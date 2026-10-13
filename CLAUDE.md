@@ -8,7 +8,7 @@ Read `docs/design.md` before starting any task. It records the requirements, arc
 
 ## Status
 
-Planning is complete and work is at milestone M0 (design document, section 14). Step 1 and the C API conventions half of step 2 are done. The steps, in order:
+Planning is complete and work is at milestone M0 (design document, section 14). Steps 1 and 2 are done. The steps, in order:
 
 1. Repository setup: MIT `LICENSE`, `README.md` (goals and non-goals), `CONTRIBUTING.md` (coding style, DCO sign-off, review process), issue templates, `.clang-format`, `.clang-tidy`, a CMake skeleton following the module layout in section 6.2, and a GitHub Actions pipeline for Windows and Linux.
 2. Two specifications, written before implementation, in `docs/`: the C API conventions (section 7.1) and the pack format (sections 8.4 and 8.5).
@@ -19,6 +19,7 @@ Planning is complete and work is at milestone M0 (design document, section 14). 
 
 - **Language:** C++20 for the implementation. The public ABI is the C API; a header-only C++ wrapper sits on top of it.
 - **C API:** every public declaration follows `docs/c-api.md`; check new API against its review checklist (section 17).
+- **Pack format:** the baker and runtime follow `docs/pack-format.md`. A change to the format updates the specification and, if it affects readers, its format version.
 - **Naming:** C functions use the `vgl_` prefix in snake case, object before action (`vgl_context_create`). Types use `vgl_` (`vgl_context`). Constants and macros use `VGL_`, then the type name, then the value (`VGL_RESULT_OUT_OF_MEMORY`). The C++ wrapper lives in namespace `vgl`.
 - **Library rules:** no exceptions across the API boundary, buildable without exceptions and RTTI, no global state, no threads or network connections created by the library, all allocations routable through host allocator callbacks.
 - **Dependencies:** keep runtime dependencies minimal (stb_image, Zstandard). GDAL is allowed only in the baking tool.

@@ -54,6 +54,16 @@ cmake --build build
 ctest --test-dir build
 ```
 
+`CMakePresets.json` (CMake 3.25 or later) has presets for the configurations CI builds: MSVC with
+the Visual Studio generator on Windows, and GCC and Clang with Ninja Multi-Config on Linux, each
+as a static, shared or no-exceptions build. A workflow preset configures, builds and tests in one
+step:
+
+```sh
+cmake --list-presets=all
+cmake --workflow --preset linux-gcc-static-debug
+```
+
 | Option | Default | Description |
 |---|---|---|
 | `BUILD_SHARED_LIBS` | `OFF` | Build vgl as a shared library |
@@ -101,6 +111,7 @@ cc main.c $(pkg-config --cflags --libs vgl)
 
 - [Design document](docs/design.md): requirements, architecture, data pipeline and roadmap
 - [C API conventions](docs/c-api.md): naming, types, errors, versioned structures, threading and ABI rules
+- [Pack format](docs/pack-format.md): tiling scheme, manifest, shards and tile encodings
 - [Contributing](CONTRIBUTING.md): coding style, sign-off and review process
 - [Changelog](CHANGELOG.md)
 

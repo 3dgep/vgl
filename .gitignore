@@ -15,5 +15,6 @@ CMakeUserPresets.json
 *.suo
 
 # Baked data and test bakes (large; never committed)
-*.vglpack
+*.vglm
+*.vgls
 /data/

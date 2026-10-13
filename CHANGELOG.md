@@ -13,6 +13,9 @@ The pack format has its own version number, independent of the library version.
 - Repository setup: license, README, contribution guidelines, issue templates, clang-format and
   clang-tidy configuration, CMake build skeleton, and GitHub Actions CI for Windows and Linux.
 - C API conventions specification (`docs/c-api.md`).
+- Pack format specification, format version 1.0 (`docs/pack-format.md`).
+- `CMakePresets.json` with configure, build, test and workflow presets for the CI platforms
+  (MSVC, and GCC and Clang with Ninja Multi-Config). CI builds through these presets.
 - `vgl/base.h`: export and deprecation macros, `vgl_bool`, double-precision vector and matrix
   types, the `vgl_result` codes, `vgl_result_name_get` and `vgl_version_get`.
 - C++ wrapper basics: `vgl::result`, `vgl::expected`, `vgl::init` and `vgl::version_get`.

@@ -1,0 +1,966 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "installDir": "${sourceDir}/install/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "VGL_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+    {
+      "name": "windows-base",
+      "hidden": true,
+      "inherits": "base",
+      "description": "Uses the newest installed Visual Studio generator.",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+    {
+      "name": "linux-base",
+      "hidden": true,
+      "inherits": "base",
+      "generator": "Ninja Multi-Config",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-gcc-base",
+      "hidden": true,
+      "inherits": "linux-base",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++"
+      }
+    },
+    {
+      "name": "linux-clang-base",
+      "hidden": true,
+      "inherits": "linux-base",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++"
+      }
+    },
+    {
+      "name": "windows-msvc-static",
+      "displayName": "Windows MSVC, static",
+      "inherits": "windows-base",
+      "cacheVariables": {
+        "BUILD_SHARED_LIBS": "OFF"
+      }
+    },
+    {
+      "name": "windows-msvc-shared",
+      "displayName": "Windows MSVC, shared",
+      "inherits": "windows-base",
+      "cacheVariables": {
+        "BUILD_SHARED_LIBS": "ON"
+      }
+    },
+    {
+      "name": "windows-msvc-noexcept",
+      "displayName": "Windows MSVC, no exceptions",
+      "inherits": "windows-base",
+      "cacheVariables": {
+        "VGL_DISABLE_EXCEPTIONS": "ON"
+      }
+    },
+    {
+      "name": "linux-gcc-static",
+      "displayName": "Linux GCC, static",
+      "inherits": "linux-gcc-base",
+      "cacheVariables": {
+        "BUILD_SHARED_LIBS": "OFF"
+      }
+    },
+    {
+      "name": "linux-gcc-shared",
+      "displayName": "Linux GCC, shared",
+      "inherits": "linux-gcc-base",
+      "cacheVariables": {
+        "BUILD_SHARED_LIBS": "ON"
+      }
+    },
+    {
+      "name": "linux-gcc-noexcept",
+      "displayName": "Linux GCC, no exceptions",
+      "inherits": "linux-gcc-base",
+      "cacheVariables": {
+        "VGL_DISABLE_EXCEPTIONS": "ON"
+      }
+    },
+    {
+      "name": "linux-clang-static",
+      "displayName": "Linux Clang, static",
+      "inherits": "linux-clang-base",
+      "cacheVariables": {
+        "BUILD_SHARED_LIBS": "OFF"
+      }
+    },
+    {
+      "name": "linux-clang-shared",
+      "displayName": "Linux Clang, shared",
+      "inherits": "linux-clang-base",
+      "cacheVariables": {
+        "BUILD_SHARED_LIBS": "ON"
+      }
+    },
+    {
+      "name": "linux-clang-noexcept",
+      "displayName": "Linux Clang, no exceptions",
+      "inherits": "linux-clang-base",
+      "cacheVariables": {
+        "VGL_DISABLE_EXCEPTIONS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-msvc-static-debug",
+      "displayName": "Windows MSVC, static, Debug",
+      "configurePreset": "windows-msvc-static",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "configuration": "Debug"
+    },
+    {
+      "name": "windows-msvc-static-release",
+      "displayName": "Windows MSVC, static, Release",
+      "configurePreset": "windows-msvc-static",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "configuration": "Release"
+    },
+    {
+      "name": "windows-msvc-shared-debug",
+      "displayName": "Windows MSVC, shared, Debug",
+      "configurePreset": "windows-msvc-shared",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "configuration": "Debug"
+    },
+    {
+      "name": "windows-msvc-shared-release",
+      "displayName": "Windows MSVC, shared, Release",
+      "configurePreset": "windows-msvc-shared",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "configuration": "Release"
+    },
+    {
+      "name": "windows-msvc-noexcept-debug",
+      "displayName": "Windows MSVC, no exceptions, Debug",
+      "configurePreset": "windows-msvc-noexcept",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "configuration": "Debug"
+    },
+    {
+      "name": "windows-msvc-noexcept-release",
+      "displayName": "Windows MSVC, no exceptions, Release",
+      "configurePreset": "windows-msvc-noexcept",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "configuration": "Release"
+    },
+    {
+      "name": "linux-gcc-static-debug",
+      "displayName": "Linux GCC, static, Debug",
+      "configurePreset": "linux-gcc-static",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Debug"
+    },
+    {
+      "name": "linux-gcc-static-release",
+      "displayName": "Linux GCC, static, Release",
+      "configurePreset": "linux-gcc-static",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Release"
+    },
+    {
+      "name": "linux-gcc-shared-debug",
+      "displayName": "Linux GCC, shared, Debug",
+      "configurePreset": "linux-gcc-shared",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Debug"
+    },
+    {
+      "name": "linux-gcc-shared-release",
+      "displayName": "Linux GCC, shared, Release",
+      "configurePreset": "linux-gcc-shared",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Release"
+    },
+    {
+      "name": "linux-gcc-noexcept-debug",
+      "displayName": "Linux GCC, no exceptions, Debug",
+      "configurePreset": "linux-gcc-noexcept",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Debug"
+    },
+    {
+      "name": "linux-gcc-noexcept-release",
+      "displayName": "Linux GCC, no exceptions, Release",
+      "configurePreset": "linux-gcc-noexcept",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Release"
+    },
+    {
+      "name": "linux-clang-static-debug",
+      "displayName": "Linux Clang, static, Debug",
+      "configurePreset": "linux-clang-static",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Debug"
+    },
+    {
+      "name": "linux-clang-static-release",
+      "displayName": "Linux Clang, static, Release",
+      "configurePreset": "linux-clang-static",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Release"
+    },
+    {
+      "name": "linux-clang-shared-debug",
+      "displayName": "Linux Clang, shared, Debug",
+      "configurePreset": "linux-clang-shared",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Debug"
+    },
+    {
+      "name": "linux-clang-shared-release",
+      "displayName": "Linux Clang, shared, Release",
+      "configurePreset": "linux-clang-shared",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Release"
+    },
+    {
+      "name": "linux-clang-noexcept-debug",
+      "displayName": "Linux Clang, no exceptions, Debug",
+      "configurePreset": "linux-clang-noexcept",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Debug"
+    },
+    {
+      "name": "linux-clang-noexcept-release",
+      "displayName": "Linux Clang, no exceptions, Release",
+      "configurePreset": "linux-clang-noexcept",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "windows-msvc-static-debug",
+      "displayName": "Windows MSVC, static, Debug",
+      "configurePreset": "windows-msvc-static",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "windows-msvc-static-release",
+      "displayName": "Windows MSVC, static, Release",
+      "configurePreset": "windows-msvc-static",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "windows-msvc-shared-debug",
+      "displayName": "Windows MSVC, shared, Debug",
+      "configurePreset": "windows-msvc-shared",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "windows-msvc-shared-release",
+      "displayName": "Windows MSVC, shared, Release",
+      "configurePreset": "windows-msvc-shared",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "windows-msvc-noexcept-debug",
+      "displayName": "Windows MSVC, no exceptions, Debug",
+      "configurePreset": "windows-msvc-noexcept",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "windows-msvc-noexcept-release",
+      "displayName": "Windows MSVC, no exceptions, Release",
+      "configurePreset": "windows-msvc-noexcept",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "linux-gcc-static-debug",
+      "displayName": "Linux GCC, static, Debug",
+      "configurePreset": "linux-gcc-static",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "linux-gcc-static-release",
+      "displayName": "Linux GCC, static, Release",
+      "configurePreset": "linux-gcc-static",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "linux-gcc-shared-debug",
+      "displayName": "Linux GCC, shared, Debug",
+      "configurePreset": "linux-gcc-shared",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "linux-gcc-shared-release",
+      "displayName": "Linux GCC, shared, Release",
+      "configurePreset": "linux-gcc-shared",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "linux-gcc-noexcept-debug",
+      "displayName": "Linux GCC, no exceptions, Debug",
+      "configurePreset": "linux-gcc-noexcept",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "linux-gcc-noexcept-release",
+      "displayName": "Linux GCC, no exceptions, Release",
+      "configurePreset": "linux-gcc-noexcept",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "linux-clang-static-debug",
+      "displayName": "Linux Clang, static, Debug",
+      "configurePreset": "linux-clang-static",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "linux-clang-static-release",
+      "displayName": "Linux Clang, static, Release",
+      "configurePreset": "linux-clang-static",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "linux-clang-shared-debug",
+      "displayName": "Linux Clang, shared, Debug",
+      "configurePreset": "linux-clang-shared",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "linux-clang-shared-release",
+      "displayName": "Linux Clang, shared, Release",
+      "configurePreset": "linux-clang-shared",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "linux-clang-noexcept-debug",
+      "displayName": "Linux Clang, no exceptions, Debug",
+      "configurePreset": "linux-clang-noexcept",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "linux-clang-noexcept-release",
+      "displayName": "Linux Clang, no exceptions, Release",
+      "configurePreset": "linux-clang-noexcept",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "windows-msvc-static-debug",
+      "displayName": "Windows MSVC, static, Debug: configure, build and test",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "windows-msvc-static"
+        },
+        {
+          "type": "build",
+          "name": "windows-msvc-static-debug"
+        },
+        {
+          "type": "test",
+          "name": "windows-msvc-static-debug"
+        }
+      ]
+    },
+    {
+      "name": "windows-msvc-static-release",
+      "displayName": "Windows MSVC, static, Release: configure, build and test",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "windows-msvc-static"
+        },
+        {
+          "type": "build",
+          "name": "windows-msvc-static-release"
+        },
+        {
+          "type": "test",
+          "name": "windows-msvc-static-release"
+        }
+      ]
+    },
+    {
+      "name": "windows-msvc-shared-debug",
+      "displayName": "Windows MSVC, shared, Debug: configure, build and test",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "windows-msvc-shared"
+        },
+        {
+          "type": "build",
+          "name": "windows-msvc-shared-debug"
+        },
+        {
+          "type": "test",
+          "name": "windows-msvc-shared-debug"
+        }
+      ]
+    },
+    {
+      "name": "windows-msvc-shared-release",
+      "displayName": "Windows MSVC, shared, Release: configure, build and test",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "windows-msvc-shared"
+        },
+        {
+          "type": "build",
+          "name": "windows-msvc-shared-release"
+        },
+        {
+          "type": "test",
+          "name": "windows-msvc-shared-release"
+        }
+      ]
+    },
+    {
+      "name": "windows-msvc-noexcept-debug",
+      "displayName": "Windows MSVC, no exceptions, Debug: configure, build and test",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "windows-msvc-noexcept"
+        },
+        {
+          "type": "build",
+          "name": "windows-msvc-noexcept-debug"
+        },
+        {
+          "type": "test",
+          "name": "windows-msvc-noexcept-debug"
+        }
+      ]
+    },
+    {
+      "name": "windows-msvc-noexcept-release",
+      "displayName": "Windows MSVC, no exceptions, Release: configure, build and test",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "windows-msvc-noexcept"
+        },
+        {
+          "type": "build",
+          "name": "windows-msvc-noexcept-release"
+        },
+        {
+          "type": "test",
+          "name": "windows-msvc-noexcept-release"
+        }
+      ]
+    },
+    {
+      "name": "linux-gcc-static-debug",
+      "displayName": "Linux GCC, static, Debug: configure, build and test",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "linux-gcc-static"
+        },
+        {
+          "type": "build",
+          "name": "linux-gcc-static-debug"
+        },
+        {
+          "type": "test",
+          "name": "linux-gcc-static-debug"
+        }
+      ]
+    },
+    {
+      "name": "linux-gcc-static-release",
+      "displayName": "Linux GCC, static, Release: configure, build and test",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "linux-gcc-static"
+        },
+        {
+          "type": "build",
+          "name": "linux-gcc-static-release"
+        },
+        {
+          "type": "test",
+          "name": "linux-gcc-static-release"
+        }
+      ]
+    },
+    {
+      "name": "linux-gcc-shared-debug",
+      "displayName": "Linux GCC, shared, Debug: configure, build and test",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "linux-gcc-shared"
+        },
+        {
+          "type": "build",
+          "name": "linux-gcc-shared-debug"
+        },
+        {
+          "type": "test",
+          "name": "linux-gcc-shared-debug"
+        }
+      ]
+    },
+    {
+      "name": "linux-gcc-shared-release",
+      "displayName": "Linux GCC, shared, Release: configure, build and test",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "linux-gcc-shared"
+        },
+        {
+          "type": "build",
+          "name": "linux-gcc-shared-release"
+        },
+        {
+          "type": "test",
+          "name": "linux-gcc-shared-release"
+        }
+      ]
+    },
+    {
+      "name": "linux-gcc-noexcept-debug",
+      "displayName": "Linux GCC, no exceptions, Debug: configure, build and test",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "linux-gcc-noexcept"
+        },
+        {
+          "type": "build",
+          "name": "linux-gcc-noexcept-debug"
+        },
+        {
+          "type": "test",
+          "name": "linux-gcc-noexcept-debug"
+        }
+      ]
+    },
+    {
+      "name": "linux-gcc-noexcept-release",
+      "displayName": "Linux GCC, no exceptions, Release: configure, build and test",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "linux-gcc-noexcept"
+        },
+        {
+          "type": "build",
+          "name": "linux-gcc-noexcept-release"
+        },
+        {
+          "type": "test",
+          "name": "linux-gcc-noexcept-release"
+        }
+      ]
+    },
+    {
+      "name": "linux-clang-static-debug",
+      "displayName": "Linux Clang, static, Debug: configure, build and test",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "linux-clang-static"
+        },
+        {
+          "type": "build",
+          "name": "linux-clang-static-debug"
+        },
+        {
+          "type": "test",
+          "name": "linux-clang-static-debug"
+        }
+      ]
+    },
+    {
+      "name": "linux-clang-static-release",
+      "displayName": "Linux Clang, static, Release: configure, build and test",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "linux-clang-static"
+        },
+        {
+          "type": "build",
+          "name": "linux-clang-static-release"
+        },
+        {
+          "type": "test",
+          "name": "linux-clang-static-release"
+        }
+      ]
+    },
+    {
+      "name": "linux-clang-shared-debug",
+      "displayName": "Linux Clang, shared, Debug: configure, build and test",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "linux-clang-shared"
+        },
+        {
+          "type": "build",
+          "name": "linux-clang-shared-debug"
+        },
+        {
+          "type": "test",
+          "name": "linux-clang-shared-debug"
+        }
+      ]
+    },
+    {
+      "name": "linux-clang-shared-release",
+      "displayName": "Linux Clang, shared, Release: configure, build and test",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "linux-clang-shared"
+        },
+        {
+          "type": "build",
+          "name": "linux-clang-shared-release"
+        },
+        {
+          "type": "test",
+          "name": "linux-clang-shared-release"
+        }
+      ]
+    },
+    {
+      "name": "linux-clang-noexcept-debug",
+      "displayName": "Linux Clang, no exceptions, Debug: configure, build and test",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "linux-clang-noexcept"
+        },
+        {
+          "type": "build",
+          "name": "linux-clang-noexcept-debug"
+        },
+        {
+          "type": "test",
+          "name": "linux-clang-noexcept-debug"
+        }
+      ]
+    },
+    {
+      "name": "linux-clang-noexcept-release",
+      "displayName": "Linux Clang, no exceptions, Release: configure, build and test",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "linux-clang-noexcept"
+        },
+        {
+          "type": "build",
+          "name": "linux-clang-noexcept-release"
+        },
+        {
+          "type": "test",
+          "name": "linux-clang-noexcept-release"
+        }
+      ]
+    }
+  ]
+}

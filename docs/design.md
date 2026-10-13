@@ -189,7 +189,7 @@ Terrain heights are stored relative to the WGS84 ellipsoid. A small geoid grid (
 
 ### 7.3 Tiling scheme and level of detail
 
-Terrain and imagery share one geographic quadtree. Level 0 has two root tiles of 180° by 180°, and each level splits every tile into four. The scheme covers the poles, which Web Mercator cannot, and matches how source elevation data is usually gridded. Because imagery and terrain tiles align one-to-one, building meshes and mapping textures onto them stays simple.
+Terrain and imagery share one geographic quadtree. Level 0 has two root tiles of 180° by 180°, and each level splits every tile into four. Tile addressing and sample placement are defined in the [pack format specification](pack-format.md), section 2. The scheme covers the poles, which Web Mercator cannot, and matches how source elevation data is usually gridded. Because imagery and terrain tiles align one-to-one, building meshes and mapping textures onto them stays simple.
 
 Tile selection uses screen-space error: a tile is refined when its geometric error, projected to the screen, exceeds a threshold in pixels. Tiles outside the view frustum, or hidden below the horizon, are culled. Culling a tile before its children are loaded requires their bounds, so each tile records the minimum and maximum heights of its children (see section 8.4).
 
@@ -302,7 +302,7 @@ Source datasets use different height references. Copernicus DEM heights are rela
 
 ### 8.4 Tile encodings
 
-**Elevation.** Elevation tiles are regular heightmap grids, not pre-triangulated meshes. A grid is simple to bake, the runtime builds the mesh, and height queries and picking are exact and cheap. The stored tile size is 129 × 129 samples, including the border row and column shared with neighbouring tiles. Samples are 16-bit integers with a per-tile scale and offset, compressed losslessly with a predictor and Zstandard. Cracks between tiles at different levels are hidden by skirts generated at runtime.
+**Elevation.** Elevation tiles are regular heightmap grids, not pre-triangulated meshes. A grid is simple to bake, the runtime builds the mesh, and height queries and picking are exact and cheap. The stored tile size is 129 × 129 samples, including the border row and column shared with neighbouring tiles. Samples are 16-bit integers with a per-tile scale and offset, compressed losslessly with a predictor and Zstandard. All tiles of one level share the same scale, and offsets are multiples of it, so the shared border samples of neighbouring tiles decode to identical heights. Cracks between tiles at different levels are hidden by skirts generated at runtime.
 
 Each tile also stores a four-bit child-existence mask and the minimum and maximum heights of its children, for culling (section 7.3).
 
@@ -312,7 +312,7 @@ Coarser levels are built bottom-up by filtering. The default filter averages. A 
 
 ### 8.5 Pack format
 
-The runtime format is a custom, range-readable pack format, inspired by PMTiles. PMTiles itself is built around Web Mercator tile identifiers and does not fit the geographic scheme.
+The runtime format is a custom, range-readable pack format, inspired by PMTiles, and is specified in full in the [pack format specification](pack-format.md). PMTiles itself is built around Web Mercator tile identifiers and does not fit the geographic scheme.
 
 **Sharding.** A global 30-metre dataset is far too large for a single file. Each layer is therefore split into shards, each holding one subtree of the quadtree, for example one shard per tile at level 6 (to be tuned during test bakes). Levels above the shard level go into one base shard. A small manifest describes which shards exist, their coverage, the tiling scheme, encodings, vertical datum, attribution and baker version.
 

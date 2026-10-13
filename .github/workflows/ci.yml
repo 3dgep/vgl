@@ -64,17 +64,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Each entry names a configure preset and a configuration from CMakePresets.json.
+        # The workflow preset is <preset>-<debug|release>.
         include:
-          - { name: "Windows MSVC static Release",       os: windows-2025, config: Release, shared: OFF, noexcept: OFF }
-          - { name: "Windows MSVC shared Debug",         os: windows-2025, config: Debug,   shared: ON,  noexcept: OFF }
-          - { name: "Windows MSVC no exceptions",        os: windows-2025, config: Release, shared: OFF, noexcept: ON }
-          - { name: "Linux GCC static Debug",            os: ubuntu-24.04, config: Debug,   shared: OFF, noexcept: OFF, cc: gcc,   cxx: g++ }
-          - { name: "Linux GCC shared Release",          os: ubuntu-24.04, config: Release, shared: ON,  noexcept: OFF, cc: gcc,   cxx: g++ }
-          - { name: "Linux Clang shared Debug",          os: ubuntu-24.04, config: Debug,   shared: ON,  noexcept: OFF, cc: clang, cxx: clang++ }
-          - { name: "Linux Clang no exceptions",         os: ubuntu-24.04, config: Release, shared: OFF, noexcept: ON,  cc: clang, cxx: clang++ }
-    env:
-      CC: ${{ matrix.cc }}
-      CXX: ${{ matrix.cxx }}
+          - { name: "Windows MSVC static Release", os: windows-2025, preset: windows-msvc-static,   config: Release, workflow: windows-msvc-static-release }
+          - { name: "Windows MSVC shared Debug",   os: windows-2025, preset: windows-msvc-shared,   config: Debug,   workflow: windows-msvc-shared-debug }
+          - { name: "Windows MSVC no exceptions",  os: windows-2025, preset: windows-msvc-noexcept, config: Release, workflow: windows-msvc-noexcept-release }
+          - { name: "Linux GCC static Debug",      os: ubuntu-24.04, preset: linux-gcc-static,      config: Debug,   workflow: linux-gcc-static-debug }
+          - { name: "Linux GCC shared Release",    os: ubuntu-24.04, preset: linux-gcc-shared,      config: Release, workflow: linux-gcc-shared-release }
+          - { name: "Linux Clang shared Debug",    os: ubuntu-24.04, preset: linux-clang-shared,    config: Debug,   workflow: linux-clang-shared-debug }
+          - { name: "Linux Clang no exceptions",   os: ubuntu-24.04, preset: linux-clang-noexcept,  config: Release, workflow: linux-clang-noexcept-release }
     steps:
       - uses: actions/checkout@v5
 
@@ -82,26 +81,11 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
-      - name: Configure
-        shell: bash
-        run: |
-          generator=()
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            generator=(-G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.config }})
-          fi
-          cmake -S . -B build "${generator[@]}" \
-            -DBUILD_SHARED_LIBS=${{ matrix.shared }} \
-            -DVGL_DISABLE_EXCEPTIONS=${{ matrix.noexcept }} \
-            -DVGL_WARNINGS_AS_ERRORS=ON
-
-      - name: Build
-        run: cmake --build build --config ${{ matrix.config }} --parallel
-
-      - name: Test
-        run: ctest --test-dir build -C ${{ matrix.config }} --output-on-failure
+      - name: Configure, build and test
+        run: cmake --workflow --preset ${{ matrix.workflow }}
 
       - name: Install
-        run: cmake --install build --config ${{ matrix.config }} --prefix install
+        run: cmake --install build/${{ matrix.preset }} --config ${{ matrix.config }} --prefix install
 
       - name: Build against the installed CMake package
         shell: bash
@@ -110,8 +94,7 @@ jobs:
           if [ "$RUNNER_OS" = "Linux" ]; then
             generator=(-G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.config }})
           fi
-          cmake -S tests/install -B build-consumer "${generator[@]}" \
-            -DCMAKE_PREFIX_PATH="$PWD/install"
+          cmake -S tests/install -B build-consumer "${generator[@]}"             -DCMAKE_PREFIX_PATH="$PWD/install"
           cmake --build build-consumer --config ${{ matrix.config }}
 
       - name: Check the installed pkg-config file
@@ -131,14 +114,13 @@ jobs:
       - name: Install tools
         run: sudo apt-get update && sudo apt-get install -y clang-18 clang-tidy-18 ninja-build
 
-      - name: Configure
-        env:
-          CC: clang-18
-          CXX: clang++-18
-        run: cmake -S . -B build -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+      - name: Configure and build
+        # The preset exports compile_commands.json. Pin the compiler to match clang-tidy-18.
+        run: |
+          cmake --preset linux-clang-static             -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18
+          cmake --build --preset linux-clang-static-debug
 
       - name: Run clang-tidy
         run: |
-          # Generate configured headers before analysis.
-          cmake --build build
-          run-clang-tidy-18 -p build -quiet "$PWD/(src|backends|tools)/"
+          test -f build/linux-clang-static/compile_commands.json
+          run-clang-tidy-18 -p build/linux-clang-static -quiet "$PWD/(src|backends|tools)/"
