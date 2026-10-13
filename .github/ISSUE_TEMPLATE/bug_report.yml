@@ -1,0 +1,64 @@
+name: Bug report
+description: Report something that does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please search the existing issues first.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened, and what did you expect to happen instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: A minimal set of steps or code that shows the problem.
+      placeholder: |
+        1. Create a context with ...
+        2. Add the pack ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: vgl version or commit
+      placeholder: "0.1.0 or a commit hash"
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Backend
+      multiple: true
+      options:
+        - OpenGL
+        - OpenGL ES
+        - Direct3D 11
+        - Ogre-Next
+        - None (core only or host renderer)
+        - Baking tool
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: Operating system, compiler and version, GPU and driver if relevant.
+      placeholder: "Windows 11, MSVC 19.44, NVIDIA RTX 4070, driver 576.02"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log output
+      description: Output from the vgl log callback, if any.
+      render: text
+  - type: textarea
+    id: data
+    attributes:
+      label: Data
+      description: Which packs or source datasets were involved, if relevant.

@@ -1,0 +1,19 @@
+# Build output
+/build/
+/build-*/
+/out/
+/install/
+
+# CMake user files
+CMakeUserPresets.json
+
+# IDEs and editors
+/.vs/
+/.vscode/
+/.idea/
+*.user
+*.suo
+
+# Baked data and test bakes (large; never committed)
+*.vglpack
+/data/

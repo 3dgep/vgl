@@ -1,0 +1,122 @@
+# Contributing to vgl
+
+Thank you for your interest in vgl. This document describes how to propose changes, the coding
+style, the sign-off requirement and the review process.
+
+Before starting on anything substantial, read [docs/design.md](docs/design.md). It records the
+requirements, architecture and decisions behind the library. If your change conflicts with it,
+open an issue to discuss the design first. When a recorded decision changes, the design document
+is updated in the same pull request.
+
+## Ways to contribute
+
+- **Report a bug** with the bug report issue template.
+- **Propose a feature** with the feature request template. vgl is deliberately small, so check
+  the goals and non-goals in the [README](README.md) first. Many features fit better as an
+  extension built on the public interfaces (design document, section 13.1) than in the library.
+- **Send a pull request.** For anything beyond a small fix, open an issue first so the approach
+  can be agreed before you invest time in it.
+
+## Developer Certificate of Origin
+
+vgl uses the [Developer Certificate of Origin](https://developercertificate.org) (DCO) instead
+of a contributor license agreement. You keep the copyright to your contribution and license it
+under the MIT license. By signing off a commit, you certify that you wrote it or otherwise have
+the right to submit it under that license.
+
+Sign off every commit by adding a `Signed-off-by` line with your real name and email address:
+
+```sh
+git commit -s
+```
+
+This appends a line such as:
+
+```
+Signed-off-by: Jane Doe <jane.doe@example.com>
+```
+
+The name and email must match the commit author. CI rejects pull requests that contain
+commits without a matching sign-off. To fix the last commit, run `git commit --amend -s`; for
+several commits, run `git rebase --signoff main` and force-push the branch.
+
+## Coding style
+
+### General
+
+- **Language:** C++20 for the implementation. Public headers in `include/vgl/*.h` are plain C
+  (C99) and must compile as both C and C++. The C++ wrapper in `include/vgl/*.hpp` is
+  header-only.
+- **Formatting** is enforced with [clang-format](.clang-format) (version 18). Run it on every file
+  you change: `clang-format -i <files>`. CI fails on unformatted code.
+- **Static analysis** uses [clang-tidy](.clang-tidy). New code should not introduce warnings.
+- **License header:** every source file, including CMake files and scripts, starts with:
+
+  ```cpp
+  // SPDX-License-Identifier: MIT
+  // Copyright (c) 2026 Jeremiah van Oosten
+  ```
+
+  Use the comment syntax of the file type (`/* */` in C headers, `#` in CMake). If you add a
+  new file, you may put your own name in the copyright line. Run `tools/ci/check-sources.sh` to
+  check.
+
+### Naming
+
+| Kind | Convention | Example |
+|---|---|---|
+| C functions | `vgl_` prefix, snake case, object before action | `vgl_context_create` |
+| C types | `vgl_` prefix, snake case | `vgl_context`, `vgl_result` |
+| C constants and macros | `VGL_`, then the type name, then the value | `VGL_RESULT_OUT_OF_MEMORY` |
+| C++ wrapper | namespace `vgl`, snake case | `vgl::context` |
+| Internal C++ | snake case; private members end in `_` | `tile_cache`, `budget_` |
+
+### Library rules
+
+These follow from the non-functional requirements in the design document (section 5.2):
+
+- No exceptions cross the API boundary, and the library builds with exceptions and RTTI
+  disabled (`VGL_DISABLE_EXCEPTIONS=ON`, tested in CI).
+- No global state: all state lives in an explicit context object.
+- The library never creates threads or opens network connections. Threads belong in the
+  optional defaults module only.
+- Every allocation goes through the host allocator callbacks. The render path does not allocate.
+- Runtime dependencies stay minimal (stb_image, Zstandard). GDAL is used only by the baker.
+  Discuss any new dependency in an issue first.
+- Backends restore all graphics state they change, and document which state they touch.
+- The C ABI stays compatible within a major version: add new functions and new fields at the
+  end of versioned option structures rather than changing existing ones.
+
+### Writing style
+
+Documentation, comments and commit messages use plain, direct English. Do not use em dashes;
+use a comma, colon, parentheses or a new sentence instead. `tools/ci/check-sources.sh` checks
+this.
+
+## Commits and pull requests
+
+- Keep each pull request focused on one change. Separate refactoring from behaviour changes.
+- Write commit messages with a short summary line (about 72 characters or less) in the
+  imperative mood, a blank line, then an explanation of what changed and why.
+- Add or update tests for every behaviour change. Geodesy code is tested against GeographicLib
+  reference values.
+- Update the documentation and [CHANGELOG.md](CHANGELOG.md) when behaviour or the public API
+  changes. Mark breaking changes under **Breaking**.
+- Make sure CI passes: formatting, license headers, sign-off, and the build and tests on Windows
+  and Linux.
+
+## Review process
+
+1. Open the pull request against `main` and fill in the checklist in the template.
+2. CI must pass before review starts. Draft pull requests are welcome for early feedback.
+3. A maintainer reviews the change for correctness, fit with the design document, API and ABI
+   impact, and test coverage. Expect questions and requested changes; this is normal.
+4. Address feedback with new commits, so reviewers can see what changed. The branch may be
+   squashed when it is merged.
+5. At least one maintainer approval is required to merge. Changes to the public C API, the pack
+   format or the design document need an explicit note from the maintainer that the design
+   change is accepted.
+
+## License
+
+By contributing, you agree that your contributions are licensed under the [MIT license](LICENSE).

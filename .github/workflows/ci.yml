@@ -1,0 +1,144 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Jeremiah van Oosten
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format-18
+
+      - name: Check formatting
+        run: |
+          git ls-files '*.c' '*.h' '*.cpp' '*.hpp' '*.inl' \
+            | xargs --no-run-if-empty clang-format-18 --dry-run --Werror
+
+      - name: Check license headers and writing style
+        run: tools/ci/check-sources.sh
+
+  dco:
+    name: DCO sign-off
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check Signed-off-by on every commit
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          status=0
+          for sha in $(git rev-list --no-merges "$BASE..$HEAD"); do
+            author=$(git log -1 --format='%an <%ae>' "$sha")
+            if ! git log -1 --format='%B' "$sha" | grep -qF "Signed-off-by: $author"; then
+              echo "::error::Commit $sha has no 'Signed-off-by: $author' line. Use git commit -s."
+              status=1
+            fi
+          done
+          exit $status
+
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "Windows MSVC static Release",       os: windows-2025, config: Release, shared: OFF, noexcept: OFF }
+          - { name: "Windows MSVC shared Debug",         os: windows-2025, config: Debug,   shared: ON,  noexcept: OFF }
+          - { name: "Windows MSVC no exceptions",        os: windows-2025, config: Release, shared: OFF, noexcept: ON }
+          - { name: "Linux GCC static Debug",            os: ubuntu-24.04, config: Debug,   shared: OFF, noexcept: OFF, cc: gcc,   cxx: g++ }
+          - { name: "Linux GCC shared Release",          os: ubuntu-24.04, config: Release, shared: ON,  noexcept: OFF, cc: gcc,   cxx: g++ }
+          - { name: "Linux Clang shared Debug",          os: ubuntu-24.04, config: Debug,   shared: ON,  noexcept: OFF, cc: clang, cxx: clang++ }
+          - { name: "Linux Clang no exceptions",         os: ubuntu-24.04, config: Release, shared: OFF, noexcept: ON,  cc: clang, cxx: clang++ }
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Ninja
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Configure
+        shell: bash
+        run: |
+          generator=()
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            generator=(-G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.config }})
+          fi
+          cmake -S . -B build "${generator[@]}" \
+            -DBUILD_SHARED_LIBS=${{ matrix.shared }} \
+            -DVGL_DISABLE_EXCEPTIONS=${{ matrix.noexcept }} \
+            -DVGL_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build --config ${{ matrix.config }} --parallel
+
+      - name: Test
+        run: ctest --test-dir build -C ${{ matrix.config }} --output-on-failure
+
+      - name: Install
+        run: cmake --install build --config ${{ matrix.config }} --prefix install
+
+      - name: Build against the installed CMake package
+        shell: bash
+        run: |
+          generator=()
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            generator=(-G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.config }})
+          fi
+          cmake -S tests/install -B build-consumer "${generator[@]}" \
+            -DCMAKE_PREFIX_PATH="$PWD/install"
+          cmake --build build-consumer --config ${{ matrix.config }}
+
+      - name: Check the installed pkg-config file
+        if: runner.os == 'Linux'
+        run: |
+          export PKG_CONFIG_PATH="$PWD/install/lib/pkgconfig"
+          pkg-config --validate vgl
+          cc tests/api_c.c $(pkg-config --static --cflags --libs vgl) -o api_c_pkgconfig
+          LD_LIBRARY_PATH="$PWD/install/lib" ./api_c_pkgconfig
+
+  clang-tidy:
+    name: clang-tidy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y clang-18 clang-tidy-18 ninja-build
+
+      - name: Configure
+        env:
+          CC: clang-18
+          CXX: clang++-18
+        run: cmake -S . -B build -G Ninja -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Run clang-tidy
+        run: |
+          # Generate configured headers before analysis.
+          cmake --build build
+          run-clang-tidy-18 -p build -quiet "$PWD/(src|backends|tools)/"
