@@ -1,0 +1,76 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Jeremiah van Oosten
+//
+// Bake configuration: the JSON file that lists sources, priorities, datums and output settings
+// (design document, section 8.2). See tools/baker/README.md for the format.
+
+#ifndef VGL_BAKER_BAKE_CONFIG_HPP
+#define VGL_BAKER_BAKE_CONFIG_HPP
+
+#include "providers/pack_format.hpp"
+
+#include <cstdint>
+#include <filesystem>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace vgl::bake
+{
+
+namespace pack = vgl::internal::pack;
+
+// Height reference of a source's values (design document, section 8.3).
+enum class vertical_datum : std::uint8_t
+{
+    ellipsoid, // Heights above the WGS84 ellipsoid, or geoid heights for a geoid source.
+    egm2008,   // Heights above the EGM2008 geoid, such as Copernicus DEM. GEBCO uses this too.
+};
+
+// How coarser levels are filtered (design document, section 8.4).
+enum class level_filter : std::uint8_t
+{
+    average,
+    maximum, // Terrain never appears lower than it is, for aviation.
+};
+
+struct source_config
+{
+    std::string name;
+    std::vector<std::filesystem::path> files;
+    vertical_datum datum = vertical_datum::ellipsoid;
+    std::uint32_t max_level = 28;        // Finest level this source contributes to.
+    std::string resampling = "bilinear"; // GDAL resampling near the source resolution.
+};
+
+struct bake_config
+{
+    std::filesystem::path output;
+    pack::layer_type layer = pack::layer_type::elevation;
+    std::uint32_t tile_size = 129;
+    std::uint32_t min_level = 0;
+    std::uint32_t max_level = 12;
+    std::uint32_t shard_level = 7; // Default: max_level - 5.
+    // Region in degrees: west, south, east, north.
+    double west = -180.0;
+    double south = -90.0;
+    double east = 180.0;
+    double north = 90.0;
+    level_filter filter = level_filter::average;
+    std::vector<double> height_steps; // One per level from min_level; empty for the defaults.
+    int zstd_level = 19;
+    std::filesystem::path geoid; // Geoid pack, needed for egm2008 sources.
+    std::vector<std::pair<std::string, std::string>> metadata;
+    std::vector<source_config> sources; // Highest priority first.
+};
+
+// Reads and checks a configuration file. Throws std::runtime_error with a message that names
+// the problem.
+[[nodiscard]] bake_config load_bake_config(const std::filesystem::path& file);
+
+// Default quantization steps (docs/pack-format.md, section 6.2 and 6.4).
+[[nodiscard]] double default_height_step(pack::layer_type layer, std::uint32_t level) noexcept;
+
+} // namespace vgl::bake
+
+#endif // VGL_BAKER_BAKE_CONFIG_HPP

@@ -1,0 +1,23 @@
+{
+    // Regional pack from Copernicus DEM GLO-30 over mainland Norway, for the test bake of
+    // milestone M1. Download the tiles from the AWS open data mirror (see README.md).
+    "output": "packs/glo30-norway",
+    "layer": "elevation",
+    "tile_size": 129,
+    "min_level": 6,
+    "max_level": 12,
+    "region": [4, 57, 32, 72],
+    "geoid": "packs/egm2008-geoid",
+    "metadata": {
+        "name": "Copernicus GLO-30, Norway",
+        "attribution": "Produced using Copernicus WorldDEM-30 © DLR e.V.",
+        "source": "Copernicus DEM GLO-30 2021_1 (EGM2008)"
+    },
+    "sources": [
+        {
+            "name": "Copernicus GLO-30",
+            "files": "sources/glo30/Copernicus_DSM_COG_10_*.tif",
+            "datum": "egm2008"
+        }
+    ]
+}

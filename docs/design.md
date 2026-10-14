@@ -35,7 +35,7 @@ This library takes a different position in two ways. First, it renders: it ships
 | Runtime data format | Custom, sharded, range-readable tile packs |
 | Data access | Local disk first; the client's own web hosting later, through the same interface |
 | Tiling scheme | Geographic (latitude/longitude) quadtree with two root tiles |
-| Geoid | EGM2008 5′ grid, baked into a geoid pack and streamed like terrain |
+| Geoid | EGM2008 2.5′ grid, baked into a geoid pack and streamed like terrain |
 | License | MIT |
 | Repository | github.com/3dgep/vgl |
 
@@ -186,7 +186,7 @@ Naming follows a fixed convention. Functions use lowercase snake case with the `
 
 All CPU-side geometry is double precision. The geodesy module provides conversions between geodetic coordinates, Earth-centred Earth-fixed (ECEF) coordinates and local East-North-Up frames, plus oriented bounding boxes and bounding spheres for tiles. The ellipsoid is a parameter rather than a constant, which costs nothing now and makes other bodies (the Moon, Mars) possible later.
 
-Terrain heights are stored relative to the WGS84 ellipsoid. A geoid model (EGM2008) lets the library convert to and from height above mean sea level, which users of height queries will usually expect. The geoid is baked from the EGM2008 5′ grid into a geoid pack, a pack with its own layer type, and is loaded through the same providers as terrain ([pack format specification](pack-format.md), section 6.4). Until it has loaded, height queries report ellipsoidal heights only.
+Terrain heights are stored relative to the WGS84 ellipsoid. A geoid model (EGM2008) lets the library convert to and from height above mean sea level, which users of height queries will usually expect. The geoid is baked from the official EGM2008 2.5′ grid into a geoid pack at 2.64′ spacing, a pack with its own layer type, and is loaded through the same providers as terrain ([pack format specification](pack-format.md), section 6.4). Until it has loaded, height queries report ellipsoidal heights only.
 
 ### 7.3 Tiling scheme and level of detail
 
@@ -315,7 +315,7 @@ Coarser levels are built bottom-up by filtering. The default filter averages. A 
 
 The runtime format is a custom, range-readable pack format, inspired by PMTiles, and is specified in full in the [pack format specification](pack-format.md). PMTiles itself is built around Web Mercator tile identifiers and does not fit the geographic scheme.
 
-**Sharding.** A global 30-metre dataset is far too large for a single file. Each layer is therefore split into shards, each holding one subtree of the quadtree, for example one shard per tile at level 6 (to be tuned during test bakes). Levels above the shard level go into one base shard. A small manifest describes which shards exist, their coverage, the tiling scheme, encodings, vertical datum, attribution and baker version.
+**Sharding.** A global 30-metre dataset is far too large for a single file. Each layer is therefore split into shards, each holding one subtree of the quadtree, rooted five levels above the pack's deepest level by default (one shard per level-7 tile for GLO-30 at level 12), which the test bake found to give shards of about 10 to 25 MB. Levels above the shard level go into one base shard. A small manifest describes which shards exist, their coverage, the tiling scheme, encodings, vertical datum, attribution and baker version.
 
 Sharding makes partial installs possible (only the regions a user needs), makes updates cheap (rebaking a region replaces only its shards), and keeps individual files at a manageable size for copying and web hosting.
 
@@ -363,16 +363,18 @@ Attribution is a first-class feature: pack metadata carries attribution strings,
 
 ### 10.1 Size estimates
 
-Source resolution and tile levels do not line up exactly: with 129-sample tiles, the deepest level is either level 12 (≈38 m spacing at the equator, slightly coarser than the source) or level 13 (≈19 m, oversampled). This choice dominates the dataset size and will be made after a regional test bake.
+Source resolution and tile levels do not line up exactly: with 129-sample tiles, the deepest level is either level 12 (≈38 m spacing at the equator, slightly coarser than the source) or level 13 (≈19 m, oversampled). The regional test bake ([report](test-bake.md)) measured both over Norway, and settled on level 12: level 13 nearly triples the size while mostly oversampling the source.
 
-| Dataset | Deepest level | Estimated baked size |
+| Dataset | Deepest level | Size |
 |---|---|---|
-| Global GLO-90 | 10 or 11 | Roughly 15 to 40 GB |
-| Global GLO-30 | 12 (≈38 m) | Roughly 100 to 150 GB |
-| Global GLO-30 | 13 (≈19 m, oversampled) | Several hundred GB |
-| GEBCO base | 8 or 9 | Under 2 GB |
+| Global GLO-30 | 12 (≈38 m) | ≈140 GB, extrapolated from Norway (1.8 GB) |
+| Global GLO-30 | 13 (≈19 m, oversampled) | ≈410 GB, extrapolated from Norway (5.3 GB) |
+| Global GLO-90 | 10 or 11 | Roughly 15 to 40 GB (not measured) |
+| GEBCO base | 8 (≈611 m) | 2.2 GB, measured |
+| GEBCO base | 9 (≈305 m, oversampled) | 6.8 GB, measured |
+| EGM2008 geoid | 5 (2.64′) | 22 MB, measured |
 
-These are order-of-magnitude estimates. They assume 2:1 to 3:1 lossless compression and about one third extra for the coarser pyramid levels. The geographic scheme also oversamples in longitude at high latitudes, where meridians converge. How far per-tile depth limits can reduce this without losing latitude detail will be measured in the test bake. Imagery at comparable resolution will be considerably larger than elevation.
+The extrapolations scale Norway by the number of GLO-30 source tiles, and are rough: Norway is mountainous, with much coastline. GEBCO ends at level 8 for a flat sea or bathymetry seen from a distance; level 9 is worth its size only if bathymetry is seen up close (question 5 of section 16). The geographic scheme also oversamples in longitude at high latitudes, where meridians converge. Imagery at comparable resolution will be considerably larger than elevation.
 
 ### 10.2 Distribution and hosting
 
@@ -401,7 +403,7 @@ All samples use a small dataset baked from public-domain sources, so they work o
 
 ### 12.1 Build
 
-The build uses CMake, with options to enable or disable each backend, decoder and provider. The runtime's third-party dependencies are limited to small, permissively licensed libraries: an image decoder (stb_image) and Zstandard for tile compression. The baker additionally depends on GDAL. The library builds as a static or shared library and installs both a CMake package and a pkg-config file, since C projects often use the latter.
+The build uses CMake, with options to enable or disable each backend, decoder and provider. Each dependency is used from an installed package when CMake finds one, and is otherwise downloaded at a pinned version with a checked hash; a downloaded Zstandard is compiled into the library with hidden symbols. GDAL is only ever found, never downloaded: on Windows it comes from conda-forge. The runtime's third-party dependencies are limited to small, permissively licensed libraries: an image decoder (stb_image) and Zstandard for tile compression. The baker additionally depends on GDAL. The library builds as a static or shared library and installs both a CMake package and a pkg-config file, since C projects often use the latter.
 
 ### 12.2 Testing
 
@@ -491,7 +493,7 @@ The backend used by the client's C project should be built first within M2, sinc
 | 4 | What imagery will the client supply, at what resolution and coverage? | Client |
 | 5 | Should the ocean floor be rendered (bathymetry), or the sea surface at mean sea level? | Client |
 | 6 | Which hosting option will serve the data for the web API? | Client |
-| 7 | Deepest elevation level (≈38 m or ≈19 m) and shard level | After test bake |
+| 7 | Deepest elevation level and shard level. Answered by the test bake: level 12 for GLO-30, level 8 for GEBCO, and shard level `max_level` − 5 ([report](test-bake.md)) | Project |
 
 ---
 

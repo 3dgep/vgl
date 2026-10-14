@@ -8,7 +8,7 @@ Read `docs/design.md` before starting any task. It records the requirements, arc
 
 ## Status
 
-Planning is complete and work is at milestone M0 (design document, section 14). Steps 1 and 2 are done. Step 3 is done. The geoid is an EGM2008 5′ geoid pack (pack format, section 6.4): the baker produces it in step 4, and the runtime loads it with the context in M2, as it does the task and I/O callback interfaces of the foundation module. The steps, in order:
+Planning is complete, and milestone M0 (design document, section 14) is done: all four steps below. The test bake report is `docs/test-bake.md`. The baker (`tools/baker`) already covers much of M1. The runtime loads packs, including the EGM2008 geoid pack, with the context in M2, which also adds the task and I/O callback interfaces of the foundation module. The steps were:
 
 1. Repository setup: MIT `LICENSE`, `README.md` (goals and non-goals), `CONTRIBUTING.md` (coding style, DCO sign-off, review process), issue templates, `.clang-format`, `.clang-tidy`, a CMake skeleton following the module layout in section 6.2, and a GitHub Actions pipeline for Windows and Linux.
 2. Two specifications, written before implementation, in `docs/`: the C API conventions (section 7.1) and the pack format (sections 8.4 and 8.5).

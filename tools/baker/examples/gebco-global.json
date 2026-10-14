@@ -1,0 +1,25 @@
+{
+    // Global base pack from the GEBCO 2026 grid (ice surface elevation), which covers land and
+    // oceans at 15 arc-seconds. GEBCO heights are treated as heights above the EGM2008 geoid.
+    // Prepare the source as tiled COGs with average overviews first (see README.md). Level 8
+    // (611 m) is slightly coarser than GEBCO's 463 m; level 9 would oversample it and triple
+    // the pack (docs/test-bake.md, section 4).
+    "output": "packs/gebco-global",
+    "layer": "elevation",
+    "tile_size": 129,
+    "min_level": 0,
+    "max_level": 8,
+    "geoid": "packs/egm2008-geoid",
+    "metadata": {
+        "name": "GEBCO 2026",
+        "attribution": "GEBCO Compilation Group (2026) GEBCO 2026 Grid",
+        "source": "GEBCO 2026 Grid, ice surface elevation (mean sea level)"
+    },
+    "sources": [
+        {
+            "name": "GEBCO 2026",
+            "files": "sources/gebco-cog/gebco_2026_*.tif",
+            "datum": "egm2008"
+        }
+    ]
+}

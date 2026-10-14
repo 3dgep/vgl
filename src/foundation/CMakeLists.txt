@@ -7,6 +7,10 @@
 target_sources(vgl_objects PRIVATE
     allocator.cpp
     allocator.hpp
+    buffer.hpp
+    byte_reader.hpp
+    crc32c.cpp
+    crc32c.hpp
     log.cpp
     log.hpp
     math.hpp

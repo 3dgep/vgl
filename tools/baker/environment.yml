@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Jeremiah van Oosten
+#
+# conda-forge environment with the baker's dependencies, for building it on Windows (and
+# optionally elsewhere). See tools/baker/README.md.
+name: vgl-baker
+channels:
+  - conda-forge
+dependencies:
+  - libgdal-core=3.10
+  - nlohmann_json=3.11
+  - zstd=1.5

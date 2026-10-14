@@ -30,6 +30,8 @@ endif()
 
 set_target_properties(vgl_objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
+target_link_libraries(vgl_objects PUBLIC vgl_zstd)
+
 vgl_target_options(vgl_objects)
 vgl_disable_exceptions(vgl_objects)
 
@@ -46,6 +48,14 @@ add_library(vgl)
 add_library(vgl::vgl ALIAS vgl)
 
 target_sources(vgl PRIVATE $<TARGET_OBJECTS:vgl_objects>)
+
+# Zstandard: compiled in when downloaded, otherwise linked. The runtime needs
+# only the decompressor.
+if(VGL_ZSTD_BUNDLED)
+    target_sources(vgl PRIVATE $<TARGET_OBJECTS:vgl_zstd_decompress_objects>)
+else()
+    target_link_libraries(vgl PRIVATE ${VGL_ZSTD_TARGET})
+endif()
 
 target_include_directories(vgl
     PUBLIC

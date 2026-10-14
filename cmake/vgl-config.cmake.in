@@ -3,6 +3,9 @@
 
 @PACKAGE_INIT@
 
+include(CMakeFindDependencyMacro)
+@VGL_CONFIG_DEPENDENCIES@
+
 include("${CMAKE_CURRENT_LIST_DIR}/vgl-targets.cmake")
 
 check_required_components(vgl)

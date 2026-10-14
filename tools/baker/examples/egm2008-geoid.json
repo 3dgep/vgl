@@ -1,0 +1,23 @@
+{
+    // EGM2008 geoid pack (docs/pack-format.md, section 6.4), baked from NGA's 2.5' grid,
+    // as distributed by PROJ: https://cdn.proj.org/us_nga_egm08_25.tif
+    "output": "packs/egm2008-geoid",
+    "layer": "geoid",
+    "tile_size": 129,
+    "min_level": 0,
+    "max_level": 5,
+    "shard_level": 6, // Above max_level: the whole pack is one base shard.
+    "metadata": {
+        "name": "EGM2008 geoid",
+        "attribution": "EGM2008 geoid model, National Geospatial-Intelligence Agency (NGA)",
+        "source": "EGM2008 2.5' grid (NGA)"
+    },
+    "sources": [
+        {
+            "name": "EGM2008 2.5'",
+            "files": "sources/geoid/us_nga_egm08_25.tif",
+            "datum": "ellipsoid",
+            "resampling": "cubic"
+        }
+    ]
+}

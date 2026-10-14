@@ -176,7 +176,7 @@ A reader must reject a manifest with an unknown required section type (bit 31 cl
 | 8 | `u8` | `height_reference` | Elevation and geoid: 1, heights are relative to the ellipsoid below. Imagery: 0. |
 | 9 | `u8[7]` | | Reserved |
 | 16 | `f64` | `semi_major_axis` | Ellipsoid semi-major axis in metres (WGS84: 6378137.0) |
-| 24 | `f64` | `inverse_flattening` | Ellipsoid inverse flattening (WGS84: 298.257223563) |
+| 24 | `f64` | `inverse_flattening` | Ellipsoid inverse flattening (WGS84: 298.257223563), or 0 for a sphere |
 | 32 | `f64` | `west` | Coverage bounds in degrees. Informative: tile existence is defined by the shard index and directories. |
 | 40 | `f64` | `south` | |
 | 48 | `f64` | `east` | |
@@ -241,7 +241,7 @@ The manifest's `shard_level` *S* splits the pack:
 - The **base shard** holds every tile at levels `min_level` to *S* − 1. It exists if any such tile exists.
 - Each **level-*S* shard** holds the subtree rooted at one tile (*S*, *x*, *y*): that tile, if it exists, and all its descendants down to `max_level`. A tile (*L*, *x*, *y*) with *L* ≥ *S* belongs to the shard (*x* >> (*L* − *S*), *y* >> (*L* − *S*)).
 
-If *S* ≤ `min_level`, there is no base shard. If *S* > `max_level`, the base shard holds the whole pack and the shard index has no entries. The baker chooses *S* so that shards stay at a manageable size for copying and web hosting; the default is settled by the test bake (design document, section 16, question 7).
+If *S* ≤ `min_level`, there is no base shard. If *S* > `max_level`, the base shard holds the whole pack and the shard index has no entries. The baker chooses *S* so that shards stay at a manageable size for copying and web hosting. By default it uses *S* = `max_level` − 5, which gave shards of about 10 to 25 MB in the test bake ([test bake report](test-bake.md), section 5).
 
 ### 5.2 File names
 
@@ -329,7 +329,9 @@ Elevation tiles use `layer_type` 1, and geoid tiles `layer_type` 3. Both have th
 - `scale` must equal the level's step from the `HEIGHT_STEPS` section.
 - `offset` must be an integer multiple of `scale`.
 
-Together, these make the decoded height of a sample depend only on the source height and the level's step, not on the tile, so shared borders (section 2.3) decode identically in neighbouring tiles. If a tile's height range does not fit in 65,534 steps, the baker must fail rather than clip, and report that the level needs a larger step. The baker's default steps are 0.5 m for levels 0 to 5 (range 32,767 m), 0.25 m for levels 6 and 7 (16,383 m) and 0.125 m from level 8 (8,191 m).
+- A writer quantizes a height *h* as *q* = floor(*h* / `scale` + ½) − `offset` / `scale`: it rounds on the level's global grid of steps, with halves rounded upwards, and only then subtracts the offset.
+
+Together, these make the decoded height of a sample depend only on the source height and the level's step, not on the tile, so shared borders (section 2.3) decode identically in neighbouring tiles. Rounding (*h* − `offset`) / `scale` instead would not: a height exactly halfway between two steps would round one way in a tile whose offset is below it and the other way in a tile whose offset is above it. The test bake found such ties in GEBCO, whose averages of whole metres often fall exactly halfway. If a tile's height range does not fit in 65,534 steps, the baker must fail rather than clip, and report that the level needs a larger step. The baker's default steps are 0.5 m for levels 0 to 5 (range 32,767 m), 0.25 m for levels 6 to 9 (16,383 m) and 0.125 m from level 10 (8,191 m). The test bake showed that 0.125 m is too fine at level 8: tiles around Hawaii span more than 8.5 km from the ocean floor to the summits.
 
 **Child bounds.** For each child whose `child_mask` bit is set, `child_min` and `child_max` must bound every decoded, non-nodata height of that child, with `f32` rounding directed outwards. For absent children the values are zero and must be ignored. The runtime uses these bounds to cull children before loading them (design document, section 7.3).
 
@@ -379,7 +381,7 @@ height above mean sea level = ellipsoidal height - N
 
 **Consistency with the baker.** The baker converts heights referenced to EGM2008, such as Copernicus DEM, to ellipsoidal heights with the same geoid pack and the same interpolation (design document, section 8.3). Converting a baked height back to mean sea level then reproduces the source height, apart from quantization.
 
-**Default bake (informative).** The default geoid pack is baked from the EGM2008 grid with 5′ spacing, resampled by bicubic interpolation to the grid of level 5 with 129-sample tiles (spacing 2.64′). Halving the spacing compared with the source keeps the error of bilinear interpolation at runtime small. Its parameters are `tile_size` 129, `min_level` 0, `max_level` 5, a `shard_level` above `max_level` so that the pack is a single base shard, and a height step of 2<sup>−8</sup> m (3.9 mm) at every level, which covers geoid heights within ±127 m; EGM2008 ranges from about −107 m to +86 m. The pack is expected to be 10 to 20 MB, and its metadata credits the source: `source` `EGM2008 5' grid (NGA)`.
+**Default bake (informative).** The default geoid pack is baked from NGA's official EGM2008 grid with 2.5′ spacing, resampled by bicubic interpolation to the grid of level 5 with 129-sample tiles (spacing 2.64′). Its spacing is close to the source's, so resampling loses almost nothing, and bilinear interpolation at runtime stays accurate. Its parameters are `tile_size` 129, `min_level` 0, `max_level` 5, a `shard_level` above `max_level` so that the pack is a single base shard, and a height step of 2<sup>−8</sup> m (3.9 mm) at every level, which covers geoid heights within ±127 m; EGM2008 ranges from about −107 m to +86 m. The pack is expected to be 10 to 20 MB, and its metadata credits the source: `source` `EGM2008 2.5' grid (NGA)`.
 
 ## 7. Versioning
 
@@ -423,18 +425,19 @@ Where a child's tile is available in the same shard, a reader in a debug build s
 
 ---
 
-## 9. Parameters to settle by test bake
+## 9. Default parameters
 
-These values are parameters recorded in each manifest, not constants of the format. Their defaults will be chosen after the regional test bake (design document, section 14, milestone M1):
+These values are parameters recorded in each manifest, not constants of the format. The test bake ([report](test-bake.md)) settled the baker's defaults for elevation:
 
-| Parameter | Field | Provisional default |
+| Parameter | Field | Default |
 |---|---|---|
 | Elevation tile size | `tile_size` | 129 |
-| Imagery tile size | `tile_size` | 256 |
-| Deepest elevation level | `max_level` | 12 (≈38 m) or 13 (≈19 m) |
-| Shard level | `shard_level` | 6 |
-| Height steps | `HEIGHT_STEPS` | 0.5 m, 0.25 m and 0.125 m, as in section 6.2 |
-| Imagery border | `border` | 0 or 1 |
+| Deepest level, Copernicus GLO-30 | `max_level` | 12 (≈38 m) |
+| Deepest level, GEBCO base | `max_level` | 8 (≈611 m) |
+| Shard level | `shard_level` | `max_level` − 5 |
+| Height steps | `HEIGHT_STEPS` | 0.5 m to level 5, 0.25 m to level 9, then 0.125 m (section 6.2) |
+
+Imagery defaults (provisionally a `tile_size` of 256 and a `border` of 0 or 1) wait for the client's imagery (design document, section 16, question 4).
 
 ---
 

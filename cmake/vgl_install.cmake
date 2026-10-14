@@ -24,6 +24,17 @@ install(EXPORT vgl-targets
     NAMESPACE vgl::
     DESTINATION "${VGL_INSTALL_CMAKEDIR}")
 
+# A static vgl linked to an installed Zstandard passes that dependency on to its
+# consumers. A downloaded Zstandard is compiled into vgl and needs nothing.
+set(VGL_CONFIG_DEPENDENCIES "")
+set(VGL_PC_REQUIRES_PRIVATE "")
+if(NOT VGL_ZSTD_BUNDLED)
+    set(VGL_PC_REQUIRES_PRIVATE "libzstd")
+    if(NOT BUILD_SHARED_LIBS)
+        set(VGL_CONFIG_DEPENDENCIES "find_dependency(zstd CONFIG)")
+    endif()
+endif()
+
 configure_package_config_file(
     "${PROJECT_SOURCE_DIR}/cmake/vgl-config.cmake.in"
     "${PROJECT_BINARY_DIR}/vgl-config.cmake"

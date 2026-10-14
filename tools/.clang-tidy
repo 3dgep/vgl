@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Jeremiah van Oosten
+#
+# Command-line tools print with printf and its relatives, and ignore their return values, as
+# command-line tools normally do. The library's rules apply otherwise.
+---
+InheritParentConfig: true
+Checks: >
+  -cppcoreguidelines-pro-type-vararg,
+  -cert-err33-c
+...

@@ -77,9 +77,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install Ninja
+      # Linux uses the installed Zstandard; Windows downloads and compiles it in, so both
+      # paths of cmake/vgl_dependencies.cmake are built.
+      - name: Install Ninja and Zstandard
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libzstd-dev
 
       - name: Configure, build and test
         run: cmake --workflow --preset ${{ matrix.workflow }}
@@ -105,6 +107,37 @@ jobs:
           cc tests/api_c.c $(pkg-config --static --cflags --libs vgl) -o api_c_pkgconfig
           LD_LIBRARY_PATH="$PWD/install/lib" ./api_c_pkgconfig
 
+  baker-linux:
+    name: Baker (Linux, system GDAL)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libzstd-dev libgdal-dev nlohmann-json3-dev
+
+      - name: Configure, build and test
+        run: cmake --workflow --preset linux-gcc-baker-release
+
+  baker-windows:
+    name: Baker (Windows, conda-forge GDAL)
+    runs-on: windows-2025
+    defaults:
+      run:
+        # A login shell, so that the micromamba environment is active and CONDA_PREFIX is set.
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: tools/baker/environment.yml
+          init-shell: bash
+          cache-environment: true
+
+      - name: Configure, build and test
+        run: cmake --workflow --preset windows-msvc-baker-release
+
   clang-tidy:
     name: clang-tidy
     runs-on: ubuntu-24.04
@@ -112,12 +145,13 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Install tools
-        run: sudo apt-get update && sudo apt-get install -y clang-18 clang-tidy-18 ninja-build
+        run: sudo apt-get update && sudo apt-get install -y clang-18 clang-tidy-18 ninja-build libzstd-dev libgdal-dev nlohmann-json3-dev
 
       - name: Configure and build
         # The preset exports compile_commands.json. Pin the compiler to match clang-tidy-18.
         run: |
-          cmake --preset linux-clang-static             -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18
+          cmake --preset linux-clang-static -DVGL_BUILD_BAKER=ON \
+            -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18
           cmake --build --preset linux-clang-static-debug
 
       - name: Run clang-tidy

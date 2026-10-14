@@ -127,6 +127,26 @@
       "cacheVariables": {
         "VGL_DISABLE_EXCEPTIONS": "ON"
       }
+    },
+    {
+      "name": "windows-msvc-baker",
+      "displayName": "Windows MSVC, static, with the baker (conda-forge GDAL)",
+      "description": "Activate the environment from tools/baker/environment.yml first, so that CONDA_PREFIX is set.",
+      "inherits": "windows-base",
+      "cacheVariables": {
+        "BUILD_SHARED_LIBS": "OFF",
+        "VGL_BUILD_BAKER": "ON",
+        "CMAKE_PREFIX_PATH": "$env{CONDA_PREFIX}/Library"
+      }
+    },
+    {
+      "name": "linux-gcc-baker",
+      "displayName": "Linux GCC, static, with the baker",
+      "inherits": "linux-gcc-base",
+      "cacheVariables": {
+        "BUILD_SHARED_LIBS": "OFF",
+        "VGL_BUILD_BAKER": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -321,6 +341,28 @@
       "name": "linux-clang-noexcept-release",
       "displayName": "Linux Clang, no exceptions, Release",
       "configurePreset": "linux-clang-noexcept",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Release"
+    },
+    {
+      "name": "windows-msvc-baker-release",
+      "displayName": "Windows MSVC, with the baker, Release",
+      "configurePreset": "windows-msvc-baker",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "configuration": "Release"
+    },
+    {
+      "name": "linux-gcc-baker-release",
+      "displayName": "Linux GCC, with the baker, Release",
+      "configurePreset": "linux-gcc-baker",
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
@@ -623,6 +665,45 @@
       "name": "linux-clang-noexcept-release",
       "displayName": "Linux Clang, no exceptions, Release",
       "configurePreset": "linux-clang-noexcept",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "windows-msvc-baker-release",
+      "displayName": "Windows MSVC, with the baker, Release",
+      "configurePreset": "windows-msvc-baker",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "configuration": "Release",
+      "environment": {
+        "PATH": "$env{CONDA_PREFIX}/Library/bin;$penv{PATH}",
+        "PROJ_DATA": "$env{CONDA_PREFIX}/Library/share/proj",
+        "GDAL_DATA": "$env{CONDA_PREFIX}/Library/share/gdal"
+      },
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "linux-gcc-baker-release",
+      "displayName": "Linux GCC, with the baker, Release",
+      "configurePreset": "linux-gcc-baker",
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
@@ -959,6 +1040,42 @@
         {
           "type": "test",
           "name": "linux-clang-noexcept-release"
+        }
+      ]
+    },
+    {
+      "name": "windows-msvc-baker-release",
+      "displayName": "Windows MSVC, with the baker, Release: configure, build and test",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "windows-msvc-baker"
+        },
+        {
+          "type": "build",
+          "name": "windows-msvc-baker-release"
+        },
+        {
+          "type": "test",
+          "name": "windows-msvc-baker-release"
+        }
+      ]
+    },
+    {
+      "name": "linux-gcc-baker-release",
+      "displayName": "Linux GCC, with the baker, Release: configure, build and test",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "linux-gcc-baker"
+        },
+        {
+          "type": "build",
+          "name": "linux-gcc-baker-release"
+        },
+        {
+          "type": "test",
+          "name": "linux-gcc-baker-release"
         }
       ]
     }

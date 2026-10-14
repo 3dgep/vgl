@@ -31,6 +31,7 @@ option(VGL_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include(vgl_target_options)
+include(vgl_dependencies)
 
 if(PROJECT_IS_TOP_LEVEL)
     # Keep executables and shared libraries together so tests and samples find
@@ -43,7 +44,7 @@ endif()
 add_subdirectory(src)
 add_subdirectory(backends)
 
-if(VGL_BUILD_BAKER)
+if(VGL_BUILD_BAKER OR VGL_BUILD_TESTS)
     add_subdirectory(tools/baker)
 endif()
 
