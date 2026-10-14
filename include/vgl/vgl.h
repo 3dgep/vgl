@@ -9,5 +9,7 @@
 #define VGL_VGL_H
 
 #include <vgl/base.h>
+#include <vgl/foundation.h>
+#include <vgl/geodesy.h>
 
 #endif /* VGL_VGL_H */

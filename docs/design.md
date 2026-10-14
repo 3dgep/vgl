@@ -35,6 +35,7 @@ This library takes a different position in two ways. First, it renders: it ships
 | Runtime data format | Custom, sharded, range-readable tile packs |
 | Data access | Local disk first; the client's own web hosting later, through the same interface |
 | Tiling scheme | Geographic (latitude/longitude) quadtree with two root tiles |
+| Geoid | EGM2008 5′ grid, baked into a geoid pack and streamed like terrain |
 | License | MIT |
 | Repository | github.com/3dgep/vgl |
 
@@ -185,7 +186,7 @@ Naming follows a fixed convention. Functions use lowercase snake case with the `
 
 All CPU-side geometry is double precision. The geodesy module provides conversions between geodetic coordinates, Earth-centred Earth-fixed (ECEF) coordinates and local East-North-Up frames, plus oriented bounding boxes and bounding spheres for tiles. The ellipsoid is a parameter rather than a constant, which costs nothing now and makes other bodies (the Moon, Mars) possible later.
 
-Terrain heights are stored relative to the WGS84 ellipsoid. A small geoid grid (EGM2008) lets the library convert to and from height above mean sea level, which users of height queries will usually expect.
+Terrain heights are stored relative to the WGS84 ellipsoid. A geoid model (EGM2008) lets the library convert to and from height above mean sea level, which users of height queries will usually expect. The geoid is baked from the EGM2008 5′ grid into a geoid pack, a pack with its own layer type, and is loaded through the same providers as terrain ([pack format specification](pack-format.md), section 6.4). Until it has loaded, height queries report ellipsoidal heights only.
 
 ### 7.3 Tiling scheme and level of detail
 
@@ -298,7 +299,7 @@ A full global bake runs for many hours, so the baker is multithreaded, resumable
 
 ### 8.3 Vertical datums
 
-Source datasets use different height references. Copernicus DEM heights are relative to the EGM2008 geoid, NASADEM to EGM96, and GEBCO is effectively mean sea level. Geoid and ellipsoid differ by up to about 100 metres. Each source in the bake configuration therefore declares its vertical datum, and the baker converts all heights to WGS84 ellipsoidal heights. Without this step, visible steps of tens of metres would appear where packs from different sources meet. The datum used is recorded in the pack metadata.
+Source datasets use different height references. Copernicus DEM heights are relative to the EGM2008 geoid, NASADEM to EGM96, and GEBCO is effectively mean sea level. Geoid and ellipsoid differ by up to about 100 metres. Each source in the bake configuration therefore declares its vertical datum, and the baker converts all heights to WGS84 ellipsoidal heights. For EGM2008 it uses the same geoid pack and interpolation as the runtime, so that converting a baked height back to mean sea level reproduces the source height. Without this step, visible steps of tens of metres would appear where packs from different sources meet. The datum used is recorded in the pack metadata.
 
 ### 8.4 Tile encodings
 

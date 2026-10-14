@@ -16,7 +16,7 @@ The key words "must", "must not", "should" and "may" are used in their usual spe
 
 ## 1. Overview
 
-A **pack** holds one layer of data, either elevation or imagery, for some part of the globe. The runtime stacks several packs per layer by priority (FR-05), so a global base pack and regional high-resolution packs combine without rebaking.
+A **pack** holds one layer of data, either elevation or imagery, for some part of the globe. The runtime stacks several packs per layer by priority (FR-05), so a global base pack and regional high-resolution packs combine without rebaking. A third kind of pack holds the geoid model, which converts between ellipsoidal heights and heights above mean sea level (section 6.4).
 
 A pack is a directory with three kinds of file:
 
@@ -158,7 +158,7 @@ A reader must reject a manifest with an unknown required section type (bit 31 cl
 | Type | Name | Required | Contents |
 |---|---|---|---|
 | `0x00000001` | `LAYER` | Always | Layer description (section 4.3) |
-| `0x00000002` | `HEIGHT_STEPS` | Elevation packs | Quantization step per level (section 4.4) |
+| `0x00000002` | `HEIGHT_STEPS` | Elevation and geoid packs | Quantization step per level (section 4.4) |
 | `0x00000003` | `SHARD_INDEX` | Always | Which shards exist (section 4.5) |
 | `0x00000004` | `METADATA` | Always | Attribution and other text (section 4.6) |
 
@@ -166,14 +166,14 @@ A reader must reject a manifest with an unknown required section type (bit 31 cl
 
 | Offset | Type | Field | Description |
 |---|---|---|---|
-| 0 | `u8` | `layer_type` | 1 elevation, 2 imagery |
+| 0 | `u8` | `layer_type` | 1 elevation, 2 imagery, 3 geoid |
 | 1 | `u8` | `tiling_scheme` | 1: the geographic scheme of section 2 |
 | 2 | `u16` | `tile_size` | Elevation: samples per side, 2<sup>*k*</sup> + 1 with 2 ≤ *k* ≤ 10. Imagery: inner pixels per side, a power of two from 64 to 2048. |
 | 4 | `u8` | `min_level` | Coarsest level in the pack |
 | 5 | `u8` | `max_level` | Finest level in the pack, at most 28 |
 | 6 | `u8` | `shard_level` | Level of the shard roots (section 5.1) |
 | 7 | `u8` | `border` | Imagery border *b* (section 2.4); 0 for elevation |
-| 8 | `u8` | `height_reference` | Elevation: 1, heights are relative to the ellipsoid below. Imagery: 0. |
+| 8 | `u8` | `height_reference` | Elevation and geoid: 1, heights are relative to the ellipsoid below. Imagery: 0. |
 | 9 | `u8[7]` | | Reserved |
 | 16 | `f64` | `semi_major_axis` | Ellipsoid semi-major axis in metres (WGS84: 6378137.0) |
 | 24 | `f64` | `inverse_flattening` | Ellipsoid inverse flattening (WGS84: 298.257223563) |
@@ -311,9 +311,9 @@ The payload starts at `header_size`. Later minor versions may append header fiel
 
 The child mask lets the runtime decide whether refinement is possible (design document, section 7.3) without reading the children's shard. It must agree with the pack: a set bit means the child tile exists, and a clear bit means it does not.
 
-### 6.2 Elevation tiles
+### 6.2 Elevation and geoid tiles
 
-Elevation tiles use `layer_type` 1. Flag bit 0 (`has_nodata`) is set if any sample is nodata. The header continues after the common part:
+Elevation tiles use `layer_type` 1, and geoid tiles `layer_type` 3. Both have the layout below; section 6.4 gives the additional rules for geoid tiles. Flag bit 0 (`has_nodata`) is set if any sample is nodata. The header continues after the common part:
 
 | Offset | Type | Field | Description |
 |---|---|---|---|
@@ -365,6 +365,22 @@ A pack may mix encodings, for example JPEG for opaque tiles and PNG for tiles wi
 
 ---
 
+### 6.4 Geoid packs
+
+A geoid pack holds the geoid height *N*, the height of the geoid above the ellipsoid, on the sample grid of section 2.3. A host adds at most one geoid pack to a context. With it, heights convert between the ellipsoid and mean sea level:
+
+```
+height above mean sea level = ellipsoidal height - N
+```
+
+**Coverage.** A geoid pack covers the whole globe at every level from `min_level` to `max_level`, without nodata samples. Packs that do not are invalid.
+
+**Interpolation.** *N* at a position is interpolated bilinearly from the four surrounding samples of the tile at `max_level` that contains the position (section 2.1, as found by the rules for tiles owning their west and north edges). With *s* the tile span and *N*<sub>t</sub> the tile size, the fractional sample coordinates are *u* = (longitude − west) · (*N*<sub>t</sub> − 1) / *s* and *v* = (north − latitude) · (*N*<sub>t</sub> − 1) / *s*, clamped to [0, *N*<sub>t</sub> − 1]. Because neighbouring tiles share their border samples, the result is continuous across tile edges, and does not depend on which tile a position on an edge is assigned to. A reader may interpolate from a coarser level while the deepest level is still loading, and must then report the result as not final (`VGL_RESULT_NOT_READY` in the C API).
+
+**Consistency with the baker.** The baker converts heights referenced to EGM2008, such as Copernicus DEM, to ellipsoidal heights with the same geoid pack and the same interpolation (design document, section 8.3). Converting a baked height back to mean sea level then reproduces the source height, apart from quantization.
+
+**Default bake (informative).** The default geoid pack is baked from the EGM2008 grid with 5′ spacing, resampled by bicubic interpolation to the grid of level 5 with 129-sample tiles (spacing 2.64′). Halving the spacing compared with the source keeps the error of bilinear interpolation at runtime small. Its parameters are `tile_size` 129, `min_level` 0, `max_level` 5, a `shard_level` above `max_level` so that the pack is a single base shard, and a height step of 2<sup>−8</sup> m (3.9 mm) at every level, which covers geoid heights within ±127 m; EGM2008 ranges from about −107 m to +86 m. The pack is expected to be 10 to 20 MB, and its metadata credits the source: `source` `EGM2008 5' grid (NGA)`.
+
 ## 7. Versioning
 
 The format version is independent of the library version (design document, section 13.3). Manifests and shards carry it separately, and in version 1.0 they must agree.
@@ -400,7 +416,7 @@ A reader must check the following, and must report a failure of any check as `VG
 **Tiles**
 - The tile's `crc` matches the directory entry.
 - `layer_type` matches, `header_size` is at least the size defined in version 1.0 and no larger than the tile, and the encoding is known (otherwise `VGL_RESULT_NOT_SUPPORTED`).
-- For elevation, `scale` equals the level's step and `offset` is a multiple of it. The payload decompresses to exactly 2 × *N* × *N* bytes, and decoded values are in [−32767, 32767] or −32768.
+- For elevation and geoid tiles, `scale` equals the level's step and `offset` is a multiple of it. The payload decompresses to exactly 2 × *N* × *N* bytes, and decoded values are in [−32767, 32767] or −32768. Geoid tiles contain no nodata.
 - For imagery, the decoded image has the expected dimensions.
 
 Where a child's tile is available in the same shard, a reader in a debug build should also check that it agrees with its parent's `child_mask` and child bounds.
@@ -427,6 +443,7 @@ These values are parameters recorded in each manifest, not constants of the form
 | Decision | Alternative considered | Reason |
 |---|---|---|
 | One layer per pack | Several layers per pack | Packs stack by priority per layer (FR-05), so one layer per pack keeps stacking and updates simple. A dataset with elevation and imagery ships as two packs. |
+| Geoid as a pack with its own layer type | A geoid grid file in another format, such as GeographicLib's PGM files, or a grid built into the library | The geoid reuses the providers, caching, budgets and streaming of terrain, and only the tiles in use are resident. A separate layer type keeps it out of terrain stacking. The cost is that height queries above mean sea level are unavailable until the pack has loaded. |
 | Binary manifest | JSON manifest | A JSON manifest is easier to read, but would add a JSON parser to the runtime (NFR-07). The baker's inspect command can print the manifest as text instead. |
 | Rows counted from the north | Rows from the south, as in TMS | Matches image row order, so tile rows and pixel rows run the same way. |
 | Same scale for every tile of a level, offsets aligned to it | Free scale and offset per tile | Shared borders must decode identically to avoid seams. Free per-tile scales would give cracks of up to half a step between neighbours. |

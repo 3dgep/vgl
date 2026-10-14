@@ -20,7 +20,7 @@ while IFS= read -r file; do
         status=1
     fi
 done < <(git ls-files \
-    '*.c' '*.h' '*.cpp' '*.hpp' '*.inl' '*.glsl' '*.hlsl' \
+    '*.c' '*.h' '*.cpp' '*.hpp' '*.inl' '*.inc' '*.glsl' '*.hlsl' \
     '*.cmake' '*.cmake.in' '*.h.in' '*.pc.in' '*.sh' 'CMakeLists.txt' '*/CMakeLists.txt' \
     '.clang-format' '.clang-tidy')
 

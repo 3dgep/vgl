@@ -31,6 +31,11 @@ static void check_types(void)
     CHECK(sizeof(vgl_dvec3) == 3 * sizeof(double));
     CHECK(sizeof(vgl_dvec4) == 4 * sizeof(double));
     CHECK(sizeof(vgl_dmat4) == 16 * sizeof(double));
+    CHECK(sizeof(vgl_ellipsoid) == 2 * sizeof(double));
+    CHECK(sizeof(vgl_geodetic) == 3 * sizeof(double));
+    CHECK(offsetof(vgl_allocator_interface, user_data) == 8);
+    CHECK(sizeof(vgl_allocator_interface) == 8 + 3 * sizeof(void*));
+    CHECK(sizeof(vgl_log_level) == 4);
 }
 
 static void check_results(void)
@@ -55,6 +60,26 @@ static void check_results(void)
     CHECK(vgl_result_name_get(VGL_RESULT_SUCCESS, NULL) == VGL_RESULT_INVALID_ARGUMENT);
 }
 
+static void check_geodesy(void)
+{
+    vgl_ellipsoid wgs84;
+    vgl_geodetic position;
+    vgl_dvec3 ecef;
+    vgl_geodetic back;
+
+    position.latitude = VGL_DEGREES_TO_RADIANS(52.1);
+    position.longitude = VGL_DEGREES_TO_RADIANS(5.1);
+    position.height = 10.0;
+
+    CHECK(vgl_ellipsoid_wgs84_get(&wgs84) == VGL_RESULT_SUCCESS);
+    CHECK(vgl_ellipsoid_geodetic_to_ecef(&wgs84, &position, &ecef) == VGL_RESULT_SUCCESS);
+    CHECK(ecef.x > 3910649.03 && ecef.x < 3910649.04);
+    CHECK(vgl_ellipsoid_ecef_to_geodetic(&wgs84, &ecef, &back) == VGL_RESULT_SUCCESS);
+    CHECK(back.height > 9.999999 && back.height < 10.000001);
+    CHECK(vgl_ellipsoid_enu_frame_get(&wgs84, &position, NULL, NULL) ==
+          VGL_RESULT_INVALID_ARGUMENT);
+}
+
 static void check_version(void)
 {
     uint32_t major = 0;
@@ -72,6 +97,7 @@ int main(void)
 {
     check_types();
     check_results();
+    check_geodesy();
     check_version();
 
     if (failures != 0)

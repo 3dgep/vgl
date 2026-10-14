@@ -95,6 +95,7 @@ A function name is the object, optionally followed by a sub-object or property, 
 | `query` | Compute a result that may depend on loaded data | `vgl_context_height_query` |
 | `update`, `draw` | Per-frame operations | `vgl_context_update` |
 | `complete` | Finish an asynchronous request (section 12) | `vgl_io_request_complete` |
+| `<a>_to_<b>` | Convert between representations | `vgl_ellipsoid_geodetic_to_ecef` |
 
 Functions that need no object use the concept they act on as the object, for example `vgl_version_get` and `vgl_result_name_get`.
 
@@ -252,7 +253,7 @@ Every function checks, in all build types:
 - the `struct_size` field of versioned structures (section 8),
 - that enumeration values and flags are known, and that values are within their documented ranges.
 
-A failed check returns `VGL_RESULT_INVALID_ARGUMENT` (or `VGL_RESULT_NOT_SUPPORTED`, see section 8.3) and logs an error that names the function and the argument. Mistakes that cannot be detected cheaply, such as dangling handles or calls from the wrong thread, are undefined behaviour. Debug builds detect what they can.
+A failed check returns `VGL_RESULT_INVALID_ARGUMENT` (or `VGL_RESULT_NOT_SUPPORTED`, see section 8.3) and logs an error that names the function and the argument. Functions that take no context have no log callback, and report failures through the result code only. Mistakes that cannot be detected cheaply, such as dangling handles or calls from the wrong thread, are undefined behaviour. Debug builds detect what they can.
 
 ### 6.7 State after failure
 
@@ -300,7 +301,7 @@ Writes the name of the code, such as `"VGL_RESULT_OUT_OF_MEMORY"`, as a static s
 
 ### 7.3 Error details
 
-The result code says what kind of failure occurred. The details go to the log callback (section 13): every failure logs exactly one message at error level that names the function, says what was wrong, and says how to fix it. There is no "last error" state, which would be global or thread-local state (NFR-06).
+The result code says what kind of failure occurred. The details go to the log callback (section 13): every failure of a function that has a context logs exactly one message at error level that names the function, says what was wrong, and says how to fix it. There is no "last error" state, which would be global or thread-local state (NFR-06).
 
 ### 7.4 No exceptions and no termination
 
@@ -398,12 +399,12 @@ typedef struct vgl_allocator_interface
     uint32_t reserved;
     void* user_data;
     void* (*allocate)(void* user_data, size_t size, size_t alignment);
-    void (*free)(void* user_data, void* memory, size_t size, size_t alignment);
+    void (*deallocate)(void* user_data, void* memory, size_t size, size_t alignment);
 } vgl_allocator_interface;
 ```
 
 - `alignment` is a power of two. `allocate` returns null on failure, which the library reports as `VGL_RESULT_OUT_OF_MEMORY`.
-- `free` receives the same size and alignment that were passed to `allocate`. It is never called with a null pointer.
+- `deallocate` receives the same size and alignment that were passed to `allocate`. It is never called with a null pointer. (The entry is not named `free`, because the debug heap of the Microsoft C runtime defines `free` as a macro.)
 - The allocator is supplied when the context is created. If it is not, the library uses the C runtime heap.
 - Every allocation made on behalf of a context, and of the objects created from it, goes through that context's allocator (NFR-03). Functions that take no context do not allocate.
 - If the host runs library work on several threads (section 11), the allocator must be thread-safe.
@@ -532,7 +533,7 @@ The wrapper is header-only, lives in namespace `vgl`, and calls only the C API, 
 
 - **Names** map mechanically from C. The prefix is dropped and the rest stays in snake case: `vgl_context` becomes `vgl::context`, `vgl_context_statistics_get(context, ...)` becomes `context.statistics_get(...)`, and `VGL_RESULT_OUT_OF_MEMORY` becomes `vgl::result::out_of_memory`.
 - **Handles** become move-only RAII classes that destroy the object in their destructor. `get()` returns the C handle and `release()` gives up ownership.
-- **Errors** are returned, never thrown, so the wrapper works with exceptions disabled. Functions that produce a value return `vgl::expected<T>`, which is `std::expected<T, vgl::result>` when the standard library provides it and a small equivalent otherwise. Other functions return `vgl::result`. All of them are `[[nodiscard]]`.
+- **Errors** are returned, never thrown, so the wrapper works with exceptions disabled. Functions that produce a value return `vgl::expected<T>`, which is `std::expected<T, vgl::result>` when the standard library provides it and a small equivalent otherwise. Other functions return `vgl::result`. A function whose C counterpart can fail only on arguments that the C++ signature rules out, such as null pointers, returns its value directly, for example `vgl::ellipsoid_wgs84_get()`. All of them are `[[nodiscard]]`.
 - **Arrays** use `std::span` in place of pointer and count pairs. The two-call pattern of section 6.3 is wrapped in functions that return a container.
 - **Strings** are passed as `const char*`, because the C API needs null-terminated strings.
 - **Versioned structures** are the C structures themselves. `vgl::init<T>()` returns a zero-initialized `T` with `struct_size` set.
