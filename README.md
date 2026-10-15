@@ -5,7 +5,7 @@
 
 vgl is a lightweight, open-source C++ library for rendering a virtual globe inside an existing
 application. It streams level-of-detail terrain and imagery on the WGS84 ellipsoid and draws it
-through backends for OpenGL / OpenGL ES, Direct3D 11 and Ogre-Next. The public interface is a C
+through backends for OpenGL / OpenGL ES, Direct3D 11 and Ogre, on Windows, Linux, macOS, Android and iOS. The public interface is a C
 API, so the library embeds as easily in a C code base as in a C++ one.
 
 > **Status:** early development. Planning is complete and work is at milestone M0 (foundations).
@@ -22,7 +22,10 @@ API, so the library embeds as easily in a C code base as in a C++ one.
   state, no threads or network connections created by the library, all allocations routable
   through host allocator callbacks, and CPU and GPU memory bounded by budgets you set.
 - **Several renderers, one core.** A renderer-independent core feeds backends for OpenGL 3.3 /
-  OpenGL ES 3.0, Direct3D 11 and Ogre-Next. A host with its own renderer can use the core alone.
+  OpenGL ES 3.0, Direct3D 11 and classic Ogre (1.x). A host with its own renderer can use the core alone.
+- **Portable.** The runtime uses only the C and C++ standard libraries, with files, threads and
+  network left to the host, so it runs the same on desktop and mobile. The baker runs on Windows
+  and Linux.
 - **Precise from orbit to the ground.** Double-precision CPU geometry, tile-relative vertices and
   reversed-Z (or logarithmic) depth, so there is no jitter or z-fighting at any distance.
 - **Offline data pipeline.** A bundled baking tool turns free global datasets (Copernicus DEM,
@@ -73,7 +76,7 @@ cmake --workflow --preset linux-gcc-static-debug
 | `VGL_BUILD_DEFAULTS` | `ON` | Build the optional thread pool and filesystem reader |
 | `VGL_BACKEND_GL` | `ON` | Build the OpenGL / OpenGL ES backend |
 | `VGL_BACKEND_D3D11` | `ON` (Windows) | Build the Direct3D 11 backend |
-| `VGL_BACKEND_OGRE` | `OFF` | Build the Ogre-Next backend |
+| `VGL_BACKEND_OGRE` | `OFF` | Build the Ogre backend (classic Ogre, 1.x) |
 | `VGL_DISABLE_EXCEPTIONS` | `OFF` | Build the library without exceptions and RTTI |
 | `VGL_WARNINGS_AS_ERRORS` | `OFF` | Treat compiler warnings as errors |
 | `VGL_INSTALL` | `ON` (top level) | Generate install rules |
@@ -101,7 +104,7 @@ cc main.c $(pkg-config --cflags --libs vgl)
 |---|---|
 | `include/vgl/` | Public C API headers and the header-only C++ wrapper |
 | `src/` | Core modules: foundation, geodesy, tiling, cache, providers, decoders, mesh, render, defaults |
-| `backends/` | OpenGL / GLES, Direct3D 11 and Ogre-Next backends |
+| `backends/` | OpenGL / GLES, Direct3D 11 and Ogre backends |
 | `tools/baker/` | Offline baking tool |
 | `samples/` | Sample applications |
 | `tests/` | Tests |

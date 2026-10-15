@@ -40,15 +40,15 @@ body:
         - OpenGL
         - OpenGL ES
         - Direct3D 11
-        - Ogre-Next
+        - Ogre
         - None (core only or host renderer)
         - Baking tool
   - type: input
     id: platform
     attributes:
       label: Platform
-      description: Operating system, compiler and version, GPU and driver if relevant.
-      placeholder: "Windows 11, MSVC 19.44, NVIDIA RTX 4070, driver 576.02"
+      description: Operating system or device, compiler and version, GPU and driver if relevant.
+      placeholder: "Windows 11, MSVC 19.44, NVIDIA RTX 4070, driver 576.02; or Android 14, NDK r27, Pixel 8"
     validations:
       required: true
   - type: textarea

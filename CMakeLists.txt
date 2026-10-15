@@ -23,7 +23,7 @@ option(VGL_INSTALL "Generate install rules, the CMake package and the pkg-config
 # Backends (design document, section 7.6).
 option(VGL_BACKEND_GL "Build the OpenGL 3.3 / OpenGL ES 3.0 backend" ON)
 cmake_dependent_option(VGL_BACKEND_D3D11 "Build the Direct3D 11 backend" ON "WIN32" OFF)
-option(VGL_BACKEND_OGRE "Build the Ogre-Next backend" OFF)
+option(VGL_BACKEND_OGRE "Build the Ogre backend (classic Ogre, 1.x)" OFF)
 
 # Library rules (NFR-05) and CI strictness.
 option(VGL_DISABLE_EXCEPTIONS "Build vgl without exceptions and RTTI" OFF)

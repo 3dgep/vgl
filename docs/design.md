@@ -29,8 +29,8 @@ This library takes a different position in two ways. First, it renders: it ships
 |---|---|
 | Implementation language | C++20 |
 | Public ABI | C API, with a header-only C++ wrapper on top |
-| Target platform | PC first; OpenGL ES 3.0+ kept possible |
-| Backends | OpenGL 3.3 / GLES 3.0 common subset, Direct3D 11, Ogre-Next |
+| Target platforms | Windows, Linux, macOS, Android and iOS for the runtime, which is platform-independent; Windows and Linux for the baker |
+| Backends | OpenGL 3.3 / GLES 3.0 common subset, Direct3D 11, Ogre (the classic 1.x line, not Ogre-Next) |
 | Elevation data | Free global datasets (Copernicus GLO-30, GEBCO), baked offline |
 | Runtime data format | Custom, sharded, range-readable tile packs |
 | Data access | Local disk first; the client's own web hosting later, through the same interface |
@@ -45,7 +45,7 @@ This library takes a different position in two ways. First, it renders: it ships
 
 ### 2.1 Goals
 
-The library should render a WGS84 globe with streamed, level-of-detail terrain and imagery inside a host application that owns the window, main loop, camera and render target. It must be usable from C as easily as from C++, so that it can be embedded in an existing C code base. It must run on Direct3D 11, OpenGL and Ogre-Next through a shared backend interface, and its core must also be usable without any backend by a host with its own renderer. Elevation and imagery data are prepared offline by a bundled baking tool and read at runtime from local files or a plain web server. The library is an open-source project hosted on GitHub, and it should be easy both to use and to extend (section 13).
+The library should render a WGS84 globe with streamed, level-of-detail terrain and imagery inside a host application that owns the window, main loop, camera and render target. It must be usable from C as easily as from C++, so that it can be embedded in an existing C code base. It must run on Direct3D 11, OpenGL, OpenGL ES and Ogre through a shared backend interface, on desktop and mobile platforms, and its core must also be usable without any backend by a host with its own renderer. Elevation and imagery data are prepared offline by a bundled baking tool and read at runtime from local files or a plain web server. The library is an open-source project hosted on GitHub, and it should be easy both to use and to extend (section 13).
 
 ### 2.2 Non-goals
 
@@ -59,7 +59,7 @@ The library is "embedded" in the sense of being embeddable in a host application
 
 **Integrators** add a globe view to an existing application. The client's C project is the primary example and the main design driver. Integrators need a small, stable C API, predictable resource use, and a library that cooperates with their existing rendering instead of taking it over.
 
-**Engine users** want the globe inside a scene graph. For them, the Ogre-Next backend maps globe tiles onto the engine's own objects and materials.
+**Engine users** want the globe inside a scene graph. For them, the Ogre backend maps globe tiles onto the engine's own objects and materials. The client uses classic Ogre (the 1.x line), not Ogre-Next.
 
 Typical applications include simulation and training, mission and route planning, moving-map displays, and visualization tools that need a 3D geographic context. Many of these involve a vehicle or aircraft positioned on the terrain, which makes height queries and correct depth interaction with host geometry important requirements.
 
@@ -67,9 +67,28 @@ Typical applications include simulation and training, mission and route planning
 
 ## 4. Platform and toolchain
 
-The initial target is desktop PC hardware. Direct3D 11 is available on Windows only, so the OpenGL backend provides coverage on other desktop platforms. OpenGL ES 3.0 and later is not a target for the first releases, but it must remain possible. Section 7.6 lists the rules the OpenGL backend follows to keep that option open. OpenGL ES 2.0 is out of scope.
+The runtime targets Windows, Linux, macOS, Android and iOS, on desktop and mobile hardware. It must stay as platform-independent as possible. The baker runs on Windows and Linux only; it never runs on a mobile device.
 
-The client's toolchain includes a C++ compiler, so the C API wraps a C++ implementation and no part of the core needs to be written in C. The baseline language level is C++20. It is supported by all current desktop compilers and leaves headroom for older vendor toolchains if a GLES device is added later.
+The rules that keep the runtime portable:
+
+- The core uses only the C and C++ standard libraries. It never calls an operating system API: files, network and threads all go through host callbacks (sections 7.5 and 13.1), which is also how an Android host reads from its APK assets and an iOS host from its app bundle.
+- No `std::filesystem`, `std::thread` or locale-dependent formatting in the core. The optional defaults module (section 6.2) may use threads and files, and is built only where they exist.
+- Data formats are little-endian and read byte by byte (pack format, section 3), so no part of the runtime depends on the host's endianness or alignment.
+- The library builds as a static library, which mobile platforms prefer, as well as a shared one, and CI builds it for every target platform.
+
+Graphics APIs by platform:
+
+| Platform | Raw backends | Ogre backend |
+|---|---|---|
+| Windows | Direct3D 11, OpenGL | Through Ogre's render systems |
+| Linux | OpenGL | Through Ogre's render systems |
+| macOS | OpenGL 3.3 core (deprecated by Apple since macOS 10.14, but available up to 4.1) | Through Ogre's render systems |
+| Android | OpenGL ES 3.0 | Through Ogre's OpenGL ES render system |
+| iOS | OpenGL ES 3.0 (deprecated by Apple since iOS 12, but available) | Through Ogre's render systems |
+
+OpenGL ES 3.0 is therefore a target from the first releases, not just a possibility: the OpenGL backend targets the common subset of OpenGL 3.3 and OpenGL ES 3.0 (section 7.6). OpenGL ES 2.0 is out of scope. A Metal backend is not planned; on macOS and iOS, rendering goes through OpenGL, OpenGL ES or Ogre, unless the client's answers (section 16) show that a raw Metal backend is needed. On macOS the OpenGL backend needs no extensions beyond OpenGL 4.1, the last version Apple ships, so clip control is unavailable there too and the logarithmic depth path applies.
+
+The client's toolchain includes a C++ compiler, so the C API wraps a C++ implementation and no part of the core needs to be written in C. The baseline language level is C++20, which current desktop compilers, the Android NDK (Clang with libc++) and Xcode's Apple Clang all support.
 
 ---
 
@@ -130,7 +149,7 @@ flowchart TB
     RI["Render interface"]
     GL["OpenGL / GLES backend"]
     DX["Direct3D 11 backend"]
-    OG["Ogre-Next backend"]
+    OG["Ogre backend"]
     Packs[("Tile packs: disk or web")]
 
     Host --> API --> Sel
@@ -156,7 +175,7 @@ flowchart TB
 | Decoders | Elevation and image decoding, pluggable so a host can substitute its own |
 | Tile mesh builder | Terrain meshes from heightmaps, skirts, normals, imagery texture coordinates |
 | Render interface | The contract between core and backends |
-| Backends | OpenGL / GLES, Direct3D 11, Ogre-Next |
+| Backends | OpenGL / GLES, Direct3D 11, Ogre |
 | Optional defaults | Thread pool and filesystem reader, used by the samples and available to hosts |
 
 ### 6.3 Host integration model
@@ -230,9 +249,9 @@ The optional defaults module provides a small thread pool and a filesystem reade
 
 #### Backend interface
 
-The interface is resource-oriented, not draw-call oriented. The core tells the backend when a tile's mesh or texture becomes available, changes or is evicted. Each frame, it hands over the visible set with per-tile transforms and parameters. The Direct3D 11 and OpenGL backends turn that into draw calls. The Ogre-Next backend turns it into renderables in Ogre's scene graph. If the interface fits both a raw graphics API and a scene-graph engine, it is general enough for hosts that want to render the visible set themselves (FR-10).
+The interface is resource-oriented, not draw-call oriented. The core tells the backend when a tile's mesh or texture becomes available, changes or is evicted. Each frame, it hands over the visible set with per-tile transforms and parameters. The Direct3D 11 and OpenGL backends turn that into draw calls. The Ogre backend turns it into renderables in Ogre's scene graph. If the interface fits both a raw graphics API and a scene-graph engine, it is general enough for hosts that want to render the visible set themselves (FR-10).
 
-The material model is deliberately narrow: a terrain tile with a number of blended imagery layers. Texture formats are negotiated per backend from the start, so compressed formats (BC1 and BC7 on desktop, ETC2 and ASTC on GLES) can be added later without changing the interface.
+The material model is deliberately narrow: a terrain tile with a number of blended imagery layers. Texture formats are negotiated per backend from the start, so compressed formats (BC1 and BC7 on desktop, ETC2 and ASTC on mobile) can be added later without changing the interface. With Android and iOS among the targets, ETC2 and ASTC matter as much as BC1 and BC7.
 
 #### Precision
 
@@ -240,7 +259,7 @@ GPU vertex positions are single precision and stored relative to each tile's cen
 
 #### Depth
 
-Planet-scale rendering needs a very large depth range. The primary approach is reversed-Z with a 32-bit floating-point depth buffer, which Direct3D 11 supports directly and OpenGL supports through clip control (OpenGL 4.5 or `ARB_clip_control`). Where clip control is unavailable, as on GLES, the backend falls back to a logarithmic depth buffer computed in the shader.
+Planet-scale rendering needs a very large depth range. The primary approach is reversed-Z with a 32-bit floating-point depth buffer, which Direct3D 11 supports directly and OpenGL supports through clip control (OpenGL 4.5 or `ARB_clip_control`). Where clip control is unavailable, as on GLES and so on every Android and iOS device, the backend falls back to a logarithmic depth buffer computed in the shader.
 
 The depth convention is exposed to the host, because host geometry such as an aircraft on the terrain has to depth-test correctly against the globe.
 
@@ -264,9 +283,9 @@ Continuous testing keeps the GLES path working: the GL sample also runs on a GLE
 
 The backend targets Direct3D 11 at feature level 11_0. Direct3D 12 offers little benefit for a globe renderer and would make the backend several times larger, so it is not planned.
 
-#### Ogre-Next backend
+#### Ogre backend
 
-The backend assumes Ogre-Next; the client is confirming the version. Materials go through Ogre-Next's HLMS, using a small custom HLMS implementation or custom pieces added to an existing one. Ogre-Next provides its own render systems, so this backend never touches a graphics API directly. Its depth configuration has to match the conventions of the other backends.
+The backend targets classic Ogre, the 1.x line, which the client uses; Ogre-Next (2.x) is not supported. Classic Ogre has no HLMS: tiles become custom renderables with their own hardware buffers, drawn with a small vgl material whose shaders are written for each of Ogre's render systems the client uses (OpenGL 3+, OpenGL ES, Direct3D 11, and Metal or Vulkan where needed). Ogre provides the render systems, so this backend never touches a graphics API directly, and it is the main rendering path on mobile platforms. Its depth configuration has to match the conventions of the other backends. The exact Ogre release and render systems are open (section 16, question 1).
 
 ---
 
@@ -391,7 +410,7 @@ Because shards are plain range-readable files, the first version of the client's
 | OpenGL | Reference sample using GLFW for the window and context |
 | OpenGL ES | The same sample on a GLES 3 context, through ANGLE or EGL |
 | Direct3D 11 | Plain Win32 window and device |
-| Ogre-Next | Globe inside an Ogre-Next scene |
+| Ogre | Globe inside a classic Ogre scene, on Windows, Linux, macOS, Android and iOS |
 | Pure C | The OpenGL sample written in C against the C API. This mirrors the client's integration; if it is awkward to write, the API needs to change. |
 | Headless | Runs tile selection and loading with a scripted camera and prints statistics, without a GPU. Doubles as a test and benchmark. |
 
@@ -414,11 +433,12 @@ The build uses CMake, with options to enable or disable each backend, decoder an
 | Baker | Bakes of synthetic, analytically defined surfaces, checking heights, seams and datum conversion |
 | Pack format | Round-trip and corruption tests |
 | Backends | Image comparison tests for each backend, including the GLES path through ANGLE and Mesa |
+| Apple and mobile | The runtime built and tested on macOS, and built for Android (NDK) and iOS, in CI from M2, with the headless tests run on an emulator or simulator |
 | C API | The pure-C sample built and run in continuous integration |
 
 ### 12.3 Licensing
 
-The library is released under the MIT license. It lets commercial integrators link the library into closed-source products, requires only that the copyright and license notice are kept, and is compatible with both GPLv2 and GPLv3 projects. All runtime and baker dependencies (stb_image, Zstandard, GDAL, Ogre-Next, GLFW, ANGLE) use permissive licenses; their notices are included in distributions. Jeremiah van Oosten retains the copyright and publishes the library as open source on GitHub at github.com/3dgep/vgl. The client, like every other user, uses it under the MIT license. External contributors keep the copyright to their own contributions and license them under MIT, confirmed by a Developer Certificate of Origin sign-off on each commit. Baked datasets carry the attribution requirements of their sources (section 9), independently of the code license.
+The library is released under the MIT license. It lets commercial integrators link the library into closed-source products, requires only that the copyright and license notice are kept, and is compatible with both GPLv2 and GPLv3 projects. All runtime and baker dependencies (stb_image, Zstandard, GDAL, Ogre, GLFW, ANGLE) use permissive licenses; their notices are included in distributions. Jeremiah van Oosten retains the copyright and publishes the library as open source on GitHub at github.com/3dgep/vgl. The client, like every other user, uses it under the MIT license. External contributors keep the copyright to their own contributions and license them under MIT, confirmed by a Developer Certificate of Origin sign-off on each commit. Baked datasets carry the attribution requirements of their sources (section 9), independently of the code license.
 
 ---
 
@@ -450,7 +470,7 @@ The library follows Semantic Versioning. Within a major version, the C ABI stays
 
 ### 13.4 Repository and contributions
 
-The repository is public at github.com/3dgep/vgl, with continuous integration through GitHub Actions on Windows and Linux. CI builds every backend, runs the tests, and runs the GLES path through ANGLE and Mesa and the headless sample. Contribution guidelines describe the coding style (enforced with clang-format and clang-tidy), the DCO sign-off and the review process, and issue templates cover bug reports and feature requests. Packages for vcpkg and Conan can follow once the API has stabilized.
+The repository is public at github.com/3dgep/vgl, with continuous integration through GitHub Actions on Windows, Linux and macOS, and builds for Android and iOS. CI builds every backend, runs the tests, and runs the GLES path through ANGLE and Mesa and the headless sample. Contribution guidelines describe the coding style (enforced with clang-format and clang-tidy), the DCO sign-off and the review process, and issue templates cover bug reports and feature requests. Packages for vcpkg and Conan can follow once the API has stabilized.
 
 ---
 
@@ -460,12 +480,12 @@ The repository is public at github.com/3dgep/vgl, with continuous integration th
 |---|---|
 | M0: Foundations | Public GitHub repository with CI and contribution guidelines, build system, foundation and geodesy modules, tiling scheme, pack format specification, C API conventions |
 | M1: Data pipeline | Baker with GDAL input, datum conversion, elevation and imagery encoding, sharded packs; regional test bake to settle tile size, deepest level and shard level |
-| M2: MVP runtime | LOD selection and culling, cache and budgets, pack-on-disk provider, mesh builder, OpenGL and Direct3D 11 backends, height queries, attribution; OpenGL, Direct3D 11, pure-C and headless samples |
-| M3: Integration | Ogre-Next backend and sample, GLES sample in CI, multiple imagery layers, picking, atmosphere |
+| M2: MVP runtime | LOD selection and culling, cache and budgets, pack-on-disk provider, mesh builder, OpenGL / GLES and Direct3D 11 backends, height queries, attribution; OpenGL, Direct3D 11, pure-C and headless samples; macOS, Android and iOS builds in CI |
+| M3: Integration | Ogre backend and sample on desktop (Windows, Linux, macOS), Android and iOS, GLES sample in CI, multiple imagery layers, picking, atmosphere |
 | M4: Distribution | HTTP pack provider, disk cache, full global bake, hosting setup |
 | Later | Compressed GPU textures, vector overlays rasterized into tiles, Vulkan backend, a limited subset of 3D Tiles |
 
-The backend used by the client's C project should be built first within M2, since that integration has to work.
+The backend used by the client's C project should be built first within M2, since that integration has to work. If the client renders through Ogre on every platform, the Ogre backend moves into M2 instead.
 
 ---
 
@@ -477,7 +497,9 @@ The backend used by the client's C project should be built first within M2, sinc
 | Surface-model artifacts (forests, buildings) | Unrealistic terrain for ground-level use | Document the limitation; NASADEM as alternative source; review bare-earth options |
 | Oversampling at high latitudes | Larger datasets | Measure in test bake; per-tile depth limits |
 | Graphics state interference with the host | Rendering bugs in the host application | Documented and restored state; integration tests in a host-like sample |
-| Ogre-Next version not yet confirmed | Rework of the Ogre backend | Build the Ogre backend after the others (M3) |
+| Exact Ogre release and render systems not yet confirmed | Rework of the Ogre backend's shaders | Keep to Ogre APIs that recent 1.x releases share; write the shaders per render system once the client confirms |
+| OpenGL and OpenGL ES deprecated on macOS and iOS | The raw OpenGL backends may stop working on a future macOS or iOS version | Ogre's Metal render system as the Apple path; revisit a raw Metal backend if the client needs one |
+| Smaller memory and thermal budgets on mobile | Stutter, memory warnings | Budgets set by the host (NFR-04), time-budgeted updates (NFR-10), and compressed GPU textures (ETC2, ASTC) earlier than planned |
 | Scope creep towards 3D Tiles and full GIS features | Loss of the lightweight goal | Non-goals recorded in this document |
 | Depth precision on GLES | Z-fighting on GLES devices | Logarithmic depth fallback, tested continuously |
 
@@ -487,9 +509,9 @@ The backend used by the client's C project should be built first within M2, sinc
 
 | # | Question | Owner |
 |---|---|---|
-| 1 | Which Ogre version does the client use (Ogre-Next assumed)? | Client |
+| 1 | Which Ogre version does the client use? Answered: classic Ogre (1.x), not Ogre-Next. Still open: the exact release, and the render systems used on each platform, in particular Metal or OpenGL on macOS and iOS. | Client |
 | 2 | Which graphics API does the client's C project render with? This decides the first backend. | Client |
-| 3 | Which operating systems must be supported: Windows only, or also Linux? | Client |
+| 3 | Which operating systems must be supported? Answered: Windows, Linux, macOS, Android and iOS for the runtime; Windows and Linux for the baker. Still open: the minimum macOS, iOS and Android versions, whether Intel Macs must be supported as well as Apple silicon, and whether 32-bit ARM (armeabi-v7a) must be supported. | Client |
 | 4 | What imagery will the client supply, at what resolution and coverage? | Client |
 | 5 | Should the ocean floor be rendered (bathymetry), or the sea surface at mean sea level? | Client |
 | 6 | Which hosting option will serve the data for the web API? | Client |
@@ -508,5 +530,5 @@ The backend used by the client's C project should be built first within M2, sinc
 | SSE | Screen-space error: a tile's geometric error projected to pixels, used to choose detail levels |
 | Skirt | Vertical strip along a tile edge that hides cracks between neighbouring tiles at different levels |
 | Shard | One file of a tile pack, holding a subtree of the quadtree |
-| HLMS | Ogre-Next's high-level material system |
+| Classic Ogre | The Ogre 1.x line, as opposed to Ogre-Next (2.x) |
 | Reversed-Z | Depth mapping that stores the far plane at 0 and the near plane at 1, improving floating-point depth precision |

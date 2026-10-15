@@ -48,7 +48,7 @@ Public C headers are written in C99 and must also compile without warnings as C+
 | `vgl/defaults.h` | Optional thread pool and filesystem reader |
 | `vgl/backend_gl.h` | OpenGL / OpenGL ES backend |
 | `vgl/backend_d3d11.h` | Direct3D 11 backend |
-| `vgl/backend_ogre.hpp` | Ogre-Next backend (C++ only, because Ogre-Next is a C++ API) |
+| `vgl/backend_ogre.hpp` | Ogre backend (C++ only, because Ogre is a C++ API) |
 | `vgl/vgl.hpp`, `vgl/<module>.hpp` | Header-only C++ wrapper (section 16) |
 
 New modules get their own header and are added to `vgl/vgl.h`. Backend and defaults headers are not included by the umbrella header, because they are optional and separately linked.
