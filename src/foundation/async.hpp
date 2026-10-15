@@ -37,7 +37,8 @@ struct async_item
     enum class kind : std::uint8_t
     {
         io,
-        task,
+        task, // A decode job.
+        mesh, // A mesh job.
     };
 
     explicit async_item(kind k) noexcept : item_kind(k) {}

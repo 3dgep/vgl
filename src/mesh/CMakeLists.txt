@@ -2,4 +2,7 @@
 # Copyright (c) 2026 Jeremiah van Oosten
 
 # Tile mesh builder: terrain meshes from heightmaps, skirts, normals, imagery texture coordinates.
-# Sources are added to the vgl_objects target with target_sources() in M2.
+
+target_sources(vgl_objects PRIVATE
+    tile_mesh.cpp
+    tile_mesh.hpp)

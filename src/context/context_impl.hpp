@@ -17,12 +17,14 @@
 #include "foundation/containers.hpp"
 #include "foundation/log.hpp"
 #include "geodesy/ellipsoid.hpp"
+#include "mesh/tile_mesh.hpp"
 #include "providers/pack_reader.hpp"
 #include "tiling/selection.hpp"
 #include "tiling/tile.hpp"
 
 #include <vgl/context.h>
 
+#include <chrono>
 #include <cstdint>
 
 namespace vgl::internal
@@ -98,6 +100,50 @@ struct decode_job : async_item
     void run() noexcept;
 };
 
+// Building of one tile mesh, on a task thread or in vgl_context_update. Everything it needs
+// is copied or allocated before it runs, so that it neither allocates nor touches the context.
+struct mesh_job : async_item
+{
+    mesh_job() noexcept : async_item(kind::mesh) {}
+
+    async_core* core = nullptr;
+    tile_id id;
+    tile_id source;
+    std::uint32_t pack_id = 0;
+    std::uint32_t grid = 0;
+    ellipsoid shape;
+    double skirt_height = 0.0;
+    buffer<float> heights;
+    buffer<dvec3> scratch;
+    buffer<tile_vertex> vertices;
+    dvec3 centre;
+    double min_height = 0.0;
+    double max_height = 0.0;
+
+    // Builds the vertices, then frees the heights and scratch.
+    void run() noexcept;
+};
+
+struct tile_mesh_data
+{
+    tile_id source;
+    std::uint32_t pack_id = 0;
+    std::uint32_t grid = 0;
+    dvec3 centre;
+    double min_height = 0.0;
+    double max_height = 0.0;
+    buffer<tile_vertex> vertices;
+};
+
+// The mesh of a selected tile, by tile key. The previous mesh stays until a new one is built.
+struct mesh_state
+{
+    bool has_mesh = false;
+    tile_mesh_data mesh;
+    bool building = false;
+    std::uint64_t last_used = 0;
+};
+
 // A tile chosen for drawing (design document, section 7.3).
 struct selected_tile
 {
@@ -148,6 +194,19 @@ availability find_tile(vgl_context& ctx,
 // Selects tiles for the context's view and starts the reads they need.
 void select_tiles(vgl_context& ctx) noexcept;
 
+// Starts building the meshes of selected tiles that need one, while time remains before
+// deadline; at least one.
+void build_meshes(vgl_context& ctx, std::chrono::steady_clock::time_point deadline) noexcept;
+
+// Installs a built mesh, and frees the job.
+void handle_mesh_built(vgl_context& ctx, mesh_job* job) noexcept;
+
+// Frees a mesh job without installing it.
+void free_mesh_job(const allocator& a, mesh_job* job) noexcept;
+
+// Forgets the meshes drawn from a pack.
+void drop_pack_meshes(vgl_context& ctx, std::uint32_t pack_id) noexcept;
+
 } // namespace vgl::internal
 
 struct vgl_pack
@@ -170,7 +229,7 @@ struct vgl_context
 {
     explicit vgl_context(const vgl::internal::allocator& a) noexcept
         : memory(a), decompressor(a), outstanding(a), packs(a), pending(a), selected(a), wanted(a),
-          boxes(a)
+          boxes(a), meshes(a)
     {
     }
 
@@ -198,7 +257,8 @@ struct vgl_context
     vgl::internal::view_state view;
     vgl::internal::vector<vgl::internal::selected_tile> selected; // For the view, this frame.
     vgl::internal::vector<vgl::internal::load_request> wanted;
-    vgl::internal::u64_map<vgl::internal::cached_box> boxes; // By tile key.
+    vgl::internal::u64_map<vgl::internal::cached_box> boxes;  // By tile key.
+    vgl::internal::u64_map<vgl::internal::mesh_state> meshes; // By tile key.
 };
 
 #endif // VGL_CONTEXT_CONTEXT_IMPL_HPP

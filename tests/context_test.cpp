@@ -889,3 +889,258 @@ TEST_CASE(selected_tiles_are_not_evicted)
     CHECK_EQ(vgl_pack_destroy(p), VGL_RESULT_SUCCESS);
     CHECK_EQ(vgl_context_destroy(ctx), VGL_RESULT_SUCCESS);
 }
+
+namespace
+{
+
+// The mesh of a selected tile, or null.
+const mesh_state* mesh_of(vgl_context* ctx, const tile_id& t)
+{
+    const mesh_state* m = ctx->meshes.find(tile_key(t));
+    return m != nullptr && m->has_mesh ? m : nullptr;
+}
+
+// Height of mesh vertex (i, j).
+float mesh_height(const mesh_state& m, std::uint32_t i, std::uint32_t j)
+{
+    return m.mesh.vertices.data()[static_cast<std::size_t>(j) * m.mesh.grid + i].height;
+}
+
+// Position in degrees of mesh vertex (i, j) of tile t.
+position mesh_position(const tile_id& t, std::uint32_t grid, std::uint32_t i, std::uint32_t j)
+{
+    const degree_region b = tile_bounds(t);
+    const double step = tile_span(t.level) / (grid - 1);
+    return {b.north - j * step, b.west + i * step};
+}
+
+} // namespace
+
+TEST_CASE(selected_tiles_get_meshes_of_their_data)
+{
+    const test_pack pack = make_pack();
+    memory_io io;
+    io.packs["mem://a"] = &pack;
+    vgl_context_create_info info = context_info();
+    info.io = &io.table;
+    vgl_context* ctx = nullptr;
+    REQUIRE(vgl_context_create(&info, &ctx) == VGL_RESULT_SUCCESS);
+    vgl_pack* p = add_pack(ctx, "mem://a");
+
+    // A tile with its own data: one vertex per sample.
+    const tile_id deep{3, 6, 2};
+    const position centre = inside(deep, 0.5, 0.5);
+    vgl_view v = camera_over(centre.lat, centre.lon, 50000.0);
+    REQUIRE(vgl_context_view_set(ctx, &v) == VGL_RESULT_SUCCESS);
+    settle(ctx, io);
+    const mesh_state* m = mesh_of(ctx, deep);
+    REQUIRE(m != nullptr);
+    CHECK(m->mesh.source == deep);
+    CHECK_EQ(m->mesh.grid, pack_tile_size);
+    CHECK_EQ(m->mesh.vertices.size(), tile_mesh_vertex_count(pack_tile_size));
+    const std::vector<std::int16_t>& q = pack.samples.at(tile_key(deep));
+    const double offset = pack.offsets.at(tile_key(deep));
+    for (std::uint32_t j = 0; j < pack_tile_size; j += 5)
+    {
+        for (std::uint32_t i = 0; i < pack_tile_size; i += 3)
+        {
+            const double expected =
+                offset + pack.steps[3] * q[static_cast<std::size_t>(j) * pack_tile_size + i];
+            CHECK_NEAR(mesh_height(*m, i, j), expected, 1e-3);
+        }
+    }
+
+    // Nodata in the top row of (3, 8, 2) is filled from its parent.
+    const tile_id holey{3, 8, 2};
+    const position over = inside(holey, 0.5, 0.5);
+    v = camera_over(over.lat, over.lon, 50000.0);
+    REQUIRE(vgl_context_view_set(ctx, &v) == VGL_RESULT_SUCCESS);
+    settle(ctx, io);
+    m = mesh_of(ctx, holey);
+    REQUIRE(m != nullptr);
+    CHECK(m->mesh.source == holey);
+    for (std::uint32_t i = 0; i < pack_tile_size; i += 4)
+    {
+        const position at = mesh_position(holey, pack_tile_size, i, 0);
+        CHECK_NEAR(
+            mesh_height(*m, i, 0), expected_height(pack, tile_parent(holey), at.lat, at.lon), 1e-3);
+    }
+
+    // From far away, children the pack lacks are drawn from a part of an ancestor.
+    v = camera_over(0.0, 0.0, 2e7);
+    REQUIRE(vgl_context_view_set(ctx, &v) == VGL_RESULT_SUCCESS);
+    settle(ctx, io);
+    int from_ancestor = 0;
+    for (const selected_tile& t : ctx->selected)
+    {
+        m = mesh_of(ctx, t.id);
+        REQUIRE(m != nullptr);
+        CHECK(m->mesh.source == t.source);
+        CHECK(m->mesh.grid >= min_mesh_grid);
+        if (!(t.source == t.id))
+        {
+            ++from_ancestor;
+            const std::uint32_t g = m->mesh.grid;
+            for (std::uint32_t k = 0; k < g; k += 2)
+            {
+                const position at = mesh_position(t.id, g, k, g - 1 - k);
+                CHECK_NEAR(mesh_height(*m, k, g - 1 - k),
+                           expected_height(pack, t.source, at.lat, at.lon),
+                           1e-2);
+            }
+        }
+    }
+    CHECK(from_ancestor > 0);
+
+    // The pack's meshes go with it.
+    const std::uint32_t pack_id = p->id;
+    CHECK_EQ(vgl_pack_destroy(p), VGL_RESULT_SUCCESS);
+    bool any = false;
+    ctx->meshes.for_each([&](std::uint64_t, const mesh_state& s) {
+        any = any || (s.has_mesh && s.mesh.pack_id == pack_id);
+    });
+    CHECK(!any);
+    CHECK_EQ(vgl_context_destroy(ctx), VGL_RESULT_SUCCESS);
+}
+
+TEST_CASE(the_bare_ellipsoid_gets_a_mesh)
+{
+    vgl_context* ctx = nullptr;
+    REQUIRE(vgl_context_create(nullptr, &ctx) == VGL_RESULT_SUCCESS);
+    const vgl_view v = camera_over(0.0, 0.0, 2e7);
+    REQUIRE(vgl_context_view_set(ctx, &v) == VGL_RESULT_SUCCESS);
+    // Without tasks, meshes build within the update's time budget, at least one per update.
+    for (int i = 0; i < 2; ++i)
+    {
+        REQUIRE(vgl_context_update(ctx, nullptr) == VGL_RESULT_SUCCESS);
+    }
+    REQUIRE(ctx->selected.size() == 2);
+    for (const selected_tile& t : ctx->selected)
+    {
+        const mesh_state* m = mesh_of(ctx, t.id);
+        REQUIRE(m != nullptr);
+        CHECK_EQ(m->mesh.pack_id, 0u);
+        CHECK_EQ(m->mesh.grid, 121u); // 180 degrees at 1.5 degrees.
+        CHECK_EQ(mesh_height(*m, 60, 60), 0.0f);
+    }
+    CHECK(ctx->cpu_used > 0);
+    CHECK_EQ(vgl_context_destroy(ctx), VGL_RESULT_SUCCESS);
+}
+
+TEST_CASE(meshes_build_on_tasks_and_keep_the_old_mesh_meanwhile)
+{
+    const test_pack pack = make_pack();
+    test_allocator memory;
+    memory_io io;
+    io.packs["mem://a"] = &pack;
+    manual_tasks tasks;
+    {
+        vgl_context_create_info info = context_info();
+        info.allocator = &memory.table;
+        info.io = &io.table;
+        info.tasks = &tasks.table;
+        vgl_context* ctx = nullptr;
+        REQUIRE(vgl_context_create(&info, &ctx) == VGL_RESULT_SUCCESS);
+        vgl_pack* p = add_pack(ctx, "mem://a");
+        const tile_id deep{3, 7, 3};
+        const position centre = inside(deep, 0.5, 0.5);
+        const vgl_view v = camera_over(centre.lat, centre.lon, 50000.0);
+        REQUIRE(vgl_context_view_set(ctx, &v) == VGL_RESULT_SUCCESS);
+
+        // While data loads, the tile is drawn from coarser data. A mesh for new data appears
+        // only once its task has run; until then the previous mesh stays.
+        bool reached = false;
+        bool kept_while_building = false;
+        for (int i = 0; i < 200 && !reached; ++i)
+        {
+            REQUIRE(vgl_context_update(ctx, nullptr) == VGL_RESULT_SUCCESS);
+            if (ctx->selected.empty())
+            {
+                tasks.run_all();
+                continue;
+            }
+            const selected_tile s = ctx->selected[0];
+            const mesh_state* m = ctx->meshes.find(tile_key(s.id));
+            if (m != nullptr && m->building && m->has_mesh && !(m->mesh.source == s.source))
+            {
+                kept_while_building = true;
+            }
+            tasks.run_all();
+            REQUIRE(vgl_context_update(ctx, nullptr) == VGL_RESULT_SUCCESS);
+            m = mesh_of(ctx, s.id);
+            reached = m != nullptr && m->mesh.source == deep;
+        }
+        CHECK(reached);
+        CHECK(kept_while_building);
+        // Leave mesh tasks for a new view with the host.
+        const vgl_view far = camera_over(0.0, 0.0, 2e7);
+        REQUIRE(vgl_context_view_set(ctx, &far) == VGL_RESULT_SUCCESS);
+        REQUIRE(vgl_context_update(ctx, nullptr) == VGL_RESULT_SUCCESS);
+        CHECK(!tasks.queued.empty());
+        CHECK_EQ(vgl_pack_destroy(p), VGL_RESULT_SUCCESS);
+        CHECK_EQ(vgl_context_destroy(ctx), VGL_RESULT_SUCCESS);
+    }
+    tasks.run_all();
+    CHECK_EQ(memory.live.load(), 0);
+}
+
+TEST_CASE(selection_and_meshes_survive_allocation_failures)
+{
+    const test_pack pack = make_pack();
+    for (long fail_at = 0;; ++fail_at)
+    {
+        test_allocator memory;
+        memory.fail_at = fail_at;
+        memory_io io;
+        io.packs["mem://a"] = &pack;
+        manual_tasks tasks;
+        bool complete = false;
+        {
+            vgl_context_create_info info = context_info();
+            info.allocator = &memory.table;
+            info.io = &io.table;
+            info.tasks = fail_at % 2 == 0 ? &tasks.table : nullptr;
+            vgl_context* ctx = nullptr;
+            if (vgl_context_create(&info, &ctx) == VGL_RESULT_SUCCESS)
+            {
+                vgl_pack_create_info create{};
+                create.struct_size = sizeof(create);
+                create.uri = "mem://a";
+                vgl_pack* p = nullptr;
+                static_cast<void>(vgl_pack_create(ctx, &create, &p));
+                const vgl_view v = camera_over(30.0, -30.0, 3e6);
+                static_cast<void>(vgl_context_view_set(ctx, &v));
+                for (int i = 0; i < 60; ++i)
+                {
+                    tasks.run_all();
+                    static_cast<void>(vgl_context_update(ctx, nullptr));
+                }
+                // Once the pack has loaded, everything recovers: every selected tile has a
+                // mesh of its current data.
+                vgl_pack_state state{};
+                if (p != nullptr && vgl_pack_state_get(p, &state, nullptr) == VGL_RESULT_SUCCESS &&
+                    state == VGL_PACK_STATE_READY)
+                {
+                    complete = !ctx->selected.empty() &&
+                               std::all_of(ctx->selected.begin(),
+                                           ctx->selected.end(),
+                                           [&](const selected_tile& t) {
+                                               const mesh_state* m = mesh_of(ctx, t.id);
+                                               return m != nullptr && m->mesh.source == t.source;
+                                           });
+                    CHECK(complete);
+                }
+                static_cast<void>(vgl_pack_destroy(p));
+                static_cast<void>(vgl_context_destroy(ctx));
+            }
+        }
+        tasks.run_all();
+        CHECK_EQ(memory.live.load(), 0);
+        if (!memory.failed)
+        {
+            CHECK(complete);
+            CHECK(fail_at > 50);
+            break;
+        }
+    }
+}

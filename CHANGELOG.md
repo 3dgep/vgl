@@ -67,6 +67,13 @@ The pack format has its own version number, independent of the library version.
   cap on outstanding reads. Selected tiles are kept from eviction. The selection geometry is
   in `src/tiling/selection.hpp`; the selected tiles are internal until the backend interface
   exposes them.
+- Tile mesh builder (`src/mesh/tile_mesh.hpp`, design document section 7.3): 24-byte vertices
+  relative to each tile's centre with height, texture coordinates and octahedral normals, a
+  skirt ring, and an index list shared per grid size. Each selected tile gets a mesh, built
+  on the task interface from heights gathered in the update; nodata is filled from coarser
+  tiles and lower-priority packs, tiles drawn from an ancestor use its samples, and the bare
+  ellipsoid gets a curved grid. Meshes count towards the CPU budget, and a tile keeps its
+  previous mesh until the new one is built.
 - Context tests with synchronous, deferred and threaded hosts, allocation accounting, failure
   injection for every allocation, corrupt packs and the CPU budget; and tests of the defaults
   module on packs written to disk.

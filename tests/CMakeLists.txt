@@ -31,6 +31,7 @@ vgl_add_internal_test(foundation foundation_test.cpp)
 vgl_add_internal_test(geodesy geodesy_test.cpp data/geographiclib_reference.inc)
 vgl_add_internal_test(tiling tiling_test.cpp)
 vgl_add_internal_test(selection selection_test.cpp)
+vgl_add_internal_test(mesh mesh_test.cpp)
 vgl_add_internal_test(pack pack_test.cpp WRITER)
 vgl_add_internal_test(context context_test.cpp WRITER)
 

@@ -5,6 +5,7 @@
 # task interface, the CPU cache budget, height queries and tile selection (vgl/context.h).
 
 target_sources(vgl_objects PRIVATE
+    build_meshes.cpp
     context.cpp
     context_impl.hpp
     select_tiles.cpp)

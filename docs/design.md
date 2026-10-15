@@ -222,9 +222,21 @@ Before each update, the host sets its view with `vgl_context_view_set`: a view m
 - **Geometric error.** The error of drawing a tile at level *L* instead of its children is its sample spacing at the equator, *a* · Δλ / (*n* − 1), for tile span Δλ in radians and *n* samples per side.
 - **Screen-space error.** The geometric error times *P*₁₁ · *H* / (2*d*), for projection element *P*₁₁, viewport height *H* in pixels and distance *d* from the eye to the tile's bounding box; an orthographic projection drops *d*. A tile is refined when this exceeds `vgl_view::max_screen_space_error`, 2 pixels by default.
 - **Bounds.** A loaded tile is bounded by its own decoded heights, a tile not yet loaded by the child bounds in its parent, and a root tile by a conservative range for the Earth, −11,500 m to 9,000 m. Bounding boxes are cached, since a level-0 box takes tens of thousands of conversions to compute.
-- **Horizon culling.** A tile is culled when its whole bounding box is hidden behind the ellipsoid lowered to the lowest possible height, tested in the scaled space where that ellipsoid is a unit sphere. The hidden region is convex, so testing the box's corners suffices.
+- **Horizon culling.** A tile is culled when it is hidden behind the ellipsoid lowered to the lowest possible height, tested in the scaled space where that ellipsoid is a unit sphere. Each tile has a horizon point that is hidden only if the whole tile is (the method of Cesium's `EllipsoidalOccluder`), and the corners of its box are tested too; the hidden region is convex, so hidden corners hide the box.
+- **Large tiles.** The box of a tile tens of degrees wide reaches far below the surface, where it can cross the view even though the surface does not. A tile coarser than level 6 is therefore drawn only if the box of one of its level-6 descendants is in view.
 - **Refinement.** A tile is refined only once its own data has loaded, so detail arrives level by level without holes. Until a child has loaded, it is drawn from its nearest loaded ancestor. A child that no pack contains is drawn the same way, and a region no pack covers is drawn as the bare ellipsoid. With several packs, a tile's data comes from the highest-priority pack that has loaded it, and a child exists if any pack has it.
 - **Loading.** Selection requests the tiles it needs, coarser levels first and then larger screen-space errors first, with a cap on outstanding reads. Selected tiles count as used in the frame, so eviction keeps them.
+
+#### Tile meshes
+
+Each selected tile gets a mesh, built from heights on a task thread (or in the update without one):
+
+- **Vertices.** 24 bytes: the position as three `float`s relative to the tile's centre along the ECEF axes, the height above the ellipsoid as a `float` (for shading without imagery), texture coordinates over the tile as two 16-bit unsigned normalized values (*u* east, *v* south, matching the imagery tile), and the normal as two 16-bit signed normalized values in octahedral encoding. Normals come from neighbouring sample positions, computed in double precision.
+- **Grid.** A tile with its own data has one vertex per sample. A tile drawn from an ancestor uses the ancestor's samples in its part of the ancestor, interpolated up to at least 9 × 9. The bare ellipsoid has vertices at most 1.5° apart, and at least 9 × 9.
+- **Nodata.** A nodata sample takes the height from the deepest loaded ancestor-or-self tile that has data there, from the tile's pack and then from the lower-priority packs; with none, it lies on the ellipsoid. Regional packs therefore blend into the global base without holes.
+- **Skirts.** A ring of vertices along the tile's boundary hangs down to the tile's lowest height minus its geometric error, with the normals and texture coordinates of the edge above, hiding cracks between neighbouring tiles at different levels.
+- **Indices.** Every tile with the same grid size shares one index list: triangles counter-clockwise seen from outside the ellipsoid, in right-handed ECEF.
+- **Memory.** Meshes count towards the CPU budget and are evicted least recently used, like decoded tiles. A tile keeps its previous mesh until the new one is built, so finer data replaces coarser without gaps.
 
 ### 7.4 Tile lifecycle, cache and memory
 

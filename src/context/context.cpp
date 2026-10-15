@@ -475,11 +475,17 @@ void process_completions(vgl_context& ctx) noexcept
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
             handle_request(ctx, static_cast<vgl_io_request*>(item));
         }
-        else
+        else if (item->item_kind == async_item::kind::task)
         {
             // item_kind gives the type.
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
             handle_decoded(ctx, static_cast<decode_job*>(item));
+        }
+        else
+        {
+            // item_kind gives the type.
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
+            handle_mesh_built(ctx, static_cast<mesh_job*>(item));
         }
         item = next;
     }
@@ -496,10 +502,16 @@ void evict(vgl_context& ctx) noexcept
     struct candidate
     {
         std::uint64_t last_used;
-        vgl_pack* pack;
+        vgl_pack* pack; // Null for a mesh.
         std::uint64_t key;
     };
     vector<candidate> candidates(ctx.memory);
+    ctx.meshes.for_each([&](std::uint64_t key, const mesh_state& m) {
+        if (!m.building && m.last_used < ctx.frame)
+        {
+            static_cast<void>(candidates.push_back({m.last_used, nullptr, key}));
+        }
+    });
     for (vgl_pack* p : ctx.packs)
     {
         p->tiles.for_each([&](std::uint64_t key, tile_state& t) {
@@ -517,6 +529,13 @@ void evict(vgl_context& ctx) noexcept
         if (ctx.cpu_used <= ctx.cpu_budget)
         {
             break;
+        }
+        if (c.pack == nullptr)
+        {
+            const mesh_state* m = ctx.meshes.find(c.key);
+            ctx.cpu_used -= m->mesh.vertices.size() * sizeof(tile_vertex);
+            static_cast<void>(ctx.meshes.erase(c.key));
+            continue;
         }
         tile_state* t = c.pack->tiles.find(c.key);
         ctx.cpu_used -= t->q.size() * sizeof(std::int16_t);
@@ -884,6 +903,7 @@ extern "C" VGL_API vgl_result vgl_pack_destroy(vgl_pack* pack)
             ctx.cpu_used -= t.q.size() * sizeof(std::int16_t);
         }
     });
+    drop_pack_meshes(ctx, p->id);
     for (std::size_t i = 0; i < ctx.packs.size(); ++i)
     {
         if (ctx.packs[i] == p)
@@ -934,11 +954,17 @@ extern "C" VGL_API vgl_result vgl_context_destroy(vgl_context* context)
             static_cast<void>(ctx->outstanding.erase(r->id));
             free_request(*ctx, r);
         }
-        else
+        else if (item->item_kind == async_item::kind::task)
         {
             // item_kind gives the type.
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
             free_job(ctx->memory, static_cast<decode_job*>(item));
+        }
+        else
+        {
+            // item_kind gives the type.
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
+            free_mesh_job(ctx->memory, static_cast<mesh_job*>(item));
         }
         item = next;
     }
@@ -1021,6 +1047,10 @@ extern "C" VGL_API vgl_result vgl_context_update(vgl_context* context, const vgl
     if (ctx->has_view)
     {
         select_tiles(*ctx);
+        const auto deadline =
+            start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                        std::chrono::duration<double>(budget));
+        build_meshes(*ctx, deadline);
     }
 
     // The frame ends here: what queries and selection used since the last update is kept.
