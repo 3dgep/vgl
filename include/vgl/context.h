@@ -96,9 +96,10 @@ typedef struct vgl_update_info
 
 /*
  * A view of the globe, for tile selection (design document, section 7.3). Matrices are
- * column-major and multiply column vectors (vgl_dmat4); hosts that use row vectors pass their
- * matrices transposed. Any handedness and any depth mapping work: OpenGL or Direct3D clip
- * space, reversed or infinite projections.
+ * column-major and multiply column vectors (vgl_dmat4). Hosts with row-major matrices that
+ * multiply row vectors, as is common with Direct3D, pass theirs unchanged: the two differences
+ * cancel out (docs/c-api.md, section 4.2). Any handedness and any depth mapping work: OpenGL
+ * or Direct3D clip space, reversed or infinite projections.
  */
 typedef struct vgl_view
 {

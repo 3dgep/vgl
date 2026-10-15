@@ -74,6 +74,9 @@ The pack format has its own version number, independent of the library version.
   tiles and lower-priority packs, tiles drawn from an ancestor use its samples, and the bare
   ellipsoid gets a curved grid. Meshes count towards the CPU budget, and a tile keeps its
   previous mesh until the new one is built.
+- Render interface specification (`docs/render-interface.md`), accepted, not yet implemented:
+  per-frame resource events and draw lists that backends and hosts pull, upload and GPU
+  budgets, transforms, vertex and texture formats, depth conventions and threading.
 - Context tests with synchronous, deferred and threaded hosts, allocation accounting, failure
   injection for every allocation, corrupt packs and the CPU budget; and tests of the defaults
   module on packs written to disk.
@@ -91,6 +94,8 @@ The pack format has its own version number, independent of the library version.
 - The baker's default shard level is `max_level` - 5, instead of 6.
 - On Android, a static `vgl` no longer adds `stdc++` to its link interface; the NDK's libc++ is
   linked by its toolchain.
+- The documentation of `vgl_view` said that hosts with row-vector matrices pass them
+  transposed; they pass them unchanged, as section 4.2 of the C API conventions says.
 - C API conventions, section 12: a context may be destroyed while I/O requests are
   outstanding. It cancels them, and the host completes them later, as before; the completions
   are discarded. Previously this was an error.

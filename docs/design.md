@@ -236,7 +236,7 @@ Each selected tile gets a mesh, built from heights on a task thread (or in the u
 - **Nodata.** A nodata sample takes the height from the deepest loaded ancestor-or-self tile that has data there, from the tile's pack and then from the lower-priority packs; with none, it lies on the ellipsoid. Regional packs therefore blend into the global base without holes.
 - **Skirts.** A ring of vertices along the tile's boundary hangs down to the tile's lowest height minus its geometric error, with the normals and texture coordinates of the edge above, hiding cracks between neighbouring tiles at different levels.
 - **Indices.** Every tile with the same grid size shares one index list: triangles counter-clockwise seen from outside the ellipsoid, in right-handed ECEF.
-- **Memory.** Meshes count towards the CPU budget and are evicted least recently used, like decoded tiles. A tile keeps its previous mesh until the new one is built, so finer data replaces coarser without gaps.
+- **Memory.** Meshes count towards the CPU budget until they are uploaded, and are evicted least recently used, like decoded tiles; after upload, only the GPU copy remains (section 7.4). A tile keeps its previous mesh until the new one is built, so finer data replaces coarser without gaps.
 
 ### 7.4 Tile lifecycle, cache and memory
 
@@ -248,14 +248,15 @@ stateDiagram-v2
     Unloaded --> Requested: selected
     Requested --> Loading: I/O issued
     Loading --> Decoded: data decoded, mesh built
-    Decoded --> Uploaded: GPU upload (render thread)
-    Uploaded --> Evicted: over budget, least recently used
-    Decoded --> Evicted: over budget
+    Decoded --> Uploaded: GPU upload (render thread), CPU mesh copy freed
+    Uploaded --> Decoded: device lost (vgl_context_resources_reset)
+    Uploaded --> Evicted: over GPU budget, least recently drawn
+    Decoded --> Evicted: over CPU budget
     Evicted --> Unloaded
     Loading --> Unloaded: cancelled
 ```
 
-Budgets for CPU cache memory and GPU residency are set when the context is created. Eviction is least-recently-used, but never removes tiles that are needed to render the current frame. The render path performs no allocations. A statistics query reports cache use, residency, queue depth and load times.
+Budgets for CPU cache memory and GPU residency are set when the context is created. Once a mesh or texture is uploaded, its CPU copy is freed and only the GPU copy counts, against the GPU budget; after a device loss, the host calls `vgl_context_resources_reset` and the resources are rebuilt from the decoded tiles ([render interface specification](render-interface.md), section 4.4). Eviction is least-recently-used, but never removes tiles that are needed to render the current frame. The render path performs no allocations. A statistics query reports cache use, residency, queue depth and load times.
 
 ### 7.5 Threading and I/O
 
@@ -264,7 +265,7 @@ The library never spawns threads or opens sockets (NFR-02). The host supplies tw
 - **Task scheduling.** The library submits decode and mesh-building work through a host callback. If no callback is supplied, the update function does this work synchronously within its time budget.
 - **I/O.** The library requests data by URI and byte range through a host callback, and receives the result asynchronously.
 
-GPU uploads happen only on the render thread, in a budgeted step at the start of each frame.
+GPU uploads happen only on the render thread, in a budgeted step at the start of each frame. The frame functions must not overlap with `vgl_context_update`; a host that updates and renders on different threads serializes the two ([render interface specification](render-interface.md), section 9).
 
 The optional defaults module provides a small thread pool and a filesystem reader, so the common case works without writing callbacks. The samples use these defaults. It is a separate library, `vgl::defaults`, that uses vgl only through the C API.
 
@@ -274,7 +275,7 @@ A context may be destroyed while reads are outstanding or tasks are queued. The 
 
 #### Backend interface
 
-The interface is resource-oriented, not draw-call oriented. The core tells the backend when a tile's mesh or texture becomes available, changes or is evicted. Each frame, it hands over the visible set with per-tile transforms and parameters. The Direct3D 11 and OpenGL backends turn that into draw calls. The Ogre backend turns it into renderables in Ogre's scene graph. If the interface fits both a raw graphics API and a scene-graph engine, it is general enough for hosts that want to render the visible set themselves (FR-10).
+The interface is resource-oriented, not draw-call oriented. The core tells the backend when a tile's mesh or texture becomes available, changes or is evicted. Each frame, it hands over the visible set with per-tile transforms and parameters. The Direct3D 11 and OpenGL backends turn that into draw calls. The Ogre backend turns it into renderables in Ogre's scene graph. If the interface fits both a raw graphics API and a scene-graph engine, it is general enough for hosts that want to render the visible set themselves (FR-10). The [render interface specification](render-interface.md) defines it: each frame, on the render thread, a backend or host pulls resource events (create and destroy meshes, shared index lists and textures, within an upload budget) and a draw list with `float` model-view matrices composed in double precision; the core never calls into it.
 
 The material model is deliberately narrow: a terrain tile with a number of blended imagery layers. Texture formats are negotiated per backend from the start, so compressed formats (BC1 and BC7 on desktop, ETC2 and ASTC on mobile) can be added later without changing the interface. With Android and iOS among the targets, ETC2 and ASTC matter as much as BC1 and BC7.
 

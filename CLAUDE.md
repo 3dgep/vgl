@@ -8,7 +8,7 @@ Read `docs/design.md` before starting any task. It records the requirements, arc
 
 ## Status
 
-Planning is complete, and milestone M0 (design document, section 14) is done: all four steps below. The test bake report is `docs/test-bake.md`. The baker (`tools/baker`) already covers much of M1. M2 has started: the context (`vgl/context.h`) loads packs, including the EGM2008 geoid pack, through the I/O interface, decodes tiles on the task interface, keeps them within a CPU budget, answers height queries, selects tiles for the host's view and builds their meshes. The defaults module (`vgl/defaults.h`) provides a thread pool and a file reader. The backend interface and the backends come next. The M0 steps were:
+Planning is complete, and milestone M0 (design document, section 14) is done: all four steps below. The test bake report is `docs/test-bake.md`. The baker (`tools/baker`) already covers much of M1. M2 has started: the context (`vgl/context.h`) loads packs, including the EGM2008 geoid pack, through the I/O interface, decodes tiles on the task interface, keeps them within a CPU budget, answers height queries, selects tiles for the host's view and builds their meshes. The defaults module (`vgl/defaults.h`) provides a thread pool and a file reader. The render interface is specified (`docs/render-interface.md`) and comes next, then the backends. The M0 steps were:
 
 1. Repository setup: MIT `LICENSE`, `README.md` (goals and non-goals), `CONTRIBUTING.md` (coding style, DCO sign-off, review process), issue templates, `.clang-format`, `.clang-tidy`, a CMake skeleton following the module layout in section 6.2, and a GitHub Actions pipeline for Windows and Linux.
 2. Two specifications, written before implementation, in `docs/`: the C API conventions (section 7.1) and the pack format (sections 8.4 and 8.5).
@@ -19,6 +19,7 @@ Planning is complete, and milestone M0 (design document, section 14) is done: al
 
 - **Language:** C++20 for the implementation. The public ABI is the C API; a header-only C++ wrapper sits on top of it.
 - **C API:** every public declaration follows `docs/c-api.md`; check new API against its review checklist (section 17).
+- **Render interface:** the core, the backends and the samples follow `docs/render-interface.md`; a change to the interface updates the specification.
 - **Pack format:** the baker and runtime follow `docs/pack-format.md`. A change to the format updates the specification and, if it affects readers, its format version.
 - **Naming:** C functions use the `vgl_` prefix in snake case, object before action (`vgl_context_create`). Types use `vgl_` (`vgl_context`). Constants and macros use `VGL_`, then the type name, then the value (`VGL_RESULT_OUT_OF_MEMORY`). The C++ wrapper lives in namespace `vgl`.
 - **Library rules:** no exceptions across the API boundary, buildable without exceptions and RTTI, no global state, no threads or network connections created by the library, all allocations routable through host allocator callbacks.
