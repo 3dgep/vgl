@@ -5,6 +5,7 @@
  * Checks that the C API headers compile as C99 and that the base functions and
  * types follow docs/c-api.md.
  */
+#include <vgl/defaults.h>
 #include <vgl/vgl.h>
 
 #include <stdio.h>
@@ -93,12 +94,51 @@ static void check_version(void)
     CHECK(vgl_version_get(NULL, &minor, &patch) == VGL_RESULT_INVALID_ARGUMENT);
 }
 
+/* I/O that has no files: every read fails at once. */
+static void read_nothing(void* user_data, vgl_io_request* request, const vgl_io_read* read)
+{
+    int* reads = (int*)user_data;
+    (void)read;
+    ++*reads;
+    vgl_io_request_complete(request, VGL_RESULT_NOT_FOUND, NULL, 0);
+}
+
+static void check_context(void)
+{
+    int reads = 0;
+    vgl_io_interface io = {.version = VGL_IO_INTERFACE_VERSION};
+    vgl_context_create_info info = {.struct_size = sizeof(info)};
+    vgl_pack_create_info pack_info = {.struct_size = sizeof(pack_info)};
+    vgl_context* context = NULL;
+    vgl_pack* pack = NULL;
+    vgl_pack_state state = VGL_PACK_STATE_LOADING;
+    vgl_result failure = VGL_RESULT_SUCCESS;
+    double height = 0.0;
+
+    io.user_data = &reads;
+    io.read = read_nothing;
+    info.io = &io;
+    CHECK(vgl_context_create(&info, &context) == VGL_RESULT_SUCCESS);
+    pack_info.uri = "nowhere";
+    CHECK(vgl_pack_create(context, &pack_info, &pack) == VGL_RESULT_SUCCESS);
+    CHECK(reads == 1);
+    CHECK(vgl_context_update(context, NULL) == VGL_RESULT_SUCCESS);
+    CHECK(vgl_pack_state_get(pack, &state, &failure) == VGL_RESULT_SUCCESS);
+    CHECK(state == VGL_PACK_STATE_FAILED);
+    CHECK(failure == VGL_RESULT_NOT_FOUND);
+    CHECK(vgl_context_height_query(context, 0.0, 0.0, VGL_HEIGHT_REFERENCE_ELLIPSOID, &height) ==
+          VGL_RESULT_NOT_FOUND);
+    CHECK(vgl_pack_destroy(pack) == VGL_RESULT_SUCCESS);
+    CHECK(vgl_context_destroy(context) == VGL_RESULT_SUCCESS);
+}
+
 int main(void)
 {
     check_types();
     check_results();
     check_geodesy();
     check_version();
+    check_context();
 
     if (failures != 0)
     {

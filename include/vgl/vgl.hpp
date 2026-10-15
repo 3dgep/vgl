@@ -8,6 +8,7 @@
 #define VGL_VGL_HPP
 
 #include <vgl/base.hpp>
+#include <vgl/context.hpp>
 #include <vgl/foundation.hpp>
 #include <vgl/geodesy.hpp>
 

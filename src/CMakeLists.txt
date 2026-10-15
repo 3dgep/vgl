@@ -43,6 +43,7 @@ add_subdirectory(providers)
 add_subdirectory(decoders)
 add_subdirectory(mesh)
 add_subdirectory(render)
+add_subdirectory(context)
 
 add_library(vgl)
 add_library(vgl::vgl ALIAS vgl)

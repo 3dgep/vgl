@@ -155,6 +155,17 @@ parse_tile_header(std::span<const std::byte> tile, const manifest& m, tile_heade
                                             std::span<std::int16_t> q,
                                             std::span<std::byte> scratch) noexcept;
 
+// The same, without the manifest: for decoding on another thread, where the pack may be
+// destroyed meanwhile. step is the quantization step of the tile's level.
+[[nodiscard]] vgl_result decode_height_samples(std::span<const std::byte> tile,
+                                               const tile_header& header,
+                                               layer_type type,
+                                               std::uint32_t tile_size,
+                                               double step,
+                                               zstd_decompressor& decompressor,
+                                               std::span<std::int16_t> q,
+                                               std::span<std::byte> scratch) noexcept;
+
 // Shard file names, relative to the manifest (section 5.2). Return the number of characters
 // written, not counting the terminator, which is always written.
 inline constexpr std::size_t max_path_size = 48;

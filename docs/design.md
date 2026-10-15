@@ -205,7 +205,7 @@ Naming follows a fixed convention. Functions use lowercase snake case with the `
 
 All CPU-side geometry is double precision. The geodesy module provides conversions between geodetic coordinates, Earth-centred Earth-fixed (ECEF) coordinates and local East-North-Up frames, plus oriented bounding boxes and bounding spheres for tiles. The ellipsoid is a parameter rather than a constant, which costs nothing now and makes other bodies (the Moon, Mars) possible later.
 
-Terrain heights are stored relative to the WGS84 ellipsoid. A geoid model (EGM2008) lets the library convert to and from height above mean sea level, which users of height queries will usually expect. The geoid is baked from the official EGM2008 2.5′ grid into a geoid pack at 2.64′ spacing, a pack with its own layer type, and is loaded through the same providers as terrain ([pack format specification](pack-format.md), section 6.4). Until it has loaded, height queries report ellipsoidal heights only.
+Terrain heights are stored relative to the WGS84 ellipsoid. A geoid model (EGM2008) lets the library convert to and from height above mean sea level, which users of height queries will usually expect. The geoid is baked from the official EGM2008 2.5′ grid into a geoid pack at 2.64′ spacing, a pack with its own layer type, and is loaded through the same providers as terrain ([pack format specification](pack-format.md), section 6.4). A context uses at most one geoid pack. Until it has loaded, height queries report ellipsoidal heights only, and queries for heights above mean sea level return `VGL_RESULT_NOT_READY`.
 
 ### 7.3 Tiling scheme and level of detail
 
@@ -243,7 +243,9 @@ The library never spawns threads or opens sockets (NFR-02). The host supplies tw
 
 GPU uploads happen only on the render thread, in a budgeted step at the start of each frame.
 
-The optional defaults module provides a small thread pool and a filesystem reader, so the common case works without writing callbacks. The samples use these defaults.
+The optional defaults module provides a small thread pool and a filesystem reader, so the common case works without writing callbacks. The samples use these defaults. It is a separate library, `vgl::defaults`, that uses vgl only through the C API.
+
+A context may be destroyed while reads are outstanding or tasks are queued. The state those need is reference counted and outlives the context, so a late completion or task finds the context gone and frees itself; the host never has to drain its queues first (C API conventions, section 12).
 
 ### 7.6 Rendering
 
@@ -340,7 +342,7 @@ Sharding makes partial installs possible (only the regions a user needs), makes 
 
 **Indexing.** Each shard carries its own tile directory, and the runtime loads directories only for shards it is visiting. A flat global index of tens of millions of entries is never loaded. All offsets are 64-bit.
 
-**Layering.** The runtime stacks several packs per layer by priority (FR-05). A global base pack and regional high-resolution packs then combine without rebaking, and new data for an area is a new regional pack.
+**Layering.** The runtime stacks several packs per layer by priority (FR-05). A global base pack and regional high-resolution packs then combine without rebaking, and new data for an area is a new regional pack. Among packs of equal priority, the one added last wins. Where the highest-priority pack has nodata, the next one is used.
 
 ### 8.6 Data providers
 

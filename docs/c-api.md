@@ -318,9 +318,11 @@ Structures passed across the API can grow in later versions without breaking hos
 Every structure that may grow starts with a `uint32_t struct_size` field, which the caller sets to `sizeof` the structure. Every other field has a default that its zero value selects. The idiomatic initialization in C is therefore:
 
 ```c
-vgl_context_create_info info = {sizeof(info)};
+vgl_context_create_info info = {.struct_size = sizeof(info)};
 info.cpu_budget = 512u * 1024u * 1024u;
 ```
+
+The designated initializer zeroes the other fields like `{sizeof(info)}` does, but compilers do not warn about it with `-Wmissing-field-initializers` (part of `-Wextra`).
 
 Structures that are fixed by nature, such as `vgl_dvec3`, have no `struct_size` field and never change.
 
@@ -450,7 +452,7 @@ I/O and background work are asynchronous (design document, section 7.5). They fo
 3. The library may cancel a request through an optional `cancel` callback. The host must still complete a cancelled request, either normally or with `VGL_RESULT_CANCELLED`.
 4. A request handle is valid from the start callback until the host's completion call returns.
 
-Destroying a context with requests outstanding is an error: the host must complete them first. The details of each operation are specified with the foundation module.
+A context may be destroyed while requests are outstanding. It asks the host to cancel them through the `cancel` callback, if there is one, and the host still completes each of them, now or later; the library then discards the completion and frees the request. Neither side waits for the other, except that destroying a context waits for tasks that are running on host threads. The interfaces' `destroy` callbacks are called during context destruction, possibly before every request is completed, so a host that frees its I/O state there must first complete what it still holds. The details of each operation are specified with the foundation module (`vgl/foundation.h`).
 
 ---
 

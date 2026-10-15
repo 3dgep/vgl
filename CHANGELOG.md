@@ -48,6 +48,22 @@ The pack format has its own version number, independent of the library version.
 - Test bake report (`docs/test-bake.md`): sizes and bake times for GLO-30 over Norway, GEBCO
   and the geoid, and the decisions on tile size (129), deepest levels (12 for GLO-30, 8 for
   GEBCO) and shard level (`max_level` - 5).
+- Foundation: the I/O interface (`vgl_io_interface`, `vgl_io_read`, `vgl_io_request` and
+  `vgl_io_request_complete`) and the task interface (`vgl_task_interface`), with the C++
+  adapters `vgl::io_interface` and `vgl::task_interface`.
+- Context module: `vgl/context.h` with `vgl_context` (allocator, log, I/O, tasks, ellipsoid and
+  CPU cache budget), `vgl_context_update` with a time budget, packs (`vgl_pack_create`,
+  `vgl_pack_destroy`, `vgl_pack_state_get`) layered by priority, and
+  `vgl_context_height_query` for ellipsoidal heights and, with a geoid pack, heights above mean
+  sea level. Packs load through the I/O interface; tiles decode on the task interface or in the
+  update, and are evicted least recently used over the CPU budget. C++ wrapper in
+  `vgl/context.hpp`.
+- Defaults module (`vgl/defaults.h`, target `vgl::defaults`, pkg-config `vgl-defaults`): a
+  thread pool for the task interface and a filesystem reader for the I/O interface, which can
+  read on the pool. C++ wrapper in `vgl/defaults.hpp`.
+- Context tests with synchronous, deferred and threaded hosts, allocation accounting, failure
+  injection for every allocation, corrupt packs and the CPU budget; and tests of the defaults
+  module on packs written to disk.
 
 ### Changed
 
@@ -62,3 +78,6 @@ The pack format has its own version number, independent of the library version.
 - The baker's default shard level is `max_level` - 5, instead of 6.
 - On Android, a static `vgl` no longer adds `stdc++` to its link interface; the NDK's libc++ is
   linked by its toolchain.
+- C API conventions, section 12: a context may be destroyed while I/O requests are
+  outstanding. It cancels them, and the host completes them later, as before; the completions
+  are discarded. Previously this was an error.

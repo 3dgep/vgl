@@ -626,16 +626,32 @@ vgl_result decode_height_tile(std::span<const std::byte> tile,
                               std::span<std::byte> scratch) noexcept
 {
     const layer_description& l = m.layer();
-    const std::uint32_t size = l.tile_size;
-    const std::size_t count = static_cast<std::size_t>(size) * size;
-    if (!has_heights(l.type) || level < l.min_level || level > l.max_level || q.size() != count ||
-        scratch.size() != 2 * count)
+    if (!has_heights(l.type) || level < l.min_level || level > l.max_level)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    return decode_height_samples(
+        tile, header, l.type, l.tile_size, m.height_step(level), decompressor, q, scratch);
+}
+
+vgl_result decode_height_samples(std::span<const std::byte> tile,
+                                 const tile_header& header,
+                                 layer_type type,
+                                 std::uint32_t tile_size,
+                                 double step,
+                                 zstd_decompressor& decompressor,
+                                 std::span<std::int16_t> q,
+                                 std::span<std::byte> scratch) noexcept
+{
+    const std::size_t count = static_cast<std::size_t>(tile_size) * tile_size;
+    if (!has_heights(type) || q.size() != count || scratch.size() != 2 * count ||
+        header.header_size > tile.size())
     {
         return VGL_RESULT_INVALID_ARGUMENT;
     }
     // The scale is the level's step, and the offset a whole number of steps (section 6.2).
     const double steps = header.offset / header.scale;
-    if (header.scale != m.height_step(level) || !std::isfinite(steps) || std::trunc(steps) != steps)
+    if (header.scale != step || !std::isfinite(steps) || std::trunc(steps) != steps)
     {
         return VGL_RESULT_CORRUPT_DATA;
     }
@@ -644,8 +660,8 @@ vgl_result decode_height_tile(std::span<const std::byte> tile,
     {
         return result;
     }
-    elevation_decode_planes(scratch, size, q);
-    if (l.type == layer_type::geoid && std::find(q.begin(), q.end(), elevation_nodata) != q.end())
+    elevation_decode_planes(scratch, tile_size, q);
+    if (type == layer_type::geoid && std::find(q.begin(), q.end(), elevation_nodata) != q.end())
     {
         return VGL_RESULT_CORRUPT_DATA;
     }

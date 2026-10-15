@@ -8,7 +8,7 @@ Read `docs/design.md` before starting any task. It records the requirements, arc
 
 ## Status
 
-Planning is complete, and milestone M0 (design document, section 14) is done: all four steps below. The test bake report is `docs/test-bake.md`. The baker (`tools/baker`) already covers much of M1. The runtime loads packs, including the EGM2008 geoid pack, with the context in M2, which also adds the task and I/O callback interfaces of the foundation module. The steps were:
+Planning is complete, and milestone M0 (design document, section 14) is done: all four steps below. The test bake report is `docs/test-bake.md`. The baker (`tools/baker`) already covers much of M1. M2 has started: the context (`vgl/context.h`) loads packs, including the EGM2008 geoid pack, through the I/O interface, decodes tiles on the task interface, keeps them within a CPU budget and answers height queries. The defaults module (`vgl/defaults.h`) provides a thread pool and a file reader. Rendering, LOD selection and the backends come next. The M0 steps were:
 
 1. Repository setup: MIT `LICENSE`, `README.md` (goals and non-goals), `CONTRIBUTING.md` (coding style, DCO sign-off, review process), issue templates, `.clang-format`, `.clang-tidy`, a CMake skeleton following the module layout in section 6.2, and a GitHub Actions pipeline for Windows and Linux.
 2. Two specifications, written before implementation, in `docs/`: the C API conventions (section 7.1) and the pack format (sections 8.4 and 8.5).

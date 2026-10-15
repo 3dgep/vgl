@@ -15,6 +15,15 @@ install(TARGETS vgl
     ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
     INCLUDES DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 
+# The defaults module, as vgl::defaults in the same package.
+if(TARGET vgl_defaults)
+    install(TARGETS vgl_defaults
+        EXPORT vgl-targets
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+endif()
+
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/vgl"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 install(DIRECTORY "${PROJECT_BINARY_DIR}/include/vgl"
@@ -80,3 +89,18 @@ configure_file(
     @ONLY)
 install(FILES "${PROJECT_BINARY_DIR}/vgl.pc"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
+
+if(TARGET vgl_defaults)
+    # The defaults module uses threads; a static build passes that on.
+    if(UNIX AND NOT APPLE AND NOT ANDROID)
+        set(VGL_DEFAULTS_PC_LIBS_PRIVATE "-pthread")
+    else()
+        set(VGL_DEFAULTS_PC_LIBS_PRIVATE "")
+    endif()
+    configure_file(
+        "${PROJECT_SOURCE_DIR}/cmake/vgl-defaults.pc.in"
+        "${PROJECT_BINARY_DIR}/vgl-defaults.pc"
+        @ONLY)
+    install(FILES "${PROJECT_BINARY_DIR}/vgl-defaults.pc"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
+endif()
