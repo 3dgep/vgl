@@ -58,8 +58,9 @@ ctest --test-dir build
 ```
 
 `CMakePresets.json` (CMake 3.25 or later) has presets for the configurations CI builds: MSVC with
-the Visual Studio generator on Windows, and GCC and Clang with Ninja Multi-Config on Linux, each
-as a static, shared or no-exceptions build. A workflow preset configures, builds and tests in one
+the Visual Studio generator on Windows, GCC and Clang with Ninja Multi-Config on Linux, each as a
+static, shared or no-exceptions build, and Apple Clang on macOS. Cross-build presets cover Android
+(`android-arm64`, with `ANDROID_NDK` pointing at an NDK) and iOS (`ios-arm64`, on a Mac). A workflow preset configures, builds and tests in one
 step:
 
 ```sh

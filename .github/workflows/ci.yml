@@ -107,6 +107,54 @@ jobs:
           cc tests/api_c.c $(pkg-config --static --cflags --libs vgl) -o api_c_pkgconfig
           LD_LIBRARY_PATH="$PWD/install/lib" ./api_c_pkgconfig
 
+  macos:
+    name: ${{ matrix.name }}
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "macOS Apple Clang static Release", workflow: macos-clang-static-release }
+          - { name: "macOS Apple Clang shared Debug",   workflow: macos-clang-shared-debug }
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Ninja
+        run: brew install ninja
+
+      - name: Configure, build and test
+        run: cmake --workflow --preset ${{ matrix.workflow }}
+
+  android:
+    name: Android arm64 (cross-build)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      # The NDK version is pinned; the runner's SDK manager installs it.
+      - name: Install Ninja and the Android NDK
+        run: |
+          sudo apt-get update && sudo apt-get install -y ninja-build
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.2.12479018" > /dev/null
+          echo "ANDROID_NDK=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      # The tests are built for Android but not run: that needs an emulator.
+      - name: Configure and build
+        run: cmake --workflow --preset android-arm64-release
+
+  ios:
+    name: iOS arm64 (cross-build)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Ninja
+        run: brew install ninja
+
+      # The tests are built for iOS but not run: that needs a simulator build.
+      - name: Configure and build
+        run: cmake --workflow --preset ios-arm64-release
+
   baker-linux:
     name: Baker (Linux, system GDAL)
     runs-on: ubuntu-24.04

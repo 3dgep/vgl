@@ -65,8 +65,11 @@ if(BUILD_SHARED_LIBS)
 else()
     set(VGL_PC_CFLAGS "")
 endif()
-# A static vgl is C++, so C consumers linking it need the C++ runtime.
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT APPLE)
+# A static vgl is C++, so C consumers linking it need the C++ runtime. On
+# Android that is the NDK's libc++, which its toolchain links.
+if(ANDROID)
+    set(VGL_PC_LIBS_PRIVATE "-lm")
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT APPLE)
     set(VGL_PC_LIBS_PRIVATE "-lstdc++ -lm")
 else()
     set(VGL_PC_LIBS_PRIVATE "")

@@ -69,10 +69,12 @@ endif()
 
 # vgl uses the C math library, and a static vgl also needs the C++ runtime. A C
 # host links with the C linker, which adds neither, so both are part of the link
-# interface (and of Libs.private in vgl.pc).
+# interface (and of Libs.private in vgl.pc). Android's C++ runtime is libc++,
+# which the NDK's toolchain chooses (ANDROID_STL), so only libm is added there.
+# Apple's toolchains link libc++ themselves.
 if(UNIX AND NOT APPLE)
     target_link_libraries(vgl PRIVATE m)
-    if(NOT BUILD_SHARED_LIBS AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    if(NOT ANDROID AND NOT BUILD_SHARED_LIBS AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         target_link_libraries(vgl PRIVATE stdc++)
     endif()
 endif()

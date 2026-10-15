@@ -43,6 +43,8 @@ The pack format has its own version number, independent of the library version.
   `query` and `sample-tile`. Example configurations for the M1 test bake, a conda-forge
   environment for Windows, and baker presets and CI jobs for Linux and Windows.
 - Baker tests on synthetic surfaces: heights, seams, datum conversion, determinism and resuming.
+- macOS presets and CI jobs (built and tested), and Android arm64 and iOS arm64 cross-build
+  presets and CI jobs.
 - Test bake report (`docs/test-bake.md`): sizes and bake times for GLO-30 over Norway, GEBCO
   and the geoid, and the decisions on tile size (129), deepest levels (12 for GLO-30, 8 for
   GEBCO) and shard level (`max_level` - 5).
@@ -58,3 +60,5 @@ The pack format has its own version number, independent of the library version.
 - Pack format: writers quantize on the level's global grid of steps (section 6.2), so that ties
   round the same way in every tile, and the default height steps are 0.25 m up to level 9.
 - The baker's default shard level is `max_level` - 5, instead of 6.
+- On Android, a static `vgl` no longer adds `stdc++` to its link interface; the NDK's libc++ is
+  linked by its toolchain.
