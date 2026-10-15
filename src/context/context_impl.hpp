@@ -18,6 +18,8 @@
 #include "foundation/log.hpp"
 #include "geodesy/ellipsoid.hpp"
 #include "providers/pack_reader.hpp"
+#include "tiling/selection.hpp"
+#include "tiling/tile.hpp"
 
 #include <vgl/context.h>
 
@@ -62,6 +64,10 @@ struct tile_state
     pack::tile_header header;
     buffer<std::int16_t> q; // Quantized samples once ready.
     std::uint64_t last_used = 0;
+    // Range of the decoded heights, without nodata. min_height > max_height if every sample
+    // is nodata.
+    double min_height = 0.0;
+    double max_height = 0.0;
 
     [[nodiscard]] double height(std::size_t k) const noexcept
     {
@@ -85,10 +91,62 @@ struct decode_job : async_item
     buffer<std::int16_t> q;
     buffer<std::byte> scratch;
     vgl_result result = VGL_RESULT_SUCCESS;
+    double min_height = 0.0;
+    double max_height = 0.0;
 
-    // Decodes bytes into q, then frees the bytes and scratch.
+    // Decodes bytes into q and finds the height range, then frees the bytes and scratch.
     void run() noexcept;
 };
+
+// A tile chosen for drawing (design document, section 7.3).
+struct selected_tile
+{
+    tile_id id;
+    tile_id source;            // The tile whose data draws it: itself, or an ancestor.
+    std::uint32_t pack_id = 0; // Pack of the source; 0 for the bare ellipsoid.
+    double min_height = 0.0;
+    double max_height = 0.0;
+};
+
+// A tile that selection wants loaded.
+struct load_request
+{
+    std::uint32_t pack_id = 0;
+    tile_id id;
+    double screen_space_error = 0.0;
+};
+
+// Bounding box of a tile for a height range, kept between frames.
+struct cached_box
+{
+    oriented_box box;
+    dvec3 horizon_point; // In the horizon occluder's scaled space, if has_horizon_point.
+    bool has_horizon_point = false;
+    double min_height = 0.0;
+    double max_height = 0.0;
+    std::uint64_t last_used = 0;
+};
+
+enum class availability : std::uint8_t
+{
+    absent,  // The pack has no such tile.
+    wanted,  // It may exist, and no read for it has started; only when not starting reads.
+    pending, // It is loading.
+    ready,
+};
+
+// Finds a tile in a pack. With start, it starts the reads the tile needs; without, it reports
+// availability::wanted instead. error receives VGL_RESULT_OUT_OF_MEMORY if a read could not
+// start.
+availability find_tile(vgl_context& ctx,
+                       vgl_pack& p,
+                       const tile_id& t,
+                       tile_state*& out,
+                       vgl_result& error,
+                       bool start = true) noexcept;
+
+// Selects tiles for the context's view and starts the reads they need.
+void select_tiles(vgl_context& ctx) noexcept;
 
 } // namespace vgl::internal
 
@@ -111,7 +169,8 @@ struct vgl_pack
 struct vgl_context
 {
     explicit vgl_context(const vgl::internal::allocator& a) noexcept
-        : memory(a), decompressor(a), outstanding(a), packs(a), pending(a)
+        : memory(a), decompressor(a), outstanding(a), packs(a), pending(a), selected(a), wanted(a),
+          boxes(a)
     {
     }
 
@@ -134,6 +193,12 @@ struct vgl_context
     std::uint64_t next_order = 1;
     vgl::internal::vector<vgl::internal::decode_job*> pending; // Waiting for an update to decode.
     std::uint64_t frame = 1;
+
+    bool has_view = false;
+    vgl::internal::view_state view;
+    vgl::internal::vector<vgl::internal::selected_tile> selected; // For the view, this frame.
+    vgl::internal::vector<vgl::internal::load_request> wanted;
+    vgl::internal::u64_map<vgl::internal::cached_box> boxes; // By tile key.
 };
 
 #endif // VGL_CONTEXT_CONTEXT_IMPL_HPP

@@ -215,6 +215,17 @@ Tile selection uses screen-space error: a tile is refined when its geometric err
 
 Pyramids are sparse. High resolution exists only where the source data supports it, and each tile carries a child-existence mask so the runtime knows whether refining is possible.
 
+#### Selection
+
+Before each update, the host sets its view with `vgl_context_view_set`: a view matrix from ECEF to camera space, a projection matrix and the viewport size, all in double precision. The update then selects tiles for it; without a view, nothing is selected. Selection derives everything else from these, and is independent of handedness and depth convention: it culls against the four side planes of the frustum and the plane through the eye, and ignores the near and far planes, which differ between OpenGL, Direct3D, reversed and infinite projections. The eye position comes from the inverse of the view matrix.
+
+- **Geometric error.** The error of drawing a tile at level *L* instead of its children is its sample spacing at the equator, *a* · Δλ / (*n* − 1), for tile span Δλ in radians and *n* samples per side.
+- **Screen-space error.** The geometric error times *P*₁₁ · *H* / (2*d*), for projection element *P*₁₁, viewport height *H* in pixels and distance *d* from the eye to the tile's bounding box; an orthographic projection drops *d*. A tile is refined when this exceeds `vgl_view::max_screen_space_error`, 2 pixels by default.
+- **Bounds.** A loaded tile is bounded by its own decoded heights, a tile not yet loaded by the child bounds in its parent, and a root tile by a conservative range for the Earth, −11,500 m to 9,000 m. Bounding boxes are cached, since a level-0 box takes tens of thousands of conversions to compute.
+- **Horizon culling.** A tile is culled when its whole bounding box is hidden behind the ellipsoid lowered to the lowest possible height, tested in the scaled space where that ellipsoid is a unit sphere. The hidden region is convex, so testing the box's corners suffices.
+- **Refinement.** A tile is refined only once its own data has loaded, so detail arrives level by level without holes. Until a child has loaded, it is drawn from its nearest loaded ancestor. A child that no pack contains is drawn the same way, and a region no pack covers is drawn as the bare ellipsoid. With several packs, a tile's data comes from the highest-priority pack that has loaded it, and a child exists if any pack has it.
+- **Loading.** Selection requests the tiles it needs, coarser levels first and then larger screen-space errors first, with a cap on outstanding reads. Selected tiles count as used in the frame, so eviction keeps them.
+
 ### 7.4 Tile lifecycle, cache and memory
 
 Each tile moves through a fixed state machine:

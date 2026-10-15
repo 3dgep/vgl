@@ -449,6 +449,8 @@ void handle_decoded(vgl_context& ctx, decode_job* job) noexcept
         if (job->result == VGL_RESULT_SUCCESS)
         {
             t->q = std::move(job->q);
+            t->min_height = job->min_height;
+            t->max_height = job->max_height;
             t->current = tile_state::state::ready;
             t->last_used = ctx.frame;
             ctx.cpu_used += t->q.size() * sizeof(std::int16_t);
@@ -524,16 +526,14 @@ void evict(vgl_context& ctx) noexcept
 
 // --- Queries -------------------------------------------------------------------------------
 
-enum class availability : std::uint8_t
-{
-    absent,  // The pack has no such tile.
-    pending, // It is loading.
-    ready,
-};
+} // namespace
 
-// Finds a tile, starting the reads it needs.
-availability find_tile(
-    vgl_context& ctx, vgl_pack& p, const tile_id& t, tile_state*& out, vgl_result& error) noexcept
+availability find_tile(vgl_context& ctx,
+                       vgl_pack& p,
+                       const tile_id& t,
+                       tile_state*& out,
+                       vgl_result& error,
+                       bool start) noexcept
 {
     const pk::layer_description& l = p.manifest.layer();
     if (t.level < l.min_level || t.level > l.max_level)
@@ -551,6 +551,14 @@ availability find_tile(
     }
     if (s == nullptr)
     {
+        if (!start)
+        {
+            // Whether the shard exists is in the manifest; whether the tile does, in the shard.
+            pk::shard_entry e;
+            const bool exists = loc.in_base ? p.manifest.has_base()
+                                            : p.manifest.find_shard(loc.root.x, loc.root.y, e);
+            return exists ? availability::wanted : availability::absent;
+        }
         shard_state fresh;
         std::array<char, pk::max_path_size> name{};
         std::size_t length = 0;
@@ -618,6 +626,10 @@ availability find_tile(
     }
     if (tile == nullptr)
     {
+        if (!start)
+        {
+            return availability::wanted;
+        }
         tile = p.tiles.insert(key, tile_state{});
         if (tile == nullptr)
         {
@@ -648,6 +660,9 @@ availability find_tile(
     out = tile;
     return availability::ready;
 }
+
+namespace
+{
 
 struct sample
 {
@@ -718,6 +733,22 @@ void decode_job::run() noexcept
         result = pack::decode_height_samples(
             bytes.span(), header, type, tile_size, step, *d, q.span(), scratch.span());
         core->release_decompressor(d);
+    }
+    if (result == VGL_RESULT_SUCCESS)
+    {
+        std::int16_t lo = std::numeric_limits<std::int16_t>::max();
+        std::int16_t hi = std::numeric_limits<std::int16_t>::min();
+        for (const std::int16_t v : q.span())
+        {
+            if (v != elevation_nodata)
+            {
+                lo = std::min(lo, v);
+                hi = std::max(hi, v);
+            }
+        }
+        // With every sample nodata, lo > hi, and so is the range.
+        min_height = header.offset + header.scale * lo;
+        max_height = header.offset + header.scale * hi;
     }
     bytes = buffer<std::byte>();
     scratch = buffer<std::byte>();
@@ -987,7 +1018,12 @@ extern "C" VGL_API vgl_result vgl_context_update(vgl_context* context, const vgl
         }
     }
 
-    // The frame ends here: what queries used since the last update is kept.
+    if (ctx->has_view)
+    {
+        select_tiles(*ctx);
+    }
+
+    // The frame ends here: what queries and selection used since the last update is kept.
     evict(*ctx);
     ++ctx->frame;
     return VGL_RESULT_SUCCESS;

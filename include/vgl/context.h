@@ -90,9 +90,52 @@ typedef struct vgl_update_info
     double time_budget;
 } vgl_update_info;
 
+/* ---------------------------------------------------------------------------------------- */
+/* View and update                                                                          */
+/* ---------------------------------------------------------------------------------------- */
+
+/*
+ * A view of the globe, for tile selection (design document, section 7.3). Matrices are
+ * column-major and multiply column vectors (vgl_dmat4); hosts that use row vectors pass their
+ * matrices transposed. Any handedness and any depth mapping work: OpenGL or Direct3D clip
+ * space, reversed or infinite projections.
+ */
+typedef struct vgl_view
+{
+    uint32_t struct_size;
+    uint32_t reserved;
+    /* From ECEF to camera space. Must be invertible. */
+    vgl_dmat4 view_matrix;
+    /* From camera space to clip space: perspective or orthographic. */
+    vgl_dmat4 projection_matrix;
+    /* Size of the render target in pixels. Both must be at least 1. */
+    uint32_t viewport_width;
+    uint32_t viewport_height;
+    /* Largest screen-space error of a selected tile, in pixels. 0 selects 2. */
+    double max_screen_space_error;
+} vgl_view;
+
+/**
+ * Sets the view that vgl_context_update selects tiles for. The view is copied.
+ *
+ * @param context  The context.
+ * @param view     The view, or null to stop selecting tiles.
+ *
+ * @retval VGL_RESULT_SUCCESS           The view was set.
+ * @retval VGL_RESULT_INVALID_ARGUMENT  context is null, or view is invalid: a matrix element
+ *                                      is not finite, the view matrix is not invertible, the
+ *                                      viewport is empty, or the error is negative.
+ * @retval VGL_RESULT_NOT_SUPPORTED     view has fields from a newer version set.
+ *
+ * @par Thread safety
+ * Context-synchronized.
+ */
+VGL_API vgl_result vgl_context_view_set(vgl_context* context, const vgl_view* view);
+
 /**
  * Advances loading: processes completed reads and tasks, decodes (when there is no task
- * interface) within the time budget, and evicts decoded tiles beyond the CPU budget.
+ * interface) within the time budget, selects tiles for the view and requests the ones that
+ * are missing, and evicts decoded tiles beyond the CPU budget.
  *
  * @param context  The context.
  * @param info     Optional. Null selects the defaults.

@@ -61,6 +61,12 @@ The pack format has its own version number, independent of the library version.
 - Defaults module (`vgl/defaults.h`, target `vgl::defaults`, pkg-config `vgl-defaults`): a
   thread pool for the task interface and a filesystem reader for the I/O interface, which can
   read on the pool. C++ wrapper in `vgl/defaults.hpp`.
+- Tile selection (design document, section 7.3): `vgl_view` and `vgl_context_view_set` set the
+  camera, and each update selects tiles by screen-space error with frustum and horizon
+  culling, refines only from loaded data, and requests missing tiles coarsest first with a
+  cap on outstanding reads. Selected tiles are kept from eviction. The selection geometry is
+  in `src/tiling/selection.hpp`; the selected tiles are internal until the backend interface
+  exposes them.
 - Context tests with synchronous, deferred and threaded hosts, allocation accounting, failure
   injection for every allocation, corrupt packs and the CPU budget; and tests of the defaults
   module on packs written to disk.

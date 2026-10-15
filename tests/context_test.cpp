@@ -7,6 +7,7 @@
 
 #include "context/context_impl.hpp"
 #include "test_packs.hpp"
+#include "test_views.hpp"
 #include "vgl_test.hpp"
 
 #include <vgl/context.h>
@@ -707,4 +708,184 @@ TEST_CASE(allocation_failures_never_leak_or_crash)
             break; // Every allocation of the scenario has been failed once.
         }
     }
+}
+
+namespace
+{
+
+// A camera at an altitude above a position in degrees, looking straight down.
+vgl_view camera_over(double lat, double lon, double altitude)
+{
+    const ellipsoid e;
+    const dvec3 eye = e.to_ecef({radians(lat), radians(lon), altitude});
+    const dvec3 ground = e.to_ecef({radians(lat), radians(lon), 0.0});
+    const dvec3 up = std::fabs(lat) < 80.0 ? dvec3{0.0, 0.0, 1.0} : dvec3{1.0, 0.0, 0.0};
+    return make_view(look_at(eye, ground, up), perspective_gl(radians(60.0), 16.0 / 9.0, 1.0, 1e9));
+}
+
+// Updates until nothing is loading. Returns the number of updates.
+int settle(vgl_context* ctx, const memory_io& io)
+{
+    int updates = 0;
+    std::size_t reads = 0;
+    do
+    {
+        reads = io.uris.size();
+        for (int i = 0; i < 3; ++i)
+        {
+            CHECK_EQ(vgl_context_update(ctx, nullptr), VGL_RESULT_SUCCESS);
+            ++updates;
+        }
+    } while (io.uris.size() != reads && updates < 300);
+    return updates;
+}
+
+bool is_ancestor(const tile_id& a, const tile_id& b)
+{
+    return a.level < b.level && tile_ancestor(b, a.level) == a;
+}
+
+// No selected tile overlaps another.
+bool disjoint(const vector<selected_tile>& tiles)
+{
+    for (const selected_tile& a : tiles)
+    {
+        for (const selected_tile& b : tiles)
+        {
+            if (&a != &b && (a.id == b.id || is_ancestor(a.id, b.id)))
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+} // namespace
+
+TEST_CASE(view_set_validates_its_input)
+{
+    vgl_context* ctx = nullptr;
+    REQUIRE(vgl_context_create(nullptr, &ctx) == VGL_RESULT_SUCCESS);
+    vgl_view v = camera_over(0.0, 0.0, 1e7);
+    CHECK_EQ(vgl_context_view_set(nullptr, &v), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_context_view_set(ctx, &v), VGL_RESULT_SUCCESS);
+    CHECK(ctx->has_view);
+    vgl_view bad = v;
+    bad.struct_size = 8;
+    CHECK_EQ(vgl_context_view_set(ctx, &bad), VGL_RESULT_INVALID_ARGUMENT);
+    bad = v;
+    bad.viewport_width = 0;
+    CHECK_EQ(vgl_context_view_set(ctx, &bad), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_context_view_set(ctx, nullptr), VGL_RESULT_SUCCESS);
+    CHECK(!ctx->has_view);
+    REQUIRE(vgl_context_update(ctx, nullptr) == VGL_RESULT_SUCCESS);
+    CHECK(ctx->selected.empty());
+    CHECK_EQ(vgl_context_destroy(ctx), VGL_RESULT_SUCCESS);
+}
+
+TEST_CASE(without_packs_the_ellipsoid_is_selected)
+{
+    vgl_context* ctx = nullptr;
+    REQUIRE(vgl_context_create(nullptr, &ctx) == VGL_RESULT_SUCCESS);
+    const vgl_view v = camera_over(0.0, 0.0, 2e7);
+    REQUIRE(vgl_context_view_set(ctx, &v) == VGL_RESULT_SUCCESS);
+    REQUIRE(vgl_context_update(ctx, nullptr) == VGL_RESULT_SUCCESS);
+    CHECK_EQ(ctx->selected.size(), 2u);
+    for (const selected_tile& t : ctx->selected)
+    {
+        CHECK_EQ(t.id.level, 0u);
+        CHECK_EQ(t.pack_id, 0u);
+    }
+    CHECK_EQ(vgl_context_destroy(ctx), VGL_RESULT_SUCCESS);
+}
+
+TEST_CASE(selection_refines_where_data_has_loaded)
+{
+    const test_pack pack = make_pack();
+    memory_io io;
+    io.packs["mem://a"] = &pack;
+    vgl_context_create_info info = context_info();
+    info.io = &io.table;
+    vgl_context* ctx = nullptr;
+    REQUIRE(vgl_context_create(&info, &ctx) == VGL_RESULT_SUCCESS);
+    vgl_pack* p = add_pack(ctx, "mem://a");
+
+    // Low over the middle of tile (3, 6, 2): only that tile is in view, at its finest level.
+    const tile_id deep{3, 6, 2};
+    const position centre = inside(deep, 0.5, 0.5);
+    vgl_view v = camera_over(centre.lat, centre.lon, 50000.0);
+    REQUIRE(vgl_context_view_set(ctx, &v) == VGL_RESULT_SUCCESS);
+    settle(ctx, io);
+    REQUIRE(ctx->selected.size() == 1);
+    CHECK(ctx->selected[0].id == deep);
+    CHECK(ctx->selected[0].source == deep);
+    CHECK_EQ(ctx->selected[0].pack_id, p->id);
+
+    // From far away, half the globe is in view. Tiles cover it without overlapping, and none
+    // lies wholly behind the horizon, about 75 degrees from the centre of the view.
+    v = camera_over(0.0, 0.0, 2e7);
+    REQUIRE(vgl_context_view_set(ctx, &v) == VGL_RESULT_SUCCESS);
+    settle(ctx, io);
+    CHECK(ctx->selected.size() > 2);
+    CHECK(disjoint(ctx->selected));
+    bool drawn_from_ancestor = false;
+    for (const selected_tile& t : ctx->selected)
+    {
+        const degree_region b = tile_bounds(t.id);
+        CHECK(b.west < 80.0 && b.east > -80.0);
+        CHECK_EQ(t.pack_id, p->id);
+        drawn_from_ancestor = drawn_from_ancestor || !(t.source == t.id);
+    }
+    // Children the pack lacks are drawn from their parents.
+    CHECK(drawn_from_ancestor);
+
+    // The selection is the same in every frame.
+    std::vector<selected_tile> before(ctx->selected.begin(), ctx->selected.end());
+    REQUIRE(vgl_context_update(ctx, nullptr) == VGL_RESULT_SUCCESS);
+    REQUIRE(ctx->selected.size() == before.size());
+    for (std::size_t i = 0; i < before.size(); ++i)
+    {
+        CHECK(ctx->selected[i].id == before[i].id);
+    }
+
+    CHECK_EQ(vgl_pack_destroy(p), VGL_RESULT_SUCCESS);
+    CHECK_EQ(vgl_context_destroy(ctx), VGL_RESULT_SUCCESS);
+}
+
+TEST_CASE(selected_tiles_are_not_evicted)
+{
+    const test_pack pack = make_pack();
+    memory_io io;
+    io.packs["mem://a"] = &pack;
+    vgl_context_create_info info = context_info();
+    info.io = &io.table;
+    info.cpu_budget = 1;
+    vgl_context* ctx = nullptr;
+    REQUIRE(vgl_context_create(&info, &ctx) == VGL_RESULT_SUCCESS);
+    vgl_pack* p = add_pack(ctx, "mem://a");
+    const position centre = inside({3, 7, 3}, 0.5, 0.5);
+    const vgl_view v = camera_over(centre.lat, centre.lon, 50000.0);
+    REQUIRE(vgl_context_view_set(ctx, &v) == VGL_RESULT_SUCCESS);
+    settle(ctx, io);
+    REQUIRE(ctx->selected.size() == 1);
+    CHECK(ctx->selected[0].source == (tile_id{3, 7, 3}));
+
+    // The view keeps its tiles and their ancestors; nothing is read again.
+    const std::size_t reads = io.uris.size();
+    for (int i = 0; i < 10; ++i)
+    {
+        REQUIRE(vgl_context_update(ctx, nullptr) == VGL_RESULT_SUCCESS);
+    }
+    CHECK_EQ(io.uris.size(), reads);
+    CHECK(ctx->selected[0].source == (tile_id{3, 7, 3}));
+    CHECK(ctx->cpu_used > 0);
+
+    // Without a view, they go.
+    REQUIRE(vgl_context_view_set(ctx, nullptr) == VGL_RESULT_SUCCESS);
+    REQUIRE(vgl_context_update(ctx, nullptr) == VGL_RESULT_SUCCESS);
+    REQUIRE(vgl_context_update(ctx, nullptr) == VGL_RESULT_SUCCESS);
+    CHECK_EQ(ctx->cpu_used, 0u);
+    CHECK_EQ(vgl_pack_destroy(p), VGL_RESULT_SUCCESS);
+    CHECK_EQ(vgl_context_destroy(ctx), VGL_RESULT_SUCCESS);
 }

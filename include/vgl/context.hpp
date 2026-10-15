@@ -86,7 +86,14 @@ public:
         static_cast<void>(vgl_context_destroy(std::exchange(handle_, handle)));
     }
 
-    // Takes completed work and decodes within the time budget. info may be null.
+    // Sets the view that update selects tiles for; null stops selection.
+    [[nodiscard]] result view_set(const vgl_view* view) noexcept
+    {
+        return static_cast<result>(vgl_context_view_set(handle_, view));
+    }
+
+    // Takes completed work, decodes within the time budget, and selects tiles for the view.
+    // info may be null.
     [[nodiscard]] result update(const vgl_update_info* info = nullptr) noexcept
     {
         return static_cast<result>(vgl_context_update(handle_, info));

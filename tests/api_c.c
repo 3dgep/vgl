@@ -37,6 +37,8 @@ static void check_types(void)
     CHECK(offsetof(vgl_allocator_interface, user_data) == 8);
     CHECK(sizeof(vgl_allocator_interface) == 8 + 3 * sizeof(void*));
     CHECK(sizeof(vgl_log_level) == 4);
+    CHECK(offsetof(vgl_view, view_matrix) == 8);
+    CHECK(sizeof(vgl_view) == 8 + 2 * sizeof(vgl_dmat4) + 8 + 8);
 }
 
 static void check_results(void)
@@ -114,6 +116,7 @@ static void check_context(void)
     vgl_pack_state state = VGL_PACK_STATE_LOADING;
     vgl_result failure = VGL_RESULT_SUCCESS;
     double height = 0.0;
+    vgl_view view = {.struct_size = sizeof(view)};
 
     io.user_data = &reads;
     io.read = read_nothing;
@@ -128,6 +131,17 @@ static void check_context(void)
     CHECK(failure == VGL_RESULT_NOT_FOUND);
     CHECK(vgl_context_height_query(context, 0.0, 0.0, VGL_HEIGHT_REFERENCE_ELLIPSOID, &height) ==
           VGL_RESULT_NOT_FOUND);
+
+    /* An identity view looks down -z from the centre of the Earth, which is valid. */
+    view.view_matrix.m[0] = view.view_matrix.m[5] = view.view_matrix.m[10] = 1.0;
+    view.view_matrix.m[15] = 1.0;
+    view.projection_matrix = view.view_matrix;
+    view.viewport_width = 640;
+    view.viewport_height = 480;
+    CHECK(vgl_context_view_set(context, &view) == VGL_RESULT_SUCCESS);
+    CHECK(vgl_context_update(context, NULL) == VGL_RESULT_SUCCESS);
+    CHECK(vgl_context_view_set(context, NULL) == VGL_RESULT_SUCCESS);
+
     CHECK(vgl_pack_destroy(pack) == VGL_RESULT_SUCCESS);
     CHECK(vgl_context_destroy(context) == VGL_RESULT_SUCCESS);
 }
