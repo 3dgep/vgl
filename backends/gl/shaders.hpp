@@ -91,6 +91,7 @@ uniform int u_debug;              // The flags.
 uniform float u_level;            // The tile's level.
 uniform float u_imagery_coarser;  // Levels by which the top layer is coarser than the tile.
 uniform int u_wire;               // 1 in the wireframe pass.
+uniform float u_contour_interval; // Metres between contour lines.
 
 layout(location = 0) out vec4 o_color;
 
@@ -142,19 +143,19 @@ void main()
     float diffuse = max(dot(n, l), 0.0);
     // The height colours show where no imagery covers the terrain.
     vec3 albedo = height_color(v_height);
-    if (u_layer_count > 0)
+    if (u_layer_count > 0 && (u_debug & 8) == 0)
     {
         albedo = blend(albedo, u_layer0, u_layer_uv[0], u_layer_opacity.x);
     }
-    if (u_layer_count > 1)
+    if (u_layer_count > 1 && (u_debug & 8) == 0)
     {
         albedo = blend(albedo, u_layer1, u_layer_uv[1], u_layer_opacity.y);
     }
-    if (u_layer_count > 2)
+    if (u_layer_count > 2 && (u_debug & 8) == 0)
     {
         albedo = blend(albedo, u_layer2, u_layer_uv[2], u_layer_opacity.z);
     }
-    if (u_layer_count > 3)
+    if (u_layer_count > 3 && (u_debug & 8) == 0)
     {
         albedo = blend(albedo, u_layer3, u_layer_uv[3], u_layer_opacity.w);
     }
@@ -179,10 +180,20 @@ void main()
             albedo = mix(albedo, vec3(1.0, 0.5, 0.0), min(0.25 + 0.2 * u_imagery_coarser, 0.8));
         }
     }
+    if ((u_debug & 16) != 0)
+    {
+        // The distance to the nearest contour in pixels, from the height's screen gradient,
+        // so that lines keep their width at every distance.
+        float x = v_height / u_contour_interval;
+        float pixels = abs(fract(x - 0.5) - 0.5) / max(fwidth(x), 1e-6);
+        bool major = abs(mod(floor(x + 0.5), 5.0)) < 0.5;
+        float coverage = 1.0 - clamp(pixels - (major ? 1.0 : 0.5), 0.0, 1.0);
+        albedo = mix(albedo, major ? vec3(0.08, 0.05, 0.02) : vec3(0.2, 0.15, 0.1), coverage * 0.85);
+    }
     o_color = vec4(albedo * (0.3 + 0.7 * diffuse), 1.0);
     if (u_wire != 0)
     {
-        o_color = vec4(0.02, 0.02, 0.02, 1.0);
+        o_color = vec4(0.3, 1.0, 0.95, 1.0); // Bright cyan: clear on dark and light ground.
     }
 #ifdef VGL_LOGARITHMIC_DEPTH
     gl_FragDepth = log2(v_log_depth) * u_log_depth * 0.5;

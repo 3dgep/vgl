@@ -139,6 +139,18 @@ The pack format has its own version number, independent of the library version.
   `VGL_GL_DEBUG_FLAG_WIREFRAME` (OpenGL only), `VGL_GL_DEBUG_FLAG_LEVEL_COLORS` (a tint per
   tile level, with tile borders) and `VGL_GL_DEBUG_FLAG_IMAGERY_SOURCE` (imagery coarser than
   the tile, or missing). The polygon mode is saved and restored when the wireframe is drawn.
+- Elevation views in the OpenGL backend: `VGL_GL_DEBUG_FLAG_HEIGHT_COLORS` (colours by height
+  instead of imagery) and `VGL_GL_DEBUG_FLAG_CONTOURS`, with
+  `vgl_gl_draw_info::contour_interval` (500 m by default, every fifth line heavier). The OpenGL
+  sample turns them on with F6 and F7, with an interval that follows the altitude or a slider.
+- Navigation in the style of Google Earth for every interactive sample, in the samples' shared
+  library `vgl_sample_common` (`samples/common/navigation.hpp`), used first by the OpenGL sample:
+  grabbing the globe with inertia, smooth zooms to the point under the cursor (also by
+  double-click and right drag), orbiting and tilting about the point at the centre, looking
+  around, keys to move, turn, tilt and zoom, and N, U and R to turn north up and look straight
+  down. Its check verifies that grabbed points, zoom targets and orbit pivots stay in place to
+  within a pixel, that tilting stops at its limit, and that the camera stays above the ground.
+- The wireframe debug view is drawn in bright cyan, which shows against dark and light ground.
 - The OpenGL sample's overlay, with Dear ImGui 1.92.9b (downloaded at a pinned hash, sample
   only): the context's statistics with memory against the budgets and a frame-time graph, the
   credits, the camera, the debug views, a frozen selection with the frozen frustum outlined,

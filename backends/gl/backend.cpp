@@ -105,6 +105,7 @@ struct vgl_gl_backend
     GLint u_level = -1;
     GLint u_imagery_coarser = -1;
     GLint u_wire = -1;
+    GLint u_contour_interval = -1;
     std::array<GLint, max_layers> u_layers = {-1, -1, -1, -1};
 
     vgl::common::pointer_map<gl_resource> resources;
@@ -212,6 +213,7 @@ vgl_result build_program(vgl_gl_backend& b, const char* function)
     b.u_level = gl.GetUniformLocation(program, "u_level");
     b.u_imagery_coarser = gl.GetUniformLocation(program, "u_imagery_coarser");
     b.u_wire = gl.GetUniformLocation(program, "u_wire");
+    b.u_contour_interval = gl.GetUniformLocation(program, "u_contour_interval");
     const std::array<const char*, max_layers> names = {
         "u_layer0", "u_layer1", "u_layer2", "u_layer3"};
     for (std::uint32_t k = 0; k < max_layers; ++k)
@@ -618,6 +620,8 @@ void draw_items(const vgl_gl_backend& b,
     gl.UniformMatrix4fv(b.u_projection, 1, GL_FALSE, to_float(projection).data());
     gl.Uniform1i(b.u_debug, static_cast<GLint>(info.debug_flags));
     gl.Uniform1i(b.u_wire, 0);
+    gl.Uniform1f(b.u_contour_interval,
+                 static_cast<GLfloat>(info.contour_interval > 0.0 ? info.contour_interval : 500.0));
 
     // The sun in camera space: only the view's rotation applies to a direction.
     std::array<double, 3> light{};
@@ -909,15 +913,17 @@ extern "C" VGL_GL_API vgl_result vgl_gl_backend_draw(vgl_gl_backend* backend,
             "negative far distance");
         return VGL_RESULT_INVALID_ARGUMENT;
     }
-    constexpr std::uint32_t known_flags = VGL_GL_DEBUG_FLAG_WIREFRAME |
-                                          VGL_GL_DEBUG_FLAG_LEVEL_COLORS |
-                                          VGL_GL_DEBUG_FLAG_IMAGERY_SOURCE;
-    if ((info.debug_flags & ~known_flags) != 0 || info.reserved != 0)
+    constexpr std::uint32_t known_flags =
+        VGL_GL_DEBUG_FLAG_WIREFRAME | VGL_GL_DEBUG_FLAG_LEVEL_COLORS |
+        VGL_GL_DEBUG_FLAG_IMAGERY_SOURCE | VGL_GL_DEBUG_FLAG_HEIGHT_COLORS |
+        VGL_GL_DEBUG_FLAG_CONTOURS;
+    if ((info.debug_flags & ~known_flags) != 0 || info.reserved != 0 ||
+        !std::isfinite(info.contour_interval) || info.contour_interval < 0.0)
     {
         log(b,
             VGL_LOG_LEVEL_ERROR,
-            "vgl_gl_backend_draw: info->debug_flags has unknown flags, or info->reserved is not "
-            "zero");
+            "vgl_gl_backend_draw: info->debug_flags has unknown flags, info->reserved is not "
+            "zero, or info->contour_interval is negative or not finite");
         return VGL_RESULT_INVALID_ARGUMENT;
     }
     if (!b.ready)

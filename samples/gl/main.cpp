@@ -8,11 +8,14 @@
 //   vgl-gl [--data <directory>] [--es] [--egl] [--depth logarithmic|reversed|conventional]
 //          [--check] [--save <directory>]
 //
-// Controls: drag with the left button to move, with the right button to turn and tilt, scroll
-// to climb or descend; 1 to 6 jump to places; L switches between sunlight and a headlight. A
-// panel shows the context's statistics and the debug views: F1 shows or hides it, F2 the
-// wireframe, F3 colours by tile level, F4 the imagery source, and F5 freezes the selection,
-// so that tiles are selected for the frozen camera while you fly around it.
+// Controls, as in Google Earth (samples/common/navigation.hpp, shared by the samples): drag to grab
+// the globe, scroll or double-click to zoom to the cursor, shift-drag or middle-drag to orbit and
+// tilt, ctrl-drag to look around, right-drag to zoom; arrows move, with shift they turn and tilt,
+// page up and down zoom; N turns north up, U looks straight down, R does both. 1 to 6 jump to
+// places, and L switches between sunlight and a headlight. A panel shows the context's statistics
+// and the debug views: F1 shows or hides it, F2 the wireframe, F3 colours by tile level, F4 the
+// imagery source, F5 freezes the selection, so that tiles are selected for the frozen camera while
+// you fly around it, F6 colours by height instead of imagery, and F7 draws contour lines.
 //
 // With --check, the sample runs hidden: it flies to a few views with each depth convention
 // the device supports, and checks what it draws, that the conventions agree, that OpenGL
@@ -21,6 +24,7 @@
 // PPM files.
 
 #define GLFW_INCLUDE_NONE
+#include "navigation.hpp"
 #include "overlay.hpp"
 #include "sample_camera.hpp"
 
@@ -306,8 +310,28 @@ vgl::result draw(vgl::gl_backend& backend, const scene& s, int width, int height
     info.debug_flags =
         (s.debug.wireframe ? std::uint32_t{VGL_GL_DEBUG_FLAG_WIREFRAME} : 0u) |
         (s.debug.level_colors ? std::uint32_t{VGL_GL_DEBUG_FLAG_LEVEL_COLORS} : 0u) |
-        (s.debug.imagery_source ? std::uint32_t{VGL_GL_DEBUG_FLAG_IMAGERY_SOURCE} : 0u);
+        (s.debug.imagery_source ? std::uint32_t{VGL_GL_DEBUG_FLAG_IMAGERY_SOURCE} : 0u) |
+        (s.debug.height_colors ? std::uint32_t{VGL_GL_DEBUG_FLAG_HEIGHT_COLORS} : 0u) |
+        (s.debug.contours ? std::uint32_t{VGL_GL_DEBUG_FLAG_CONTOURS} : 0u);
+    info.contour_interval = s.debug.contour_interval;
     return backend.draw(&info);
+}
+
+// A contour interval for an altitude: about a fortieth of it, rounded down to 1, 2 or 5 times
+// a power of ten, from 1 m to 2,000 m.
+float contour_interval_for(double altitude)
+{
+    const double target = std::clamp(altitude / 40.0, 1.0, 2000.0);
+    const double power = std::pow(10.0, std::floor(std::log10(target)));
+    double step = power;
+    for (const double m : {2.0, 5.0})
+    {
+        if (m * power <= target)
+        {
+            step = m * power;
+        }
+    }
+    return static_cast<float>(step);
 }
 
 // The host's clip control, for its own geometry: the reversed-Z convention needs depth from 0
@@ -492,6 +516,100 @@ double difference(const image& a, const image& b)
     return static_cast<double>(differing) / static_cast<double>(a.size() / 4);
 }
 
+// Where an ECEF point appears in a window, for a camera; false behind it.
+bool project(const sample::camera& c, const vgl_dvec3& p, double w, double h, double& x, double& y)
+{
+    const vgl_dmat4 v = sample::camera_view_matrix(c);
+    const vgl_dmat4 m =
+        sample::perspective(vgl::degrees_to_radians(field_of_view), w / h, 1.0, 1.0e9);
+    const double cx = v.m[0] * p.x + v.m[4] * p.y + v.m[8] * p.z + v.m[12];
+    const double cy = v.m[1] * p.x + v.m[5] * p.y + v.m[9] * p.z + v.m[13];
+    const double cz = v.m[2] * p.x + v.m[6] * p.y + v.m[10] * p.z + v.m[14];
+    if (cz >= 0.0)
+    {
+        return false;
+    }
+    x = (m.m[0] * cx / -cz * 0.5 + 0.5) * w;
+    y = (0.5 - m.m[5] * cy / -cz * 0.5) * h;
+    return true;
+}
+
+// The navigation's promises (navigation.hpp), from three cameras: a grabbed point stays under
+// the cursor, zooming keeps the point under the cursor in place, orbiting keeps the point at
+// the centre in place and never tilts past the limit, and the camera stays above the ground.
+void navigation_check()
+{
+    constexpr double w = 1280.0;
+    constexpr double h = 720.0;
+    using drag = sample::globe_navigation::drag;
+    const std::array<sample::camera, 3> starts{{
+        {30.0, -30.0, 2.0e7, 0.0, 90.0},
+        {44.5, 9.0, 3.0e5, 0.0, 35.0},
+        {27.0, 86.9, 2.0e4, 45.0, 60.0},
+    }};
+    const auto near = [](double x, double y, double ex, double ey) {
+        return std::abs(x - ex) < 1.0 && std::abs(y - ey) < 1.0;
+    };
+    for (const sample::camera& start : starts)
+    {
+        const std::string where =
+            " from " + std::to_string(static_cast<int>(start.altitude / 1000.0)) + " km";
+        sample::globe_navigation nav;
+        nav.viewport(w, h, field_of_view);
+        nav.ground(0.0);
+
+        // Grab and drag in steps.
+        sample::camera c = start;
+        vgl_dvec3 grabbed{};
+        expect(nav.pick(c, 600.0, 420.0, grabbed), "the cursor is over the globe" + where);
+        nav.press(drag::pan, 600.0, 420.0, c);
+        for (int k = 1; k <= 10; ++k)
+        {
+            nav.move(600.0 + 12.0 * k, 420.0 - 8.0 * k, c);
+        }
+        nav.release();
+        double x = 0.0;
+        double y = 0.0;
+        expect(project(c, grabbed, w, h, x, y) && near(x, y, 720.0, 340.0),
+               "a grabbed point stays under the cursor" + where);
+
+        // Zoom towards the cursor.
+        c = start;
+        vgl_dvec3 under{};
+        // A point off the centre that is on the globe from every start.
+        const double zx = w / 2.0 + 90.0;
+        const double zy = h / 2.0 + 60.0;
+        expect(nav.pick(c, zx, zy, under), "the cursor is over the globe" + where);
+        nav.scroll(2.0, zx, zy, c);
+        for (int k = 0; k < 120; ++k)
+        {
+            nav.update(1.0 / 60.0, {}, c);
+        }
+        expect(c.altitude < start.altitude, "scrolling up zooms in" + where);
+        expect(project(c, under, w, h, x, y) && near(x, y, zx, zy),
+               "zooming keeps the point under the cursor" + where);
+
+        // Orbit around the centre, tilting as far as it goes.
+        c = start;
+        vgl_dvec3 centre{};
+        expect(nav.pick(c, w / 2.0, h / 2.0, centre), "the centre is on the globe" + where);
+        nav.press(drag::orbit, w / 2.0, h / 2.0, c);
+        for (int k = 1; k <= 40; ++k)
+        {
+            nav.move(w / 2.0 + 5.0 * k, h / 2.0 - 10.0 * k, c);
+        }
+        nav.release();
+        expect(project(c, centre, w, h, x, y) && near(x, y, w / 2.0, h / 2.0),
+               "orbiting keeps the centre in place" + where);
+        const vgl_dvec3 eye = sample::camera_eye(c);
+        const vgl_dvec3 up = sample::normalize(centre);
+        const double tilt = vgl::radians_to_degrees(
+            std::acos(sample::dot(up, sample::normalize(sample::sub(eye, centre)))));
+        expect(tilt < 86.0, "orbiting stops at the tilt limit" + where);
+        expect(c.altitude >= 20.0, "the camera stays above the ground" + where);
+    }
+}
+
 bool idle(const vgl_context_statistics& s)
 {
     return s.packs_loading == 0 && s.reads_outstanding == 0 && s.tiles_decoding == 0 &&
@@ -513,6 +631,7 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
 {
     constexpr int width = 640;
     constexpr int height = 360;
+    navigation_check();
     GLuint host_vertex_array = 0;
     gl.GenVertexArrays(1, &host_vertex_array);
 
@@ -621,6 +740,7 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
         // The debug views draw without OpenGL errors, and leave the host's state as it was,
         // the polygon mode included.
         s.debug.wireframe = s.debug.level_colors = s.debug.imagery_source = true;
+        s.debug.height_colors = s.debug.contours = true;
         clear(gl, s, t);
         sentinel_state_set(gl, host_vertex_array);
         expect(draw(*backend, s, width, height) == vgl::result::success,
@@ -639,6 +759,20 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
                        width,
                        height,
                        o.save + "/" + depth_name(s.depth) + "-debug.ppm");
+        }
+        // The heightmap with contour lines alone, every 100 m.
+        s.debug.wireframe = s.debug.level_colors = s.debug.imagery_source = false;
+        s.debug.contour_interval = 100.0f;
+        clear(gl, s, t);
+        expect(draw(*backend, s, width, height) == vgl::result::success,
+               "vgl_gl_backend_draw succeeds with contour lines");
+        expect(gl.GetError() == 0, "OpenGL reports no error with contour lines");
+        if (!o.save.empty())
+        {
+            save_image(read_image(gl, t),
+                       width,
+                       height,
+                       o.save + "/" + depth_name(s.depth) + "-contours.ppm");
         }
         target_destroy(gl, t);
         backend->reset();
@@ -680,57 +814,62 @@ struct input
 {
     scene* s = nullptr;
     sample::overlay* ui = nullptr;
-    bool dragging_left = false;
-    bool dragging_right = false;
-    double x = 0.0;
-    double y = 0.0;
+    sample::globe_navigation* nav = nullptr;
+    double last_click = -1.0; // When the left button was last pressed, for double-clicks.
+    double click_x = 0.0;
+    double click_y = 0.0;
 };
 
-void on_mouse_button(GLFWwindow* window, int button, int action, int /*mods*/)
+void on_mouse_button(GLFWwindow* window, int button, int action, int mods)
 {
     auto* in = static_cast<input*>(glfwGetWindowUserPointer(window));
-    const bool down = action == GLFW_PRESS && !in->ui->wants_mouse();
+    double x = 0.0;
+    double y = 0.0;
+    glfwGetCursorPos(window, &x, &y);
+    if (action == GLFW_RELEASE)
+    {
+        in->nav->release();
+        return;
+    }
+    if (action != GLFW_PRESS || in->ui->wants_mouse())
+    {
+        return;
+    }
+    using drag = sample::globe_navigation::drag;
+    const sample::camera& c = in->s->camera;
     if (button == GLFW_MOUSE_BUTTON_LEFT)
     {
-        in->dragging_left = down;
+        // A second press soon after the first, close to it, is a double-click.
+        const double now = glfwGetTime();
+        if (now - in->last_click < 0.3 && std::abs(x - in->click_x) < 4.0 &&
+            std::abs(y - in->click_y) < 4.0)
+        {
+            in->nav->double_click(x, y, c);
+            in->last_click = -1.0;
+            return;
+        }
+        in->last_click = now;
+        in->click_x = x;
+        in->click_y = y;
+        const drag mode = (mods & GLFW_MOD_SHIFT) != 0     ? drag::orbit
+                          : (mods & GLFW_MOD_CONTROL) != 0 ? drag::look
+                                                           : drag::pan;
+        in->nav->press(mode, x, y, c);
+    }
+    else if (button == GLFW_MOUSE_BUTTON_MIDDLE)
+    {
+        in->nav->press(drag::orbit, x, y, c);
     }
     else if (button == GLFW_MOUSE_BUTTON_RIGHT)
     {
-        in->dragging_right = down;
+        in->nav->press(drag::zoom, x, y, c);
     }
-    glfwGetCursorPos(window, &in->x, &in->y);
 }
 
 void on_cursor(GLFWwindow* window, double x, double y)
 {
     auto* in = static_cast<input*>(glfwGetWindowUserPointer(window));
-    const double dx = x - in->x;
-    const double dy = y - in->y;
-    in->x = x;
-    in->y = y;
-    sample::camera& c = in->s->camera;
-    if (in->dragging_left)
-    {
-        // About the ground distance a pixel spans, turned into degrees.
-        int width = 0;
-        int height = 0;
-        glfwGetWindowSize(window, &width, &height);
-        const double metres = c.altitude * 1.15 / std::max(height, 1);
-        const double degrees = metres / 111320.0;
-        const double h = vgl::degrees_to_radians(c.heading);
-        const double forward = dy * degrees;
-        const double right = -dx * degrees;
-        c.latitude =
-            std::clamp(c.latitude + forward * std::cos(h) - right * std::sin(h), -89.0, 89.0);
-        c.longitude += (forward * std::sin(h) + right * std::cos(h)) /
-                       std::max(std::cos(vgl::degrees_to_radians(c.latitude)), 0.05);
-        c.longitude = std::remainder(c.longitude, 360.0);
-    }
-    if (in->dragging_right)
-    {
-        c.heading = std::remainder(c.heading + dx * 0.2, 360.0);
-        c.pitch = std::clamp(c.pitch + dy * 0.2, 0.0, 90.0);
-    }
+    in->nav->move(x, y, in->s->camera);
 }
 
 void on_scroll(GLFWwindow* window, double /*dx*/, double dy)
@@ -740,8 +879,10 @@ void on_scroll(GLFWwindow* window, double /*dx*/, double dy)
     {
         return;
     }
-    sample::camera& c = in->s->camera;
-    c.altitude = std::clamp(c.altitude * std::pow(0.85, dy), 50.0, 5.0e7);
+    double x = 0.0;
+    double y = 0.0;
+    glfwGetCursorPos(window, &x, &y);
+    in->nav->scroll(dy, x, y, in->s->camera);
 }
 
 void on_key(GLFWwindow* window, int key, int /*scancode*/, int action, int /*mods*/)
@@ -784,8 +925,31 @@ void on_key(GLFWwindow* window, int key, int /*scancode*/, int action, int /*mod
     {
         d.freeze = !d.freeze;
     }
+    else if (key == GLFW_KEY_F6)
+    {
+        d.height_colors = !d.height_colors;
+    }
+    else if (key == GLFW_KEY_F7)
+    {
+        d.contours = !d.contours;
+    }
+    else if (key == GLFW_KEY_N || key == GLFW_KEY_R)
+    {
+        in->nav->stop();
+        in->s->camera.heading = 0.0; // North up.
+        if (key == GLFW_KEY_R)
+        {
+            in->s->camera.pitch = 90.0; // And looking straight down.
+        }
+    }
+    else if (key == GLFW_KEY_U)
+    {
+        in->nav->stop();
+        in->s->camera.pitch = 90.0;
+    }
     else if (key >= GLFW_KEY_1 && key < GLFW_KEY_1 + static_cast<int>(places.size()))
     {
+        in->nav->stop();
         in->s->camera = places[static_cast<std::size_t>(key - GLFW_KEY_1)].camera;
     }
 }
@@ -814,9 +978,11 @@ int run_interactive(const options& o, GLFWwindow* window, const host_gl& gl, vgl
 
     // The window's callbacks first: Dear ImGui chains to them.
     sample::overlay ui;
+    sample::globe_navigation nav;
     input in;
     in.s = &s;
     in.ui = &ui;
+    in.nav = &nav;
     glfwSetWindowUserPointer(window, &in);
     glfwSetMouseButtonCallback(window, on_mouse_button);
     glfwSetCursorPosCallback(window, on_cursor);
@@ -862,13 +1028,39 @@ int run_interactive(const options& o, GLFWwindow* window, const host_gl& gl, vgl
             target_create(gl, t, width, height, s.depth == VGL_DEPTH_CONVENTION_REVERSED_Z);
         }
 
-        // Stay above the terrain.
+        // Navigation: throws, smooth zooms and keys, over the terrain under the camera.
         const vgl::expected<vgl::height_sample> ground =
             ctx.height_query(vgl::degrees_to_radians(s.camera.latitude),
                              vgl::degrees_to_radians(s.camera.longitude));
         if (ground && ground->status == vgl::result::success)
         {
-            s.camera.altitude = std::max(s.camera.altitude, ground->height + 50.0);
+            nav.ground(ground->height);
+            s.camera.altitude = std::max(s.camera.altitude, ground->height + 20.0);
+        }
+        int window_width = 0;
+        int window_height = 0;
+        glfwGetWindowSize(window, &window_width, &window_height);
+        nav.viewport(window_width, window_height, field_of_view);
+        sample::navigation_keys keys;
+        if (!ui.wants_keyboard())
+        {
+            const auto held = [&](int key) { return glfwGetKey(window, key) == GLFW_PRESS; };
+            keys.left = held(GLFW_KEY_LEFT);
+            keys.right = held(GLFW_KEY_RIGHT);
+            keys.up = held(GLFW_KEY_UP);
+            keys.down = held(GLFW_KEY_DOWN);
+            keys.zoom_in = held(GLFW_KEY_PAGE_UP) || held(GLFW_KEY_EQUAL) || held(GLFW_KEY_KP_ADD);
+            keys.zoom_out =
+                held(GLFW_KEY_PAGE_DOWN) || held(GLFW_KEY_MINUS) || held(GLFW_KEY_KP_SUBTRACT);
+            keys.shift = held(GLFW_KEY_LEFT_SHIFT) || held(GLFW_KEY_RIGHT_SHIFT);
+        }
+        const auto navigated = std::chrono::steady_clock::now();
+        nav.update(std::chrono::duration<double>(navigated - last_frame).count(), keys, s.camera);
+
+        // Contours about every fortieth of the altitude, at 1, 2 or 5 times a power of ten.
+        if (s.debug.contour_auto)
+        {
+            s.debug.contour_interval = contour_interval_for(s.camera.altitude);
         }
 
         // Freezing keeps the camera of that moment for selection.

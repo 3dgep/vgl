@@ -24,13 +24,17 @@ namespace sample
 // What the debug controls set.
 struct debug_settings
 {
-    bool panel = true;           // The overlay itself (F1).
-    bool wireframe = false;      // F2; desktop OpenGL only.
-    bool level_colors = false;   // F3.
-    bool imagery_source = false; // F4.
-    bool freeze = false;         // F5: select tiles for a frozen camera.
-    bool sunlight = true;        // L.
-    float max_error = 2.0f;      // Screen-space error in pixels.
+    bool panel = true;               // The overlay itself (F1).
+    bool wireframe = false;          // F2; desktop OpenGL only.
+    bool level_colors = false;       // F3.
+    bool imagery_source = false;     // F4.
+    bool freeze = false;             // F5: select tiles for a frozen camera.
+    bool height_colors = false;      // F6: colours by height instead of imagery.
+    bool contours = false;           // F7.
+    bool contour_auto = true;        // The interval follows the altitude.
+    float contour_interval = 500.0f; // Metres.
+    bool sunlight = true;            // L.
+    float max_error = 2.0f;          // Screen-space error in pixels.
 };
 
 // What the panel shows besides the statistics.

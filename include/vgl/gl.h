@@ -166,19 +166,27 @@ typedef struct vgl_gl_draw_info
     /* Debug views: a combination of vgl_gl_debug_flag values. 0 draws normally. */
     uint32_t debug_flags;
     uint32_t reserved;
+    /* Height between contour lines (VGL_GL_DEBUG_FLAG_CONTOURS), in metres. 0 selects 500. */
+    double contour_interval;
 } vgl_gl_draw_info;
 
 /* Debug views of vgl_gl_draw_info.debug_flags, for inspecting level of detail and loading. */
 typedef enum vgl_gl_debug_flag
 {
-    /* The triangles as lines over the shading. OpenGL only: OpenGL ES has no line polygon
-     * mode, and ignores it. */
+    /* The triangles as bright cyan lines over the shading. OpenGL only: OpenGL ES has no line
+     * polygon mode, and ignores it. */
     VGL_GL_DEBUG_FLAG_WIREFRAME = 0x1,
     /* Each tile tinted by its level, with its borders outlined. */
     VGL_GL_DEBUG_FLAG_LEVEL_COLORS = 0x2,
     /* Tiles drawn with imagery coarser than themselves tinted orange, more strongly the more
      * levels coarser it is, and tiles without imagery magenta. */
     VGL_GL_DEBUG_FLAG_IMAGERY_SOURCE = 0x4,
+    /* Colours by height, from the deep ocean floor to snow, instead of the imagery. */
+    VGL_GL_DEBUG_FLAG_HEIGHT_COLORS = 0x8,
+    /* Contour lines every contour_interval metres, every fifth one heavier. Heights are above
+     * the ellipsoid, so the lines are offset from those above mean sea level by the geoid
+     * height, within about 100 m. */
+    VGL_GL_DEBUG_FLAG_CONTOURS = 0x10,
     VGL_GL_DEBUG_FLAG_MAX_ENUM = 0x7FFFFFFF
 } vgl_gl_debug_flag;
 

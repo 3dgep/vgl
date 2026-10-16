@@ -197,6 +197,21 @@ void overlay::panel(const vgl_context_statistics& s, const panel_info& info, deb
             ImGui::TextDisabled("orange: coarser imagery, magenta: none");
         }
         ImGui::Checkbox("Freeze selection (F5)", &d.freeze);
+        ImGui::Checkbox("Heightmap (F6)", &d.height_colors);
+        ImGui::Checkbox("Contour lines (F7)", &d.contours);
+        if (d.contours)
+        {
+            ImGui::Checkbox("Interval from altitude", &d.contour_auto);
+            ImGui::BeginDisabled(d.contour_auto);
+            ImGui::SliderFloat("Interval",
+                               &d.contour_interval,
+                               1.0f,
+                               5000.0f,
+                               "%.0f m",
+                               ImGuiSliderFlags_Logarithmic);
+            ImGui::EndDisabled();
+            ImGui::TextDisabled("heavier every 5th; heights above the ellipsoid");
+        }
         ImGui::Checkbox("Sunlight (L)", &d.sunlight);
         ImGui::SliderFloat(
             "Max error", &d.max_error, 0.5f, 16.0f, "%.1f px", ImGuiSliderFlags_Logarithmic);
@@ -251,6 +266,22 @@ void overlay::panel(const vgl_context_statistics& s, const panel_info& info, deb
         {
             ImGui::EndTable();
         }
+    }
+
+    if (ImGui::CollapsingHeader("Controls") && begin_table("controls"))
+    {
+        row("Left drag", "grab the globe");
+        row("Scroll, double-click", "zoom to the cursor");
+        row("Shift or middle drag", "orbit and tilt");
+        row("Ctrl drag", "look around");
+        row("Right drag", "zoom");
+        row("Arrows", "move");
+        row("Shift + arrows", "orbit and tilt");
+        row("Page up, down", "zoom");
+        row("N, U, R", "north up, top down, both");
+        row("1 to 6", "places");
+        row("L", "sunlight");
+        ImGui::EndTable();
     }
 
     if (ImGui::CollapsingHeader("Credits", ImGuiTreeNodeFlags_DefaultOpen))

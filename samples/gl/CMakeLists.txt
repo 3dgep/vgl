@@ -11,10 +11,10 @@ if(NOT TARGET vgl_imgui)
     return()
 endif()
 
-add_executable(vgl_gl_sample main.cpp overlay.cpp overlay.hpp ../common/sample_camera.hpp)
+add_executable(vgl_gl_sample main.cpp overlay.cpp overlay.hpp)
 set_target_properties(vgl_gl_sample PROPERTIES OUTPUT_NAME vgl-gl)
-target_include_directories(vgl_gl_sample PRIVATE ../common)
-target_link_libraries(vgl_gl_sample PRIVATE vgl::vgl vgl::defaults vgl::gl glfw vgl_imgui)
+target_link_libraries(vgl_gl_sample PRIVATE
+    vgl_sample_common vgl::vgl vgl::defaults vgl::gl glfw vgl_imgui)
 target_compile_definitions(vgl_gl_sample PRIVATE
     VGL_SAMPLE_DATA_DIR="${PROJECT_SOURCE_DIR}/samples/data")
 vgl_target_options(vgl_gl_sample)

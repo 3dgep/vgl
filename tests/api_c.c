@@ -52,7 +52,7 @@ static void check_types(void)
     CHECK(sizeof(vgl_depth_convention) == 4);
     /* The OpenGL backend's structures (vgl/gl.h). */
     CHECK(sizeof(vgl_gl_backend_create_info) == 24);
-    CHECK(sizeof(vgl_gl_draw_info) == 72);
+    CHECK(sizeof(vgl_gl_draw_info) == 80);
     CHECK(offsetof(vgl_gl_draw_info, sun_direction) == 24);
 }
 

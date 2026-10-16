@@ -9,6 +9,17 @@ if(NOT TARGET vgl_defaults)
     return()
 endif()
 
+# Code that the samples share: the camera, and navigation in the style of Google
+# Earth, which every interactive sample uses. It has no window or graphics API
+# of its own, so samples on any backend can use it.
+add_library(vgl_sample_common STATIC
+    common/navigation.cpp
+    common/navigation.hpp
+    common/sample_camera.hpp)
+target_include_directories(vgl_sample_common PUBLIC common)
+target_link_libraries(vgl_sample_common PUBLIC vgl::vgl)
+vgl_target_options(vgl_sample_common)
+
 add_subdirectory(headless)
 
 # The OpenGL samples need GLFW for their window and context. GLFW is used only
