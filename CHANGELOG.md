@@ -74,7 +74,15 @@ The pack format has its own version number, independent of the library version.
   tiles and lower-priority packs, tiles drawn from an ancestor use its samples, and the bare
   ellipsoid gets a curved grid. Meshes count towards the CPU budget, and a tile keeps its
   previous mesh until the new one is built.
-- Render interface specification (`docs/render-interface.md`), accepted, not yet implemented:
+- The core side of the render interface (`vgl/render.h`, `vgl/render.hpp`): frames with
+  resource lists to destroy and create, draw lists with double-precision model-view matrices,
+  an upload budget, a GPU budget (`vgl_context_create_info::gpu_budget`, 512 MiB by default),
+  no holes while a region's replacements upload, CPU copies freed after upload, handles,
+  failed creates, `vgl_context_resources_reset` and `vgl_context_texture_formats_set`.
+  Tested with a consumer that checks the interface's rules in every frame.
+- `VGL_POINTER_PADDING` in `vgl/base.h`, and a rule for it in the C API conventions
+  (section 8.2): pointers next to 64-bit fields take 8 bytes on every target.
+- Render interface specification (`docs/render-interface.md`), accepted:
   per-frame resource events and draw lists that backends and hosts pull, upload and GPU
   budgets, transforms, vertex and texture formats, depth conventions and threading.
 - Context tests with synchronous, deferred and threaded hosts, allocation accounting, failure

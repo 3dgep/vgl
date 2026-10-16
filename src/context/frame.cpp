@@ -1,0 +1,734 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2026 Jeremiah van Oosten
+//
+// The core side of the render interface (docs/render-interface.md). A frame decides what the
+// consumer destroys, creates and draws:
+//
+// 1. Tiles whose next mesh is resident switch to it, retiring the old one.
+// 2. The draw set: the selected tiles whose meshes are resident, except where a tile drawn in
+//    the last frame still covers a region whose replacements are not all resident yet.
+// 3. Creates: meshes of selected tiles waiting for upload, coarsest first, within the upload
+//    budget, with the index lists they need.
+// 4. Destroys: retired resources, and resources not drawn now, least recently drawn first,
+//    while the GPU budget is exceeded.
+// 5. Draw items, nearest first, with model-view matrices composed in double precision.
+
+#include "context/context_impl.hpp"
+#include "foundation/math.hpp"
+#include "tiling/tile.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <cstring>
+
+namespace vgl::internal
+{
+
+namespace
+{
+
+constexpr std::uint64_t default_upload_budget = 16ull * 1024 * 1024;
+constexpr std::uint32_t none = 0xFFFFFFFFu;
+
+bool is_live(const gpu_resource* r, gpu_resource::state s) noexcept
+{
+    return r != nullptr && r->current == s && !r->garbage;
+}
+
+// The index list resource of a mesh, or null.
+gpu_resource* index_list_of(vgl_context& ctx, const gpu_resource& mesh) noexcept
+{
+    const std::uint64_t* id = ctx.index_lists.find(mesh.grid);
+    return id != nullptr ? ctx.resources.find(*id) : nullptr;
+}
+
+// True if a mesh can be drawn: it and its index list are resident.
+bool drawable(vgl_context& ctx, std::uint64_t id) noexcept
+{
+    gpu_resource* r = id != 0 ? ctx.resources.find(id) : nullptr;
+    return is_live(r, gpu_resource::state::resident) &&
+           is_live(index_list_of(ctx, *r), gpu_resource::state::resident);
+}
+
+void promote(vgl_context& ctx) noexcept
+{
+    ctx.meshes.for_each([&](std::uint64_t, mesh_state& m) {
+        if (m.next != 0 && drawable(ctx, m.next))
+        {
+            if (m.current != 0)
+            {
+                retire_resource(ctx, m.current);
+            }
+            m.current = m.next;
+            m.next = 0;
+        }
+    });
+}
+
+// Decides what to draw (step 2) into ctx.frame_tiles. Returns false if out of memory.
+bool decide_draw_set(vgl_context& ctx) noexcept
+{
+    ctx.frame_tiles.clear();
+    ctx.frame_selected.clear();
+    ctx.frame_drawn.clear();
+    const std::size_t selected = ctx.has_view ? ctx.selected.size() : 0;
+    const std::size_t previous = ctx.drawn.size();
+    if (!ctx.frame_ready.resize(selected) || !ctx.frame_owner.resize(selected) ||
+        !ctx.frame_counts.resize(3 * previous))
+    {
+        return false;
+    }
+
+    // Which selected tiles can be drawn with their own mesh.
+    for (std::size_t i = 0; i < selected; ++i)
+    {
+        const tile_id& t = ctx.selected[i].id;
+        if (ctx.frame_selected.insert(tile_key(t), static_cast<std::uint32_t>(i)) == nullptr)
+        {
+            return false;
+        }
+        const mesh_state* m = ctx.meshes.find(tile_key(t));
+        ctx.frame_ready[i] = m != nullptr && drawable(ctx, m->current) ? 1 : 0;
+        ctx.frame_owner[i] = none;
+    }
+    for (std::size_t j = 0; j < previous; ++j)
+    {
+        if (ctx.frame_drawn.insert(tile_key(ctx.drawn[j].id), static_cast<std::uint32_t>(j)) ==
+            nullptr)
+        {
+            return false;
+        }
+        ctx.frame_counts[3 * j] = 0;     // Selected tiles inside it.
+        ctx.frame_counts[3 * j + 1] = 0; // Of which ready.
+        ctx.frame_counts[3 * j + 2] = 0; // 1 if it stays.
+    }
+
+    // The last-frame tile, if any, that contains each selected tile.
+    for (std::size_t i = 0; i < selected; ++i)
+    {
+        const tile_id& t = ctx.selected[i].id;
+        for (std::uint32_t level = t.level + 1; level-- > 0;)
+        {
+            const std::uint32_t* j = ctx.frame_drawn.find(tile_key(tile_ancestor(t, level)));
+            if (j != nullptr)
+            {
+                ctx.frame_owner[i] = *j;
+                const std::size_t k = std::size_t{3} * *j;
+                ++ctx.frame_counts[k];
+                ctx.frame_counts[k + 1] += ctx.frame_ready[i];
+                break;
+            }
+        }
+    }
+
+    // Last-frame tiles stay while what replaces them is not all ready.
+    for (std::size_t j = 0; j < previous; ++j)
+    {
+        const drawn_tile& p = ctx.drawn[j];
+        if (!drawable(ctx, p.mesh))
+        {
+            continue;
+        }
+        bool stays = false;
+        const std::uint32_t* ancestor = nullptr;
+        for (std::uint32_t level = p.id.level; level-- > 0 && ancestor == nullptr;)
+        {
+            ancestor = ctx.frame_selected.find(tile_key(tile_ancestor(p.id, level)));
+        }
+        if (ancestor != nullptr)
+        {
+            // Zooming out: it stays until the coarser tile is ready, which waits meanwhile.
+            stays = (ctx.frame_ready[*ancestor] & 1) == 0;
+            if (stays)
+            {
+                ctx.frame_ready[*ancestor] = 0;
+            }
+        }
+        else
+        {
+            const std::uint32_t inside = ctx.frame_counts[3 * j];
+            stays = inside != 0 && ctx.frame_counts[3 * j + 1] != inside;
+        }
+        ctx.frame_counts[3 * j + 2] = stays ? 1 : 0;
+        if (stays && !ctx.frame_tiles.push_back(p))
+        {
+            return false;
+        }
+    }
+
+    for (std::size_t i = 0; i < selected; ++i)
+    {
+        const std::uint32_t owner = ctx.frame_owner[i];
+        const bool covered = owner != none && ctx.frame_counts[3 * owner + 2] != 0;
+        if (ctx.frame_ready[i] != 0 && !covered)
+        {
+            const tile_id& t = ctx.selected[i].id;
+            const mesh_state* m = ctx.meshes.find(tile_key(t));
+            if (!ctx.frame_tiles.push_back({t, m->current}))
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+void mark_drawn(vgl_context& ctx) noexcept
+{
+    for (const drawn_tile& d : ctx.frame_tiles)
+    {
+        gpu_resource* r = ctx.resources.find(d.mesh);
+        r->last_drawn = ctx.render_frame;
+        index_list_of(ctx, *r)->last_drawn = ctx.render_frame;
+    }
+}
+
+bool offer(vgl_context& ctx, std::uint64_t id, gpu_resource& r) noexcept
+{
+    if (!ctx.frame_offered.push_back(id))
+    {
+        return false;
+    }
+    if (r.resource_kind == gpu_resource::kind::index_list)
+    {
+        vgl_index_list_data d{};
+        d.resource = id;
+        d.indices = r.indices.data();
+        d.index_count = r.index_count;
+        d.index_size = r.index_size;
+        if (!ctx.frame_index_lists.push_back(d))
+        {
+            ctx.frame_offered.pop_back();
+            return false;
+        }
+    }
+    else
+    {
+        vgl_mesh_data d{};
+        d.resource = id;
+        d.index_list = *ctx.index_lists.find(r.grid);
+        d.vertices = r.vertices.data();
+        d.vertex_count = static_cast<std::uint32_t>(r.vertices.size());
+        d.vertex_size = sizeof(tile_vertex);
+        d.tile = {r.tile.level, r.tile.x, r.tile.y, 0};
+        d.centre = r.centre.to_c();
+        d.min_height = r.min_height;
+        d.max_height = r.max_height;
+        if (!ctx.frame_meshes.push_back(d))
+        {
+            ctx.frame_offered.pop_back();
+            return false;
+        }
+    }
+    r.current = gpu_resource::state::offered;
+    ctx.gpu_used += r.bytes;
+    return true;
+}
+
+// Step 3.
+void choose_uploads(vgl_context& ctx, std::uint64_t budget) noexcept
+{
+    vector<std::uint64_t>& candidates = ctx.frame_candidates;
+    candidates.clear();
+    const std::size_t selected = ctx.has_view ? ctx.selected.size() : 0;
+    for (std::size_t i = 0; i < selected; ++i)
+    {
+        const mesh_state* m = ctx.meshes.find(tile_key(ctx.selected[i].id));
+        const gpu_resource* r =
+            m != nullptr && m->next != 0 ? ctx.resources.find(m->next) : nullptr;
+        if (is_live(r, gpu_resource::state::pending) && !candidates.push_back(m->next))
+        {
+            break;
+        }
+    }
+    // Coarsest first, then oldest.
+    std::sort(candidates.begin(), candidates.end(), [&](std::uint64_t a, std::uint64_t b) {
+        const std::uint32_t la = ctx.resources.find(a)->tile.level;
+        const std::uint32_t lb = ctx.resources.find(b)->tile.level;
+        return la != lb ? la < lb : a < b;
+    });
+    std::uint64_t used = 0;
+    bool any = false;
+    for (const std::uint64_t id : candidates)
+    {
+        gpu_resource* mesh = ctx.resources.find(id);
+        const std::uint64_t* list_id = ctx.index_lists.find(mesh->grid);
+        gpu_resource* list = list_id != nullptr ? ctx.resources.find(*list_id) : nullptr;
+        if (list == nullptr)
+        {
+            continue;
+        }
+        const bool list_needed = list->current == gpu_resource::state::pending;
+        const std::uint64_t cost = mesh->bytes + (list_needed ? list->bytes : 0);
+        if (any && used + cost > budget)
+        {
+            break;
+        }
+        if (list_needed && !offer(ctx, *list_id, *list))
+        {
+            break;
+        }
+        if (!offer(ctx, id, *mesh))
+        {
+            break;
+        }
+        used += cost;
+        any = true;
+    }
+}
+
+// Step 4.
+void choose_destroys(vgl_context& ctx) noexcept
+{
+    if (ctx.gpu_used > ctx.gpu_budget)
+    {
+        vector<std::uint64_t>& candidates = ctx.frame_candidates;
+        candidates.clear();
+        ctx.resources.for_each([&](std::uint64_t id, const gpu_resource& r) {
+            // Meshes of selected tiles stay even when not drawn yet: they are waiting for the
+            // rest of a region to arrive, and evicting them would keep it from ever arriving.
+            if (r.resource_kind == gpu_resource::kind::mesh &&
+                is_live(&r, gpu_resource::state::resident) && r.last_drawn < ctx.render_frame &&
+                ctx.frame_selected.find(tile_key(r.tile)) == nullptr)
+            {
+                static_cast<void>(candidates.push_back(id));
+            }
+        });
+        // Least recently drawn first, then oldest.
+        std::sort(candidates.begin(), candidates.end(), [&](std::uint64_t a, std::uint64_t b) {
+            const std::uint64_t la = ctx.resources.find(a)->last_drawn;
+            const std::uint64_t lb = ctx.resources.find(b)->last_drawn;
+            return la != lb ? la < lb : a < b;
+        });
+        std::uint64_t used = ctx.gpu_used;
+        for (const std::uint64_t id : candidates)
+        {
+            if (used <= ctx.gpu_budget)
+            {
+                break;
+            }
+            gpu_resource* r = ctx.resources.find(id);
+            used -= r->bytes;
+            const std::uint64_t key = tile_key(r->tile);
+            retire_resource(ctx, id);
+            if (mesh_state* m = ctx.meshes.find(key); m != nullptr)
+            {
+                m->current = m->current == id ? 0 : m->current;
+                m->next = m->next == id ? 0 : m->next;
+                if (m->current == 0 && m->next == 0 && !m->building)
+                {
+                    static_cast<void>(ctx.meshes.erase(key));
+                }
+            }
+        }
+    }
+
+    ctx.resources.for_each([&](std::uint64_t id, const gpu_resource& r) {
+        if (r.garbage && r.current == gpu_resource::state::resident)
+        {
+            static_cast<void>(ctx.frame_destroys.push_back(id));
+        }
+    });
+    for (const std::uint64_t id : ctx.frame_destroys)
+    {
+        ctx.gpu_used -= ctx.resources.find(id)->bytes;
+        static_cast<void>(ctx.resources.erase(id));
+    }
+}
+
+// Step 5.
+bool write_draw_items(vgl_context& ctx, const dmat4& view, const dvec3& eye) noexcept
+{
+    std::sort(ctx.frame_tiles.begin(),
+              ctx.frame_tiles.end(),
+              [&](const drawn_tile& a, const drawn_tile& b) {
+                  const double da = length(ctx.resources.find(a.mesh)->centre - eye);
+                  const double db = length(ctx.resources.find(b.mesh)->centre - eye);
+                  return da != db ? da < db : tile_key(a.id) < tile_key(b.id);
+              });
+    const std::size_t stride = ctx.frame_draw_stride;
+    if (!ctx.frame_draw.resize(stride * ctx.frame_tiles.size()))
+    {
+        return false;
+    }
+    std::byte* out = ctx.frame_draw.data();
+    for (const drawn_tile& d : ctx.frame_tiles)
+    {
+        const gpu_resource* r = ctx.resources.find(d.mesh);
+        const std::uint64_t list_id = *ctx.index_lists.find(r->grid);
+        const gpu_resource* list = ctx.resources.find(list_id);
+
+        vgl_draw_item item{};
+        item.tile = {d.id.level, d.id.x, d.id.y, 0};
+        item.mesh = d.mesh;
+        item.mesh_handle = r->handle;
+        item.index_list = list_id;
+        item.index_list_handle = list->handle;
+        item.index_count = list->index_count;
+        item.index_size = list->index_size;
+        // view * translate(centre): the translation is where the centre lands.
+        const dvec3 t = transform_point(view, r->centre);
+        for (std::size_t k = 0; k < 12; ++k)
+        {
+            item.model_view[k] = static_cast<float>(view.m[k]);
+        }
+        item.model_view[12] = static_cast<float>(t.x);
+        item.model_view[13] = static_cast<float>(t.y);
+        item.model_view[14] = static_cast<float>(t.z);
+        item.model_view[15] = static_cast<float>(view.m[15]);
+        item.centre = r->centre.to_c();
+        item.min_height = r->min_height;
+        item.max_height = r->max_height;
+
+        // A consumer compiled against an older header gets the fields it knows; one compiled
+        // against a newer header gets zeros in the rest.
+        const std::size_t known = std::min(stride, sizeof(vgl_draw_item));
+        std::memcpy(out, &item, known);
+        std::memset(out + known, 0, stride - known);
+        out += stride;
+    }
+    ctx.frame_draw_count = static_cast<std::uint32_t>(ctx.frame_tiles.size());
+    return true;
+}
+
+// The eye of a view matrix, or the given one if it cannot be inverted.
+dvec3 eye_of(const dmat4& v, const dvec3& fallback) noexcept
+{
+    vgl_view probe{};
+    probe.struct_size = sizeof(probe);
+    probe.view_matrix = v.to_c();
+    probe.projection_matrix = dmat4{}.to_c();
+    probe.viewport_width = 1;
+    probe.viewport_height = 1;
+    view_state s;
+    return make_view_state(probe, s) ? s.eye : fallback;
+}
+
+} // namespace
+
+} // namespace vgl::internal
+
+using namespace vgl::internal;
+
+extern "C" VGL_API vgl_result vgl_context_frame_begin(vgl_context* context,
+                                                      const vgl_frame_begin_info* info,
+                                                      vgl_frame** out_frame)
+{
+    if (out_frame == nullptr)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    *out_frame = nullptr;
+    vgl_context* const ctx = context;
+    if (ctx == nullptr)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    if (ctx->frame_open)
+    {
+        ctx->log.log(VGL_LOG_LEVEL_ERROR,
+                     "vgl_context_frame_begin: a frame is already open; call vgl_frame_end first");
+        return VGL_RESULT_INVALID_OPERATION;
+    }
+
+    vgl_frame_begin_info settings{};
+    if (info != nullptr)
+    {
+        if (info->struct_size < sizeof(vgl_frame_begin_info))
+        {
+            return VGL_RESULT_INVALID_ARGUMENT;
+        }
+        const auto* bytes = reinterpret_cast<const unsigned char*>(info);
+        for (std::size_t i = sizeof(vgl_frame_begin_info); i < info->struct_size; ++i)
+        {
+            if (bytes[i] != 0)
+            {
+                return VGL_RESULT_NOT_SUPPORTED;
+            }
+        }
+        std::memcpy(&settings, info, sizeof(settings));
+    }
+    if (settings.draw_item_size != 0 && settings.draw_item_size < offsetof(vgl_draw_item, centre))
+    {
+        // Too small for any version of the draw item.
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    dmat4 view = ctx->view.view_matrix;
+    dvec3 eye = ctx->view.eye;
+    if (settings.view_matrix != nullptr)
+    {
+        view = dmat4::from_c(*settings.view_matrix);
+        if (!std::all_of(view.m.begin(), view.m.end(), [](double v) { return std::isfinite(v); }))
+        {
+            return VGL_RESULT_INVALID_ARGUMENT;
+        }
+        eye = eye_of(view, eye);
+    }
+    const std::uint64_t upload_budget =
+        settings.upload_budget == 0 ? default_upload_budget : settings.upload_budget;
+
+    ++ctx->render_frame;
+    ctx->frame_destroys.clear();
+    ctx->frame_index_lists.clear();
+    ctx->frame_meshes.clear();
+    ctx->frame_layers.clear();
+    ctx->frame_offered.clear();
+    ctx->frame_draw_count = 0;
+    ctx->frame_draw_stride =
+        settings.draw_item_size == 0 ? sizeof(vgl_draw_item) : settings.draw_item_size;
+
+    promote(*ctx);
+    if (!decide_draw_set(*ctx))
+    {
+        // Draw what was drawn before, as far as it still exists.
+        ctx->frame_tiles.clear();
+        for (const drawn_tile& d : ctx->drawn)
+        {
+            if (drawable(*ctx, d.mesh))
+            {
+                static_cast<void>(ctx->frame_tiles.push_back(d));
+            }
+        }
+    }
+    mark_drawn(*ctx);
+    choose_uploads(*ctx, upload_budget);
+    choose_destroys(*ctx);
+    if (!write_draw_items(*ctx, view, eye))
+    {
+        // Undo the offers, so that nothing is half delivered.
+        for (const std::uint64_t id : ctx->frame_offered)
+        {
+            gpu_resource* r = ctx->resources.find(id);
+            r->current = gpu_resource::state::pending;
+            ctx->gpu_used -= r->bytes;
+        }
+        ctx->frame_offered.clear();
+        ctx->frame_index_lists.clear();
+        ctx->frame_meshes.clear();
+        return VGL_RESULT_OUT_OF_MEMORY;
+    }
+    ctx->frame_open = true;
+    *out_frame = &ctx->frame_handle;
+    return VGL_RESULT_SUCCESS;
+}
+
+extern "C" VGL_API vgl_result vgl_frame_destroys_get(const vgl_frame* frame,
+                                                     const uint64_t** out_resources,
+                                                     uint32_t* out_count)
+{
+    if (frame == nullptr || out_resources == nullptr || out_count == nullptr)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    const vgl_context& ctx = *frame->context;
+    *out_resources = ctx.frame_destroys.data();
+    *out_count = static_cast<std::uint32_t>(ctx.frame_destroys.size());
+    return VGL_RESULT_SUCCESS;
+}
+
+extern "C" VGL_API vgl_result vgl_frame_index_lists_get(const vgl_frame* frame,
+                                                        const vgl_index_list_data** out_index_lists,
+                                                        uint32_t* out_count)
+{
+    if (frame == nullptr || out_index_lists == nullptr || out_count == nullptr)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    const vgl_context& ctx = *frame->context;
+    *out_index_lists = ctx.frame_index_lists.data();
+    *out_count = static_cast<std::uint32_t>(ctx.frame_index_lists.size());
+    return VGL_RESULT_SUCCESS;
+}
+
+extern "C" VGL_API vgl_result vgl_frame_meshes_get(const vgl_frame* frame,
+                                                   const vgl_mesh_data** out_meshes,
+                                                   uint32_t* out_count)
+{
+    if (frame == nullptr || out_meshes == nullptr || out_count == nullptr)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    const vgl_context& ctx = *frame->context;
+    *out_meshes = ctx.frame_meshes.data();
+    *out_count = static_cast<std::uint32_t>(ctx.frame_meshes.size());
+    return VGL_RESULT_SUCCESS;
+}
+
+extern "C" VGL_API vgl_result vgl_frame_textures_get(const vgl_frame* frame,
+                                                     const vgl_texture_data** out_textures,
+                                                     uint32_t* out_count)
+{
+    if (frame == nullptr || out_textures == nullptr || out_count == nullptr)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    // Imagery comes later; no textures yet.
+    *out_textures = nullptr;
+    *out_count = 0;
+    return VGL_RESULT_SUCCESS;
+}
+
+extern "C" VGL_API vgl_result vgl_frame_draw_list_get(const vgl_frame* frame,
+                                                      const vgl_draw_item** out_items,
+                                                      uint32_t* out_count)
+{
+    if (frame == nullptr || out_items == nullptr || out_count == nullptr)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    const vgl_context& ctx = *frame->context;
+    *out_items = reinterpret_cast<const vgl_draw_item*>(ctx.frame_draw.data());
+    *out_count = ctx.frame_draw_count;
+    return VGL_RESULT_SUCCESS;
+}
+
+extern "C" VGL_API vgl_result vgl_frame_draw_layers_get(const vgl_frame* frame,
+                                                        const vgl_draw_layer** out_layers,
+                                                        uint32_t* out_count)
+{
+    if (frame == nullptr || out_layers == nullptr || out_count == nullptr)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    const vgl_context& ctx = *frame->context;
+    *out_layers = ctx.frame_layers.data();
+    *out_count = static_cast<std::uint32_t>(ctx.frame_layers.size());
+    return VGL_RESULT_SUCCESS;
+}
+
+extern "C" VGL_API vgl_result vgl_frame_resource_handle_set(vgl_frame* frame,
+                                                            uint64_t resource,
+                                                            uint64_t handle)
+{
+    if (frame == nullptr)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    gpu_resource* r = frame->context->resources.find(resource);
+    if (r == nullptr || r->current == gpu_resource::state::pending)
+    {
+        return VGL_RESULT_NOT_FOUND;
+    }
+    r->handle = handle;
+    return VGL_RESULT_SUCCESS;
+}
+
+extern "C" VGL_API vgl_result vgl_frame_resource_failed(vgl_frame* frame,
+                                                        uint64_t resource,
+                                                        vgl_result reason)
+{
+    if (frame == nullptr || reason >= 0)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    vgl_context& ctx = *frame->context;
+    gpu_resource* r = ctx.resources.find(resource);
+    if (r == nullptr || r->current != gpu_resource::state::offered)
+    {
+        return VGL_RESULT_NOT_FOUND;
+    }
+    if (!r->failed)
+    {
+        r->failed = true;
+        const char* name = nullptr;
+        static_cast<void>(vgl_result_name_get(reason, &name));
+        ctx.log.log(VGL_LOG_LEVEL_WARNING,
+                    "vgl_frame_resource_failed: resource %llu could not be created (%s); it is "
+                    "offered again in a later frame",
+                    static_cast<unsigned long long>(resource),
+                    name);
+    }
+    return VGL_RESULT_SUCCESS;
+}
+
+extern "C" VGL_API vgl_result vgl_frame_end(vgl_frame* frame)
+{
+    if (frame == nullptr || !frame->context->frame_open)
+    {
+        return VGL_RESULT_SUCCESS;
+    }
+    vgl_context& ctx = *frame->context;
+    for (const std::uint64_t id : ctx.frame_offered)
+    {
+        gpu_resource* r = ctx.resources.find(id);
+        if (r->failed)
+        {
+            r->failed = false;
+            r->current = gpu_resource::state::pending;
+            ctx.gpu_used -= r->bytes;
+            if (r->garbage)
+            {
+                retire_resource(ctx, id); // Retired during the frame; never created.
+            }
+            continue;
+        }
+        r->current = gpu_resource::state::resident;
+        ctx.cpu_used -= r->cpu_bytes();
+        r->vertices = buffer<tile_vertex>();
+        r->indices = buffer<std::byte>();
+    }
+    // What was drawn now is what stays drawn while its replacements arrive.
+    ctx.drawn.clear();
+    for (const drawn_tile& d : ctx.frame_tiles)
+    {
+        static_cast<void>(ctx.drawn.push_back(d));
+    }
+    ctx.frame_open = false;
+    return VGL_RESULT_SUCCESS;
+}
+
+extern "C" VGL_API vgl_result vgl_context_resources_reset(vgl_context* context)
+{
+    if (context == nullptr)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    vgl_context& ctx = *context;
+    if (ctx.frame_open)
+    {
+        return VGL_RESULT_INVALID_OPERATION;
+    }
+    ctx.resources.for_each(
+        [&](std::uint64_t, const gpu_resource& r) { ctx.cpu_used -= r.cpu_bytes(); });
+    ctx.resources.clear();
+    ctx.index_lists.clear();
+    ctx.gpu_used = 0;
+    ctx.drawn.clear();
+    // Tiles rebuild their meshes when next selected.
+    vector<std::uint64_t> idle(ctx.memory);
+    ctx.meshes.for_each([&](std::uint64_t key, mesh_state& m) {
+        m.current = 0;
+        m.next = 0;
+        if (!m.building)
+        {
+            static_cast<void>(idle.push_back(key));
+        }
+    });
+    for (const std::uint64_t key : idle)
+    {
+        static_cast<void>(ctx.meshes.erase(key));
+    }
+    return VGL_RESULT_SUCCESS;
+}
+
+extern "C" VGL_API vgl_result vgl_context_texture_formats_set(vgl_context* context,
+                                                              const vgl_texture_format* formats,
+                                                              uint32_t format_count)
+{
+    if (context == nullptr || (formats == nullptr && format_count != 0))
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    std::uint32_t mask = 1u << VGL_TEXTURE_FORMAT_RGBA8;
+    for (std::uint32_t i = 0; i < format_count; ++i)
+    {
+        if (formats[i] < VGL_TEXTURE_FORMAT_RGBA8 || formats[i] > VGL_TEXTURE_FORMAT_ASTC_4X4)
+        {
+            return VGL_RESULT_INVALID_ARGUMENT;
+        }
+        mask |= 1u << formats[i];
+    }
+    context->texture_formats = mask;
+    return VGL_RESULT_SUCCESS;
+}

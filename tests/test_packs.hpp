@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Jeremiah van Oosten
 //
-// Test packs built in memory with the baker's writers, the heights they should give, and an
-// allocator that counts and fails allocations. Shared by the context and defaults tests.
+// Test packs built in memory with the baker's writers, the heights they should give, an
+// allocator that counts and fails allocations, and hosts that serve packs from memory and run
+// tasks on demand. Shared by the context, render and defaults tests.
 
 #ifndef VGL_TESTS_TEST_PACKS_HPP
 #define VGL_TESTS_TEST_PACKS_HPP
@@ -23,6 +24,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace vgl::test
@@ -210,6 +212,91 @@ struct test_allocator
     {
         --static_cast<test_allocator*>(user_data)->live;
         allocator().deallocate(memory, size, alignment);
+    }
+};
+
+// Serves packs from memory. Completes reads inside read(), or queues them for complete_all().
+struct memory_io
+{
+    std::map<std::string, const test_pack*> packs; // By URI.
+    bool deferred = false;
+    std::vector<std::pair<vgl_io_request*, vgl_io_read>> queued;
+    std::vector<std::string> uris; // Of every read started.
+    int destroyed = 0;
+    vgl_io_interface table{VGL_IO_INTERFACE_VERSION, 0, this, &read, nullptr, &destroy};
+
+    void serve(vgl_io_request* request, const vgl_io_read& r) const
+    {
+        const std::string uri = r.uri;
+        for (const auto& [base, p] : packs)
+        {
+            if (uri.size() > base.size() && uri.compare(0, base.size(), base) == 0 &&
+                uri[base.size()] == '/')
+            {
+                const auto f = p->files.find(uri.substr(base.size() + 1));
+                if (f == p->files.end())
+                {
+                    break;
+                }
+                const std::vector<std::byte>& bytes = f->second;
+                const std::uint64_t offset = std::min<std::uint64_t>(r.offset, bytes.size());
+                const std::uint64_t size = std::min<std::uint64_t>(r.size, bytes.size() - offset);
+                static_cast<void>(vgl_io_request_complete(request,
+                                                          VGL_RESULT_SUCCESS,
+                                                          bytes.data() + offset,
+                                                          static_cast<std::size_t>(size)));
+                return;
+            }
+        }
+        static_cast<void>(vgl_io_request_complete(request, VGL_RESULT_NOT_FOUND, nullptr, 0));
+    }
+
+    void complete_all()
+    {
+        auto work = std::move(queued);
+        queued.clear();
+        for (const auto& [request, r] : work)
+        {
+            serve(request, r);
+        }
+    }
+
+    static void read(void* user_data, vgl_io_request* request, const vgl_io_read* r)
+    {
+        auto* self = static_cast<memory_io*>(user_data);
+        self->uris.emplace_back(r->uri);
+        if (self->deferred)
+        {
+            // The read description lives in the request; copy its URI for later.
+            self->queued.emplace_back(request, *r);
+            return;
+        }
+        self->serve(request, *r);
+    }
+
+    static void destroy(void* user_data) { ++static_cast<memory_io*>(user_data)->destroyed; }
+};
+
+// Runs tasks on demand, on the test's thread.
+struct manual_tasks
+{
+    std::vector<std::pair<vgl_task_fn, void*>> queued;
+    vgl_task_interface table{VGL_TASK_INTERFACE_VERSION, 0, this, &submit, nullptr};
+
+    void run_all()
+    {
+        auto work = std::move(queued);
+        queued.clear();
+        for (const auto& [fn, data] : work)
+        {
+            fn(data);
+        }
+    }
+
+    static vgl_result submit(void* user_data, vgl_task_fn fn, void* data)
+    {
+        static_cast<manual_tasks*>(user_data)->queued.emplace_back(fn, data);
+        return VGL_RESULT_SUCCESS;
     }
 };
 

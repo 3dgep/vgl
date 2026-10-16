@@ -28,6 +28,7 @@ namespace
 namespace pk = pack;
 
 constexpr std::uint64_t default_cpu_budget = 256ull * 1024 * 1024;
+constexpr std::uint64_t default_gpu_budget = 512ull * 1024 * 1024;
 constexpr double default_time_budget = 0.002;
 // The first read of a shard; the header and a typical directory fit (pack format, section 1.1).
 constexpr std::uint64_t shard_head_size = 64ull * 1024;
@@ -495,6 +496,8 @@ void process_completions(vgl_context& ctx) noexcept
 // this frame, since the last update, are kept.
 void evict(vgl_context& ctx) noexcept
 {
+    // Meshes waiting for upload first: they are rebuilt from tiles, not reread.
+    evict_pending_meshes(ctx);
     if (ctx.cpu_used <= ctx.cpu_budget)
     {
         return;
@@ -502,16 +505,10 @@ void evict(vgl_context& ctx) noexcept
     struct candidate
     {
         std::uint64_t last_used;
-        vgl_pack* pack; // Null for a mesh.
+        vgl_pack* pack;
         std::uint64_t key;
     };
     vector<candidate> candidates(ctx.memory);
-    ctx.meshes.for_each([&](std::uint64_t key, const mesh_state& m) {
-        if (!m.building && m.last_used < ctx.frame)
-        {
-            static_cast<void>(candidates.push_back({m.last_used, nullptr, key}));
-        }
-    });
     for (vgl_pack* p : ctx.packs)
     {
         p->tiles.for_each([&](std::uint64_t key, tile_state& t) {
@@ -529,13 +526,6 @@ void evict(vgl_context& ctx) noexcept
         if (ctx.cpu_used <= ctx.cpu_budget)
         {
             break;
-        }
-        if (c.pack == nullptr)
-        {
-            const mesh_state* m = ctx.meshes.find(c.key);
-            ctx.cpu_used -= m->mesh.vertices.size() * sizeof(tile_vertex);
-            static_cast<void>(ctx.meshes.erase(c.key));
-            continue;
         }
         tile_state* t = c.pack->tiles.find(c.key);
         ctx.cpu_used -= t->q.size() * sizeof(std::int16_t);
@@ -867,6 +857,8 @@ extern "C" VGL_API vgl_result vgl_context_create(const vgl_context_create_info* 
         ctx->tasks = *settings.tasks;
     }
     ctx->cpu_budget = settings.cpu_budget == 0 ? default_cpu_budget : settings.cpu_budget;
+    ctx->gpu_budget = settings.gpu_budget == 0 ? default_gpu_budget : settings.gpu_budget;
+    ctx->frame_handle.context = ctx;
     *out_context = ctx;
     return VGL_RESULT_SUCCESS;
 }
@@ -1013,6 +1005,12 @@ extern "C" VGL_API vgl_result vgl_context_update(vgl_context* context, const vgl
         settings.time_budget < 0.0)
     {
         return r != VGL_RESULT_SUCCESS ? r : VGL_RESULT_INVALID_ARGUMENT;
+    }
+    if (ctx->frame_open)
+    {
+        ctx->log.log(VGL_LOG_LEVEL_ERROR,
+                     "vgl_context_update: a frame is open; call vgl_frame_end before updating");
+        return VGL_RESULT_INVALID_OPERATION;
     }
     const double budget = settings.time_budget == 0.0 ? default_time_budget : settings.time_budget;
     const auto start = std::chrono::steady_clock::now();

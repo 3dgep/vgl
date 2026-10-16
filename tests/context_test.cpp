@@ -33,91 +33,6 @@ using namespace vgl::internal;
 using namespace vgl::internal::pack;
 using namespace vgl::test;
 
-// Serves packs from memory. Completes reads inside read(), or queues them for complete_all().
-struct memory_io
-{
-    std::map<std::string, const test_pack*> packs; // By URI.
-    bool deferred = false;
-    std::vector<std::pair<vgl_io_request*, vgl_io_read>> queued;
-    std::vector<std::string> uris; // Of every read started.
-    int destroyed = 0;
-    vgl_io_interface table{VGL_IO_INTERFACE_VERSION, 0, this, &read, nullptr, &destroy};
-
-    void serve(vgl_io_request* request, const vgl_io_read& r) const
-    {
-        const std::string uri = r.uri;
-        for (const auto& [base, p] : packs)
-        {
-            if (uri.size() > base.size() && uri.compare(0, base.size(), base) == 0 &&
-                uri[base.size()] == '/')
-            {
-                const auto f = p->files.find(uri.substr(base.size() + 1));
-                if (f == p->files.end())
-                {
-                    break;
-                }
-                const std::vector<std::byte>& bytes = f->second;
-                const std::uint64_t offset = std::min<std::uint64_t>(r.offset, bytes.size());
-                const std::uint64_t size = std::min<std::uint64_t>(r.size, bytes.size() - offset);
-                static_cast<void>(vgl_io_request_complete(request,
-                                                          VGL_RESULT_SUCCESS,
-                                                          bytes.data() + offset,
-                                                          static_cast<std::size_t>(size)));
-                return;
-            }
-        }
-        static_cast<void>(vgl_io_request_complete(request, VGL_RESULT_NOT_FOUND, nullptr, 0));
-    }
-
-    void complete_all()
-    {
-        auto work = std::move(queued);
-        queued.clear();
-        for (const auto& [request, r] : work)
-        {
-            serve(request, r);
-        }
-    }
-
-    static void read(void* user_data, vgl_io_request* request, const vgl_io_read* r)
-    {
-        auto* self = static_cast<memory_io*>(user_data);
-        self->uris.emplace_back(r->uri);
-        if (self->deferred)
-        {
-            // The read description lives in the request; copy its URI for later.
-            self->queued.emplace_back(request, *r);
-            return;
-        }
-        self->serve(request, *r);
-    }
-
-    static void destroy(void* user_data) { ++static_cast<memory_io*>(user_data)->destroyed; }
-};
-
-// Runs tasks on demand, on the test's thread.
-struct manual_tasks
-{
-    std::vector<std::pair<vgl_task_fn, void*>> queued;
-    vgl_task_interface table{VGL_TASK_INTERFACE_VERSION, 0, this, &submit, nullptr};
-
-    void run_all()
-    {
-        auto work = std::move(queued);
-        queued.clear();
-        for (const auto& [fn, data] : work)
-        {
-            fn(data);
-        }
-    }
-
-    static vgl_result submit(void* user_data, vgl_task_fn fn, void* data)
-    {
-        static_cast<manual_tasks*>(user_data)->queued.emplace_back(fn, data);
-        return VGL_RESULT_SUCCESS;
-    }
-};
-
 // One worker thread for I/O completions and tasks, as a host might have.
 class worker
 {
@@ -713,16 +628,6 @@ TEST_CASE(allocation_failures_never_leak_or_crash)
 namespace
 {
 
-// A camera at an altitude above a position in degrees, looking straight down.
-vgl_view camera_over(double lat, double lon, double altitude)
-{
-    const ellipsoid e;
-    const dvec3 eye = e.to_ecef({radians(lat), radians(lon), altitude});
-    const dvec3 ground = e.to_ecef({radians(lat), radians(lon), 0.0});
-    const dvec3 up = std::fabs(lat) < 80.0 ? dvec3{0.0, 0.0, 1.0} : dvec3{1.0, 0.0, 0.0};
-    return make_view(look_at(eye, ground, up), perspective_gl(radians(60.0), 16.0 / 9.0, 1.0, 1e9));
-}
-
 // Updates until nothing is loading. Returns the number of updates.
 int settle(vgl_context* ctx, const memory_io& io)
 {
@@ -894,16 +799,16 @@ namespace
 {
 
 // The mesh of a selected tile, or null.
-const mesh_state* mesh_of(vgl_context* ctx, const tile_id& t)
+// The newest mesh of a tile. Without frames, meshes keep their CPU copies.
+const gpu_resource* mesh_of(vgl_context* ctx, const tile_id& t)
 {
-    const mesh_state* m = ctx->meshes.find(tile_key(t));
-    return m != nullptr && m->has_mesh ? m : nullptr;
+    return latest_mesh(*ctx, t);
 }
 
 // Height of mesh vertex (i, j).
-float mesh_height(const mesh_state& m, std::uint32_t i, std::uint32_t j)
+float mesh_height(const gpu_resource& m, std::uint32_t i, std::uint32_t j)
 {
-    return m.mesh.vertices.data()[static_cast<std::size_t>(j) * m.mesh.grid + i].height;
+    return m.vertices.data()[static_cast<std::size_t>(j) * m.grid + i].height;
 }
 
 // Position in degrees of mesh vertex (i, j) of tile t.
@@ -933,11 +838,11 @@ TEST_CASE(selected_tiles_get_meshes_of_their_data)
     vgl_view v = camera_over(centre.lat, centre.lon, 50000.0);
     REQUIRE(vgl_context_view_set(ctx, &v) == VGL_RESULT_SUCCESS);
     settle(ctx, io);
-    const mesh_state* m = mesh_of(ctx, deep);
+    const gpu_resource* m = mesh_of(ctx, deep);
     REQUIRE(m != nullptr);
-    CHECK(m->mesh.source == deep);
-    CHECK_EQ(m->mesh.grid, pack_tile_size);
-    CHECK_EQ(m->mesh.vertices.size(), tile_mesh_vertex_count(pack_tile_size));
+    CHECK(m->source == deep);
+    CHECK_EQ(m->grid, pack_tile_size);
+    CHECK_EQ(m->vertices.size(), tile_mesh_vertex_count(pack_tile_size));
     const std::vector<std::int16_t>& q = pack.samples.at(tile_key(deep));
     const double offset = pack.offsets.at(tile_key(deep));
     for (std::uint32_t j = 0; j < pack_tile_size; j += 5)
@@ -958,7 +863,7 @@ TEST_CASE(selected_tiles_get_meshes_of_their_data)
     settle(ctx, io);
     m = mesh_of(ctx, holey);
     REQUIRE(m != nullptr);
-    CHECK(m->mesh.source == holey);
+    CHECK(m->source == holey);
     for (std::uint32_t i = 0; i < pack_tile_size; i += 4)
     {
         const position at = mesh_position(holey, pack_tile_size, i, 0);
@@ -975,12 +880,12 @@ TEST_CASE(selected_tiles_get_meshes_of_their_data)
     {
         m = mesh_of(ctx, t.id);
         REQUIRE(m != nullptr);
-        CHECK(m->mesh.source == t.source);
-        CHECK(m->mesh.grid >= min_mesh_grid);
+        CHECK(m->source == t.source);
+        CHECK(m->grid >= min_mesh_grid);
         if (!(t.source == t.id))
         {
             ++from_ancestor;
-            const std::uint32_t g = m->mesh.grid;
+            const std::uint32_t g = m->grid;
             for (std::uint32_t k = 0; k < g; k += 2)
             {
                 const position at = mesh_position(t.id, g, k, g - 1 - k);
@@ -996,8 +901,8 @@ TEST_CASE(selected_tiles_get_meshes_of_their_data)
     const std::uint32_t pack_id = p->id;
     CHECK_EQ(vgl_pack_destroy(p), VGL_RESULT_SUCCESS);
     bool any = false;
-    ctx->meshes.for_each([&](std::uint64_t, const mesh_state& s) {
-        any = any || (s.has_mesh && s.mesh.pack_id == pack_id);
+    ctx->resources.for_each([&](std::uint64_t, const gpu_resource& r) {
+        any = any || (r.resource_kind == gpu_resource::kind::mesh && r.pack_id == pack_id);
     });
     CHECK(!any);
     CHECK_EQ(vgl_context_destroy(ctx), VGL_RESULT_SUCCESS);
@@ -1017,10 +922,10 @@ TEST_CASE(the_bare_ellipsoid_gets_a_mesh)
     REQUIRE(ctx->selected.size() == 2);
     for (const selected_tile& t : ctx->selected)
     {
-        const mesh_state* m = mesh_of(ctx, t.id);
+        const gpu_resource* m = mesh_of(ctx, t.id);
         REQUIRE(m != nullptr);
-        CHECK_EQ(m->mesh.pack_id, 0u);
-        CHECK_EQ(m->mesh.grid, 121u); // 180 degrees at 1.5 degrees.
+        CHECK_EQ(m->pack_id, 0u);
+        CHECK_EQ(m->grid, 121u); // 180 degrees at 1.5 degrees.
         CHECK_EQ(mesh_height(*m, 60, 60), 0.0f);
     }
     CHECK(ctx->cpu_used > 0);
@@ -1060,15 +965,16 @@ TEST_CASE(meshes_build_on_tasks_and_keep_the_old_mesh_meanwhile)
                 continue;
             }
             const selected_tile s = ctx->selected[0];
-            const mesh_state* m = ctx->meshes.find(tile_key(s.id));
-            if (m != nullptr && m->building && m->has_mesh && !(m->mesh.source == s.source))
+            const mesh_state* state = ctx->meshes.find(tile_key(s.id));
+            const gpu_resource* m = mesh_of(ctx, s.id);
+            if (state != nullptr && state->building && m != nullptr && !(m->source == s.source))
             {
                 kept_while_building = true;
             }
             tasks.run_all();
             REQUIRE(vgl_context_update(ctx, nullptr) == VGL_RESULT_SUCCESS);
             m = mesh_of(ctx, s.id);
-            reached = m != nullptr && m->mesh.source == deep;
+            reached = m != nullptr && m->source == deep;
         }
         CHECK(reached);
         CHECK(kept_while_building);
@@ -1125,8 +1031,8 @@ TEST_CASE(selection_and_meshes_survive_allocation_failures)
                                std::all_of(ctx->selected.begin(),
                                            ctx->selected.end(),
                                            [&](const selected_tile& t) {
-                                               const mesh_state* m = mesh_of(ctx, t.id);
-                                               return m != nullptr && m->mesh.source == t.source;
+                                               const gpu_resource* m = mesh_of(ctx, t.id);
+                                               return m != nullptr && m->source == t.source;
                                            });
                     CHECK(complete);
                 }

@@ -11,5 +11,6 @@
 #include <vgl/context.hpp>
 #include <vgl/foundation.hpp>
 #include <vgl/geodesy.hpp>
+#include <vgl/render.hpp>
 
 #endif // VGL_VGL_HPP

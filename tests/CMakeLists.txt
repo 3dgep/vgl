@@ -34,6 +34,7 @@ vgl_add_internal_test(selection selection_test.cpp)
 vgl_add_internal_test(mesh mesh_test.cpp)
 vgl_add_internal_test(pack pack_test.cpp WRITER)
 vgl_add_internal_test(context context_test.cpp WRITER)
+vgl_add_internal_test(render render_test.cpp WRITER)
 
 # Some tests run work on threads of their own, as hosts do.
 find_package(Threads REQUIRED)

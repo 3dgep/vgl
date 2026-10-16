@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace vgl::internal
 {
@@ -222,10 +223,12 @@ void mesh_job::run() noexcept
 {
     centre = build_tile_vertices(
         shape, id, grid, heights.span(), skirt_height, scratch.span(), vertices.span());
-    min_height = skirt_height;
-    max_height = skirt_height;
+    // The terrain's range; the skirts hang below it.
+    min_height = heights.data()[0];
+    max_height = heights.data()[0];
     for (const float h : heights.span())
     {
+        min_height = std::min(min_height, static_cast<double>(h));
         max_height = std::max(max_height, static_cast<double>(h));
     }
     heights = buffer<float>();
@@ -242,25 +245,134 @@ void free_mesh_job(const allocator& a, mesh_job* job) noexcept
     }
 }
 
+namespace
+{
+
+// Makes sure the index list of a grid size exists. Returns false if out of memory.
+bool ensure_index_list(vgl_context& ctx, std::uint32_t grid) noexcept
+{
+    if (ctx.index_lists.find(grid) != nullptr)
+    {
+        return true;
+    }
+    const std::size_t count = tile_mesh_index_count(grid);
+    const bool wide = tile_mesh_vertex_count(grid) > 65536;
+    gpu_resource r;
+    r.resource_kind = gpu_resource::kind::index_list;
+    r.grid = grid;
+    r.index_count = static_cast<std::uint32_t>(count);
+    r.index_size = wide ? 4 : 2;
+    buffer<std::uint32_t> indices;
+    if (!indices.allocate(ctx.memory, count) ||
+        !r.indices.allocate(ctx.memory, count * r.index_size))
+    {
+        return false;
+    }
+    build_tile_indices(grid, indices.span());
+    if (wide)
+    {
+        std::memcpy(r.indices.data(), indices.data(), count * 4);
+    }
+    else
+    {
+        for (std::size_t k = 0; k < count; ++k)
+        {
+            const auto v = static_cast<std::uint16_t>(indices.data()[k]);
+            std::memcpy(r.indices.data() + 2 * k, &v, 2);
+        }
+    }
+    r.bytes = r.indices.size();
+    const std::uint64_t id = ctx.next_resource_id;
+    if (ctx.resources.insert(id, std::move(r)) == nullptr)
+    {
+        return false;
+    }
+    if (ctx.index_lists.insert(grid, id) == nullptr)
+    {
+        static_cast<void>(ctx.resources.erase(id));
+        return false;
+    }
+    ++ctx.next_resource_id;
+    ctx.cpu_used += ctx.resources.find(id)->cpu_bytes();
+    return true;
+}
+
+// Erases a mesh state that holds nothing.
+void forget_if_empty(vgl_context& ctx, std::uint64_t key) noexcept
+{
+    const mesh_state* m = ctx.meshes.find(key);
+    if (m != nullptr && m->current == 0 && m->next == 0 && !m->building)
+    {
+        static_cast<void>(ctx.meshes.erase(key));
+    }
+}
+
+} // namespace
+
+const gpu_resource* latest_mesh(const vgl_context& ctx, const tile_id& t) noexcept
+{
+    const mesh_state* m = ctx.meshes.find(tile_key(t));
+    if (m == nullptr)
+    {
+        return nullptr;
+    }
+    const std::uint64_t id = m->next != 0 ? m->next : m->current;
+    return id != 0 ? ctx.resources.find(id) : nullptr;
+}
+
+void retire_resource(vgl_context& ctx, std::uint64_t id) noexcept
+{
+    gpu_resource* r = ctx.resources.find(id);
+    if (r == nullptr)
+    {
+        return;
+    }
+    r->garbage = true;
+    if (r->current == gpu_resource::state::offered)
+    {
+        return; // The open frame's lists point at its data; vgl_frame_end frees it.
+    }
+    ctx.cpu_used -= r->cpu_bytes();
+    r->vertices = buffer<tile_vertex>();
+    r->indices = buffer<std::byte>();
+    if (r->current == gpu_resource::state::pending)
+    {
+        static_cast<void>(ctx.resources.erase(id)); // The consumer never received it.
+    }
+}
+
 void handle_mesh_built(vgl_context& ctx, mesh_job* job) noexcept
 {
     mesh_state* m = ctx.meshes.find(tile_key(job->id));
     if (m != nullptr && m->building)
     {
         m->building = false;
-        if (m->has_mesh)
+        gpu_resource r;
+        r.resource_kind = gpu_resource::kind::mesh;
+        r.tile = job->id;
+        r.source = job->source;
+        r.pack_id = job->pack_id;
+        r.grid = job->grid;
+        r.centre = job->centre;
+        r.min_height = job->min_height;
+        r.max_height = job->max_height;
+        r.bytes = job->vertices.size() * sizeof(tile_vertex);
+        r.vertices = std::move(job->vertices);
+        // The index list first: it may take the next resource id.
+        const bool has_list = ensure_index_list(ctx, job->grid);
+        const std::uint64_t id = ctx.next_resource_id;
+        if (has_list && ctx.resources.insert(id, std::move(r)) != nullptr)
         {
-            ctx.cpu_used -= m->mesh.vertices.size() * sizeof(tile_vertex);
+            ++ctx.next_resource_id;
+            ctx.cpu_used += ctx.resources.find(id)->cpu_bytes();
+            // The map may have moved m; find it again.
+            m = ctx.meshes.find(tile_key(job->id));
+            if (m->next != 0)
+            {
+                retire_resource(ctx, m->next); // Superseded before it was created.
+            }
+            m->next = id;
         }
-        m->mesh.source = job->source;
-        m->mesh.pack_id = job->pack_id;
-        m->mesh.grid = job->grid;
-        m->mesh.centre = job->centre;
-        m->mesh.min_height = job->min_height;
-        m->mesh.max_height = job->max_height;
-        m->mesh.vertices = std::move(job->vertices);
-        m->has_mesh = true;
-        ctx.cpu_used += m->mesh.vertices.size() * sizeof(tile_vertex);
     }
     free_mesh_job(ctx.memory, job);
 }
@@ -281,8 +393,9 @@ void build_meshes(vgl_context& ctx, std::chrono::steady_clock::time_point deadli
             }
         }
         m->last_used = ctx.frame;
+        const gpu_resource* latest = latest_mesh(ctx, s.id);
         const bool current =
-            m->has_mesh && m->mesh.source == s.source && m->mesh.pack_id == s.pack_id;
+            latest != nullptr && latest->source == s.source && latest->pack_id == s.pack_id;
         if (current || m->building || (started && std::chrono::steady_clock::now() >= deadline))
         {
             continue;
@@ -307,26 +420,84 @@ void build_meshes(vgl_context& ctx, std::chrono::steady_clock::time_point deadli
 void drop_pack_meshes(vgl_context& ctx, std::uint32_t pack_id) noexcept
 {
     vector<std::uint64_t> keys(ctx.memory);
-    ctx.meshes.for_each([&](std::uint64_t key, const mesh_state& m) {
-        if (m.has_mesh && m.mesh.pack_id == pack_id)
-        {
-            static_cast<void>(keys.push_back(key));
-        }
-    });
+    ctx.meshes.for_each(
+        [&](std::uint64_t key, const mesh_state&) { static_cast<void>(keys.push_back(key)); });
     for (const std::uint64_t key : keys)
     {
         mesh_state* m = ctx.meshes.find(key);
-        ctx.cpu_used -= m->mesh.vertices.size() * sizeof(tile_vertex);
-        if (m->building)
+        for (std::uint64_t* id : {&m->current, &m->next})
         {
-            // A build is under way; keep the entry for it, without the stale mesh.
-            m->has_mesh = false;
-            m->mesh = tile_mesh_data{};
+            const gpu_resource* r = *id != 0 ? ctx.resources.find(*id) : nullptr;
+            if (r != nullptr && r->pack_id == pack_id)
+            {
+                retire_resource(ctx, *id);
+                *id = 0;
+            }
         }
-        else
+        forget_if_empty(ctx, key);
+    }
+}
+
+void evict_pending_meshes(vgl_context& ctx) noexcept
+{
+    if (ctx.cpu_used <= ctx.cpu_budget)
+    {
+        return;
+    }
+    struct candidate
+    {
+        std::uint64_t last_used;
+        std::uint64_t key;
+    };
+    vector<candidate> candidates(ctx.memory);
+    ctx.meshes.for_each([&](std::uint64_t key, const mesh_state& m) {
+        const gpu_resource* r = m.next != 0 ? ctx.resources.find(m.next) : nullptr;
+        if (r != nullptr && r->current == gpu_resource::state::pending && !m.building &&
+            m.last_used < ctx.frame)
         {
-            static_cast<void>(ctx.meshes.erase(key));
+            static_cast<void>(candidates.push_back({m.last_used, key}));
         }
+    });
+    std::sort(candidates.begin(), candidates.end(), [](const candidate& a, const candidate& b) {
+        return a.last_used < b.last_used;
+    });
+    for (const candidate& c : candidates)
+    {
+        if (ctx.cpu_used <= ctx.cpu_budget)
+        {
+            break;
+        }
+        mesh_state* m = ctx.meshes.find(c.key);
+        retire_resource(ctx, m->next);
+        m->next = 0;
+        forget_if_empty(ctx, c.key);
+    }
+    if (ctx.cpu_used <= ctx.cpu_budget)
+    {
+        return;
+    }
+    // Index lists that were never uploaded and that no mesh uses any more.
+    vector<std::uint32_t> unused(ctx.memory);
+    ctx.index_lists.for_each([&](std::uint64_t grid, std::uint64_t id) {
+        const gpu_resource* list = ctx.resources.find(id);
+        if (list == nullptr || list->current != gpu_resource::state::pending)
+        {
+            return;
+        }
+        bool used = false;
+        ctx.resources.for_each([&](std::uint64_t, const gpu_resource& r) {
+            used = used ||
+                   (r.resource_kind == gpu_resource::kind::mesh && !r.garbage && r.grid == grid);
+        });
+        if (!used)
+        {
+            static_cast<void>(unused.push_back(static_cast<std::uint32_t>(grid)));
+        }
+    });
+    for (const std::uint32_t grid : unused)
+    {
+        retire_resource(ctx, *ctx.index_lists.find(grid));
+        static_cast<void>(ctx.index_lists.erase(grid));
     }
 }
 

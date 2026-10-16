@@ -76,6 +76,18 @@ void check_context()
     const vgl::expected<vgl::height_sample> msl =
         ctx->height_query(0.0, 0.0, vgl::height_reference::mean_sea_level);
     CHECK(!msl && msl.error() == vgl::result::invalid_operation);
+    {
+        // Without a view, a frame draws nothing; it ends when it goes out of scope.
+        vgl::expected<vgl::frame> f = vgl::frame::begin(*ctx);
+        CHECK(f.has_value());
+        if (f)
+        {
+            CHECK(f->draw_list().empty());
+            CHECK(f->destroys().empty());
+            CHECK(f->meshes().empty());
+        }
+    }
+    CHECK(ctx->resources_reset() == vgl::result::success);
     p->reset();
 }
 

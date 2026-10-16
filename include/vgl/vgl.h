@@ -12,5 +12,6 @@
 #include <vgl/context.h>
 #include <vgl/foundation.h>
 #include <vgl/geodesy.h>
+#include <vgl/render.h>
 
 #endif /* VGL_VGL_H */

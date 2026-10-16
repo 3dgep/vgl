@@ -330,6 +330,7 @@ Structures that are fixed by nature, such as `vgl_dvec3`, have no `struct_size` 
 
 - Fields are only ever appended. Existing fields are never removed, reordered, renamed or changed in type. A deprecated field keeps its place and is ignored.
 - Structures have no implicit padding, including at the end. Where alignment would insert padding, the header declares an explicit `uint32_t reserved` field that must be zero. Tests check the size of each public structure.
+- In a structure that also holds 64-bit fields, each pointer is followed by `VGL_POINTER_PADDING(name)` from `vgl/base.h`, which adds a `uint32_t` on targets with 32-bit pointers and nothing elsewhere. Every pointer then takes 8 bytes, and the layout is the same on 32-bit and 64-bit targets.
 - Arrays are passed as a pointer and a count: `const vgl_layer_info* layers; uint32_t layer_count;`.
 - A versioned structure inside another one is referenced by pointer, not embedded by value, so that each can grow independently.
 

@@ -36,6 +36,7 @@ struct plane
 
 struct view_state
 {
+    dmat4 view_matrix;           // From ECEF to camera space.
     dvec3 eye;                   // In ECEF.
     std::array<plane, 5> planes; // The four sides of the frustum, and the plane of the eye.
     double pixel_scale = 0.0;    // Pixels per unit of camera space at unit distance.

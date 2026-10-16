@@ -104,6 +104,26 @@ public:
 
     [[nodiscard]] bool push_back(T value) noexcept { return emplace_back(std::move(value)); }
 
+    // Grows with value-initialized elements, or shrinks. Returns false if out of memory, with
+    // the size unchanged.
+    [[nodiscard]] bool resize(std::size_t size) noexcept
+    {
+        if (size > capacity_ && !reserve(size))
+        {
+            return false;
+        }
+        while (size_ < size)
+        {
+            ::new (static_cast<void*>(data_ + size_)) T();
+            ++size_;
+        }
+        while (size_ > size)
+        {
+            pop_back();
+        }
+        return true;
+    }
+
     void pop_back() noexcept
     {
         --size_;

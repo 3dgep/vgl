@@ -1,6 +1,6 @@
 # Render interface specification
 
-**Status: accepted on 15 October 2026, not yet implemented.** This document specifies the render interface, as the [C API conventions](c-api.md) and the [pack format](pack-format.md) specify theirs. The core, the built-in backends and third-party consumers follow it, and a change to the interface updates this document. Section 12 records the decisions and the alternatives that were considered.
+**Status: accepted on 15 October 2026; the core side is implemented (`vgl/render.h`), the backends are not yet.** This document specifies the render interface, as the [C API conventions](c-api.md) and the [pack format](pack-format.md) specify theirs. The core, the built-in backends and third-party consumers follow it, and a change to the interface updates this document. Section 12 records the decisions and the alternatives that were considered.
 
 This document specifies the contract between the vgl core and whatever draws the globe: the built-in OpenGL / OpenGL ES, Direct3D 11 and Ogre backends, third-party backends, and hosts that render the tiles themselves (FR-10).
 
@@ -39,10 +39,10 @@ From the design document:
 
 The render interface is **pulled, not pushed**. The core never calls into a backend. Instead, the consumer brackets each frame on the render thread:
 
-1. `vgl_context_frame_begin` returns a frame. The frame carries two lists that point into library memory and stay valid until the frame ends (C API conventions, section 6.4):
-   - **resource events**: meshes, index lists and textures to create, and resources to destroy
+1. `vgl_context_frame_begin` returns a frame. The frame carries lists that point into library memory and stay valid until the frame ends (C API conventions, section 6.4):
+   - **resources**: those to destroy, then the index lists, meshes and textures to create
    - the **draw list**: for each tile to draw, its resources and its model-view matrix
-2. The consumer applies the events (creating and destroying its GPU objects) and draws, or hands the list to its scene graph.
+2. The consumer applies the resource lists (destroying and creating its GPU objects) and draws, or hands the list to its scene graph.
 3. `vgl_frame_end` closes the frame. After it, the core frees the CPU copies of what was uploaded.
 
 The built-in backends are consumers of exactly this API, so a host that renders by itself uses the same, tested path (design document, section 13.1).
@@ -52,7 +52,7 @@ Why pull rather than a table of callbacks (the usual extension interface, C API 
 - **Scene graphs.** Ogre wants to create its objects inside its own frame callbacks, not whenever the core decides. A list it can walk when it is ready fits that; callbacks would arrive at the wrong time.
 - **No re-entrancy rules.** Callbacks must not call back into the context (section 9.3). A consumer that walks a list can call anything it likes.
 - **C.** A loop over an array is the most natural thing in C; a table of callbacks with `user_data` casts is less so.
-- **Batching.** A backend sees all of a frame's events at once, and can, for example, upload them with one staging buffer.
+- **Batching.** A backend sees all of a frame's resources at once, and can, for example, upload them with one staging buffer.
 
 The cost is that the consumer must call `vgl_context_frame_begin` and `vgl_frame_end` every frame, even when nothing changed. The built-in backends do this inside their draw function, so the four-step integration of section 13.2 stays four steps.
 
@@ -68,14 +68,14 @@ sequenceDiagram
     Note over C: loading, decoding, selection,<br/>mesh building (tasks)
     H->>B: draw (render thread)
     B->>C: vgl_context_frame_begin(info)
-    C-->>B: frame: resource events, draw list
-    Note over B: destroy, then create GPU objects<br/>(within the upload budget)
+    C-->>B: frame: resource lists, draw list
+    Note over B: destroy, then create GPU objects<br/>(index lists, meshes, textures)
     Note over B: draw the list
     B->>C: vgl_frame_end(frame)
     Note over C: free CPU copies of uploads
 ```
 
-The declarations, in outline; they follow the C API conventions, and details such as names may still change during implementation, which then updates this document:
+The declarations, from `vgl/render.h`:
 
 ```c
 typedef struct vgl_frame vgl_frame;
@@ -83,29 +83,38 @@ typedef struct vgl_frame vgl_frame;
 typedef struct vgl_frame_begin_info
 {
     uint32_t struct_size;
-    /* sizeof(vgl_draw_item) in the consumer's header, so that the core writes draw
-     * items of that size (section 5). 0 selects the size of the first version. */
+    /* sizeof(vgl_draw_item) in the consumer's header; draw items are written at this
+     * stride. 0 selects the size in this header (section 5). */
     uint32_t draw_item_size;
-    /* Bytes the consumer may upload in this frame. 0 selects 16 MiB. At least one
-     * resource is always offered, so a large one cannot stall forever. */
+    /* Bytes of resources the consumer may create in this frame. 0 selects 16 MiB. At
+     * least one resource is always offered, so a large one cannot stall forever. */
     uint64_t upload_budget;
-    /* Optional. The camera to compose model-view matrices for, when it differs from
-     * the view of the last update (for example, the host updates at 20 Hz and draws at
-     * 60 Hz). Null uses the view of the last update. */
+    /* Optional. The camera to compose model-view matrices for, when it differs from the
+     * view of the last update (for example, the host updates at 20 Hz and draws at
+     * 60 Hz). Null uses the view set with vgl_context_view_set. */
     const vgl_dmat4* view_matrix;
+    VGL_POINTER_PADDING(view_matrix_padding)
 } vgl_frame_begin_info;
 
 vgl_result vgl_context_frame_begin(vgl_context* context,
                                    const vgl_frame_begin_info* info,
                                    vgl_frame** out_frame);
 
-/* Views into library memory, valid until vgl_frame_end. */
-vgl_result vgl_frame_resource_events_get(const vgl_frame* frame,
-                                         const vgl_resource_event** out_events,
-                                         uint32_t* out_count);
+/* The lists, in the order to apply them: views into library memory, valid until
+ * vgl_frame_end. */
+vgl_result vgl_frame_destroys_get(const vgl_frame* frame,
+                                  const uint64_t** out_resources, uint32_t* out_count);
+vgl_result vgl_frame_index_lists_get(const vgl_frame* frame,
+                                     const vgl_index_list_data** out_index_lists,
+                                     uint32_t* out_count);
+vgl_result vgl_frame_meshes_get(const vgl_frame* frame,
+                                const vgl_mesh_data** out_meshes, uint32_t* out_count);
+vgl_result vgl_frame_textures_get(const vgl_frame* frame,
+                                  const vgl_texture_data** out_textures, uint32_t* out_count);
 vgl_result vgl_frame_draw_list_get(const vgl_frame* frame,
-                                   const vgl_draw_item** out_items,
-                                   uint32_t* out_count);
+                                   const vgl_draw_item** out_items, uint32_t* out_count);
+vgl_result vgl_frame_draw_layers_get(const vgl_frame* frame,
+                                     const vgl_draw_layer** out_layers, uint32_t* out_count);
 
 /* Optional: a handle the consumer wants back in later draw items, for example a
  * pointer to its own buffer object, to avoid a lookup per draw. */
@@ -131,39 +140,59 @@ There are three kinds of resource:
 
 Each resource has a 64-bit identifier, unique within the context and never reused. The consumer maps identifiers to its own objects, or sets a handle (section 3) that the core echoes in later draw items.
 
-### 4.2 Events
+### 4.2 Resource lists
+
+Each kind of resource has its own list, with its own data structure:
 
 ```c
-typedef enum vgl_resource_event_type
+typedef struct vgl_index_list_data
 {
-    VGL_RESOURCE_EVENT_TYPE_DESTROY = 1,
-    VGL_RESOURCE_EVENT_TYPE_MESH_CREATE = 2,
-    VGL_RESOURCE_EVENT_TYPE_INDEX_LIST_CREATE = 3,
-    VGL_RESOURCE_EVENT_TYPE_TEXTURE_CREATE = 4,
-    VGL_RESOURCE_EVENT_TYPE_MAX_ENUM = 0x7FFFFFFF
-} vgl_resource_event_type;
-
-typedef struct vgl_resource_event
-{
-    vgl_resource_event_type type;
-    uint32_t reserved;
     uint64_t resource;
-    /* For the create events: the data, valid until vgl_frame_end. One of these,
-     * by type; the others are null. */
-    const vgl_mesh_data* mesh;
-    const vgl_index_list_data* index_list;
-    const vgl_texture_data* texture;
-} vgl_resource_event;
+    const void* indices;             /* index_count indices of index_size bytes */
+    VGL_POINTER_PADDING(indices_padding)
+    uint32_t index_count;
+    uint32_t index_size;             /* 2 or 4 */
+} vgl_index_list_data;
+
+typedef struct vgl_mesh_data
+{
+    uint64_t resource;
+    uint64_t index_list;             /* the index list it is drawn with */
+    const void* vertices;            /* vertex_count vertices of vertex_size bytes */
+    VGL_POINTER_PADDING(vertices_padding)
+    uint32_t vertex_count;
+    uint32_t vertex_size;            /* VGL_TERRAIN_VERTEX_SIZE */
+    vgl_tile_id tile;
+    vgl_dvec3 centre;                /* ECEF origin of the vertex positions */
+    double min_height;               /* the terrain's range; the skirts hang below it */
+    double max_height;
+} vgl_mesh_data;
+
+typedef struct vgl_texture_data
+{
+    uint64_t resource;
+    vgl_texture_format format;
+    uint32_t width;
+    uint32_t height;
+    uint32_t mip_count;
+    const void* const* mip_data;     /* mip_count levels, largest first */
+    VGL_POINTER_PADDING(mip_data_padding)
+    const size_t* mip_sizes;
+    VGL_POINTER_PADDING(mip_sizes_padding)
+} vgl_texture_data;
 ```
 
-- In each frame, destroy events come first, so that their memory is free before anything new is created.
-- A resource appears in the draw list only after its create event has been delivered, in that frame or an earlier one, and never after its destroy event.
-- After `vgl_frame_end`, the core treats every create event as done, unless the consumer called `vgl_frame_resource_failed`. A failed resource is offered again in a later frame, and the failure is logged.
+- The consumer applies the lists in a fixed order: destroys, index lists, meshes, textures. Memory is therefore freed before anything new is created, and a mesh's index list exists before the mesh. Separate lists also spare C consumers a switch over event types.
+- A mesh's index list is created in the same frame or an earlier one. If the consumer cannot create an index list, it cannot create the meshes that use it either, and reports both as failed.
+- A resource appears in the draw list only in frames after the one that created it, and never after its destroy.
+- After `vgl_frame_end`, the core treats every create as done, unless the consumer called `vgl_frame_resource_failed`. A failed resource is offered again in a later frame, and the failure is logged.
+- Destroying the context destroys none of the consumer's objects; the consumer frees them itself.
+- Pointers in these structures are followed by `VGL_POINTER_PADDING`, so that every structure has the same layout, without implicit padding, on 32-bit and 64-bit targets (C API conventions, section 8.2).
 
 ### 4.3 Upload budget and the GPU budget
 
-- **Upload budget.** A frame offers create events up to `upload_budget` bytes, coarsest tiles first, so a large view change spreads its uploads over several frames instead of one long one.
-- **GPU budget.** `vgl_context_create_info` gains a `gpu_budget` (0 selects a default, perhaps 512 MiB). The core adds up the sizes of the resources it has asked the consumer to create. While the total exceeds the budget, it issues destroy events for resources not drawn in the current frame, least recently drawn first. The consumer never decides what to evict; it only does what the events say.
+- **Upload budget.** A frame offers resources to create up to `upload_budget` bytes, coarsest tiles first, so a large view change spreads its uploads over several frames instead of one long one.
+- **GPU budget.** `vgl_context_create_info` has a `gpu_budget` (0 selects 512 MiB). The core adds up the sizes of the resources it has asked the consumer to create. While the total exceeds the budget, it destroys meshes not drawn in the current frame, least recently drawn first. Meshes of selected tiles are exempt even when they are not drawn yet: they are waiting for the rest of their region, and evicting them would keep it from ever arriving. Index lists are small, and stay until a reset. The consumer never decides what to evict; it only applies the destroy list.
 - **No holes.** A region keeps what it drew last frame until all the resources that replace it are resident, the same rule selection follows for loading (design document, section 7.3).
 
 ### 4.4 CPU copies and device loss
@@ -174,7 +203,7 @@ The price is device loss. If the consumer loses its GPU objects (a lost Direct3D
 
 ```c
 /* Forget every resource: the consumer has lost them all. They are rebuilt from the
- * decoded tiles and offered again as create events, within the upload budget. */
+ * decoded tiles and offered again for creation, within the upload budget. */
 vgl_result vgl_context_resources_reset(vgl_context* context);
 ```
 
@@ -209,20 +238,21 @@ typedef struct vgl_draw_item
     uint64_t index_list;
     uint64_t index_list_handle;
     uint32_t index_count;
-    uint32_t layer_count;
-    const vgl_draw_layer* layers;  /* Imagery, bottom first. */
+    uint32_t index_size;           /* 2 or 4, as in the index list */
+    uint32_t first_layer;          /* the item's layers in the frame's layer list, */
+    uint32_t layer_count;          /* bottom first */
     float model_view[16];          /* Mesh coordinates to camera space, column-major;
                                       composed in double, rounded at the end. */
     vgl_dvec3 centre;              /* ECEF origin of the mesh coordinates, for consumers
                                       that compose their own transforms. */
-    double min_height;
+    double min_height;             /* the terrain's range */
     double max_height;
 } vgl_draw_item;
 ```
 
 - **Transforms.** The core composes `view × translate(centre)` in double precision and rounds the result to `float`, so consumers get jitter-free matrices without doing any double-precision work. The projection stays with the consumer, since only the consumer knows its depth convention (section 8). An engine that composes transforms itself uses `centre`.
 - **Order.** Items are sorted by distance from the camera, nearest first, which helps early depth rejection. Consumers may reorder them.
-- **Layers.** The material model is the design's narrow one: a terrain tile with imagery layers blended bottom to top. A tile with no imagery has no layers; backends then shade by height and normal.
+- **Layers.** The material model is the design's narrow one: a terrain tile with imagery layers blended bottom to top. An item's layers are `layer_count` entries of the frame's layer list (`vgl_frame_draw_layers_get`), from `first_layer`; an index rather than a pointer keeps the item free of padding. A tile with no imagery has no layers; backends then shade by height and normal.
 - **Growth.** The draw list is an array, so consumers step through it by `sizeof(vgl_draw_item)` of the header they were compiled against. To keep that safe, `vgl_frame_begin_info` has a field in which the consumer states that size, and the core writes items of that size. Fields are only ever appended.
 
 ## 6. Vertex and index formats
@@ -238,7 +268,7 @@ Meshes use the layout the mesh builder already produces (design document, sectio
 
 The stride is 24 bytes. Every one of these formats exists in OpenGL ES 3.0 and Direct3D 11, and in recent classic Ogre releases as `VET_FLOAT3`, `VET_FLOAT1`, `VET_USHORT2_NORM` and `VET_SHORT2_NORM`; to be confirmed for the client's release (design document, section 16, question 1).
 
-Index lists are 16-bit when the mesh has at most 65,536 vertices (grids up to 254 × 254 with their skirts, which covers the 129-sample tiles of the test bake), and 32-bit above that; the event says which. Triangles are counter-clockwise seen from outside the ellipsoid, in right-handed ECEF. A consumer whose camera space is left-handed, as is common with Direct3D, sees them clockwise and sets its culling mode to match; the backend knows its convention, so the data does not need to say.
+Index lists are 16-bit when the mesh has at most 65,536 vertices (grids up to 254 × 254 with their skirts, which covers the 129-sample tiles of the test bake), and 32-bit above that; the index list's data says which. Triangles are counter-clockwise seen from outside the ellipsoid, in right-handed ECEF. A consumer whose camera space is left-handed, as is common with Direct3D, sees them clockwise and sets its culling mode to match; the backend knows its convention, so the data does not need to say.
 
 ## 7. Textures and format negotiation
 
@@ -263,7 +293,7 @@ vgl_result vgl_context_texture_formats_set(vgl_context* context,
 
 For each imagery tile, the core picks the first of the consumer's formats it can produce: the pack's own pre-encoded format if the consumer lists it (the baker can pre-encode BC1 or BC7, design document section 8.4), and otherwise RGBA8, decoded from JPEG, WebP or PNG. Only RGBA8 needs to work in the MVP; the compressed formats are later work that needs no interface change.
 
-Texture events carry the format, the size, the mip level count and a pointer per mip level. Mip levels are generated by the core on a task thread, because OpenGL ES 3.0 cannot generate mipmaps for every format and because generating them on the render thread would cost frame time.
+Texture data carries the format, the size, the mip level count and a pointer per mip level. Mip levels are generated by the core on a task thread, because OpenGL ES 3.0 cannot generate mipmaps for every format and because generating them on the render thread would cost frame time.
 
 Imagery itself is still an open question for the client (design document, section 16, question 4), so textures are specified here only far enough to keep the interface stable.
 
@@ -289,14 +319,14 @@ gl_FragDepth = log2(max(1e-6, 1.0 + w)) * log_depth_coefficient * 0.5;
 
 - `vgl_context_frame_begin`, the frame functions and `vgl_frame_end` are in the **render thread** category (C API conventions, section 11): context-synchronized, and on the thread that owns the graphics device.
 - They must not overlap with `vgl_context_update`, which is context-synchronized too. A host that updates on another thread than it renders must serialize the two. This keeps the MVP simple; a later version could let the update run while the previous frame is drawn, by double-buffering the draw list, without changing these declarations.
-- Frame functions never allocate. The lists are built during the update and only handed out by `vgl_context_frame_begin`.
+- The frame's lists belong to the context and keep their capacity from frame to frame, so frames allocate only while the lists grow, and not at all once they have reached the size of the view.
 
 ## 10. Fitting the consumers
 
 | | Direct3D 11 / OpenGL backend | Ogre backend | Host renderer |
 |---|---|---|---|
 | Where the frame is | Inside `vgl_gl_draw` / `vgl_d3d11_draw`, called by the host in its render pass | In a `RenderQueueListener` or a custom `MovableObject`'s `_updateRenderQueue`, once per Ogre frame | Wherever the host draws |
-| Create and destroy events | Buffers and textures from a pool; a staging buffer per frame | `HardwareVertexBuffer`, `HardwareIndexBuffer` and `Texture` objects through Ogre's managers | Its own objects |
+| Destroy and create lists | Buffers and textures from a pool; a staging buffer per frame | `HardwareVertexBuffer`, `HardwareIndexBuffer` and `Texture` objects through Ogre's managers | Its own objects |
 | Draw list | One draw call per item, with a per-item constant buffer or uniform block | A pool of renderables, one per item, added to the render queue. Each reports `model_view` with `getUseIdentityView` set, so Ogre multiplies only the projection and the precision survives. | Its own draws |
 | Precision | `model_view` as is | `model_view` as is; an Ogre build with `OGRE_DOUBLE_PRECISION` is not needed | `model_view`, or its own composition from `centre` |
 | State | Saves and restores what it changes (NFR-08), documented per backend | Ogre's pass state; nothing to restore | Its own |
@@ -323,3 +353,13 @@ All seven were accepted as proposed.
 | 5 | Update and draw on different threads | Serialized by the host in the MVP (section 9) | Overlapping from the start, with a double-buffered draw list |
 | 6 | Index width | 16-bit up to 65,536 vertices, 32-bit above (section 6) | Always 32-bit, simpler but larger |
 | 7 | Mip levels | Generated by the core on task threads (section 7) | Generated by each backend on the GPU |
+
+### Changes during implementation
+
+Implementing the core side changed some details of the accepted proposal, without touching the seven decisions:
+
+- One list per kind of resource replaced a single list of events with a type field (section 4.2). An event holding one pointer per kind needed implicit padding on 32-bit targets, which the C API conventions forbid.
+- Draw items name their layers by index into a frame-wide list instead of a pointer, and say their index size (section 5), for the same reason and to spare a lookup.
+- A resource is drawn from the frame after the one that created it, so that a create the consumer reports as failed is never in the same frame's draw list.
+- Meshes of selected tiles are exempt from GPU eviction (section 4.3); without that, a region waiting for its last tiles could evict the others forever.
+- Frames allocate only while their lists grow (section 9), instead of never.

@@ -39,6 +39,15 @@ static void check_types(void)
     CHECK(sizeof(vgl_log_level) == 4);
     CHECK(offsetof(vgl_view, view_matrix) == 8);
     CHECK(sizeof(vgl_view) == 8 + 2 * sizeof(vgl_dmat4) + 8 + 8);
+    /* Render interface structures: the same layout on 32-bit and 64-bit targets. */
+    CHECK(sizeof(vgl_tile_id) == 16);
+    CHECK(sizeof(vgl_index_list_data) == 24);
+    CHECK(sizeof(vgl_mesh_data) == 88);
+    CHECK(sizeof(vgl_texture_data) == 40);
+    CHECK(sizeof(vgl_draw_layer) == 40);
+    CHECK(sizeof(vgl_draw_item) == 168);
+    CHECK(offsetof(vgl_draw_item, model_view) == 64);
+    CHECK(sizeof(vgl_frame_begin_info) == 24);
 }
 
 static void check_results(void)
@@ -117,6 +126,9 @@ static void check_context(void)
     vgl_result failure = VGL_RESULT_SUCCESS;
     double height = 0.0;
     vgl_view view = {.struct_size = sizeof(view)};
+    vgl_frame* frame = NULL;
+    const vgl_draw_item* items = NULL;
+    uint32_t item_count = 0;
 
     io.user_data = &reads;
     io.read = read_nothing;
@@ -140,6 +152,10 @@ static void check_context(void)
     view.viewport_height = 480;
     CHECK(vgl_context_view_set(context, &view) == VGL_RESULT_SUCCESS);
     CHECK(vgl_context_update(context, NULL) == VGL_RESULT_SUCCESS);
+    CHECK(vgl_context_frame_begin(context, NULL, &frame) == VGL_RESULT_SUCCESS);
+    CHECK(vgl_frame_draw_list_get(frame, &items, &item_count) == VGL_RESULT_SUCCESS);
+    CHECK(vgl_frame_end(frame) == VGL_RESULT_SUCCESS);
+    CHECK(vgl_context_resources_reset(context) == VGL_RESULT_SUCCESS);
     CHECK(vgl_context_view_set(context, NULL) == VGL_RESULT_SUCCESS);
 
     CHECK(vgl_pack_destroy(pack) == VGL_RESULT_SUCCESS);

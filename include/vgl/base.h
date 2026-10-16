@@ -37,6 +37,17 @@
 #    define VGL_DEPRECATED(message)
 #endif
 
+/*
+ * Pads a pointer field to 8 bytes on targets with 32-bit pointers. Placed after each pointer
+ * in a structure that also holds 64-bit fields, it gives the structure the same layout, without
+ * implicit padding, on every target (docs/c-api.md, section 8.2).
+ */
+#if UINTPTR_MAX == UINT32_MAX
+#    define VGL_POINTER_PADDING(name) uint32_t name;
+#else
+#    define VGL_POINTER_PADDING(name)
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif

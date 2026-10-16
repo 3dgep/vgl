@@ -23,6 +23,7 @@
 #include "tiling/tile.hpp"
 
 #include <vgl/context.h>
+#include <vgl/render.h>
 
 #include <chrono>
 #include <cstdint>
@@ -124,24 +125,68 @@ struct mesh_job : async_item
     void run() noexcept;
 };
 
-struct tile_mesh_data
+// A resource of the render interface (docs/render-interface.md, section 4): a tile mesh or a
+// shared index list. It keeps its CPU copy until the consumer has created it.
+struct gpu_resource
 {
+    enum class kind : std::uint8_t
+    {
+        mesh,
+        index_list,
+    };
+
+    enum class state : std::uint8_t
+    {
+        pending,  // Not offered yet, or offered and failed.
+        offered,  // In the open frame's create lists.
+        resident, // Created by the consumer.
+    };
+
+    kind resource_kind = kind::mesh;
+    state current = state::pending;
+    bool garbage = false;     // To destroy in the next frame.
+    bool failed = false;      // Reported failed in the open frame.
+    std::uint64_t bytes = 0;  // Size on the GPU.
+    std::uint64_t handle = 0; // As set by the consumer.
+    std::uint64_t last_drawn = 0;
+
+    // Meshes.
+    tile_id tile;
     tile_id source;
     std::uint32_t pack_id = 0;
     std::uint32_t grid = 0;
     dvec3 centre;
     double min_height = 0.0;
     double max_height = 0.0;
-    buffer<tile_vertex> vertices;
+    buffer<tile_vertex> vertices; // Until resident.
+
+    // Index lists.
+    buffer<std::byte> indices; // Until resident.
+    std::uint32_t index_count = 0;
+    std::uint32_t index_size = 0;
+
+    // Bytes of CPU memory the resource holds.
+    [[nodiscard]] std::uint64_t cpu_bytes() const noexcept
+    {
+        return vertices.size() * sizeof(tile_vertex) + indices.size();
+    }
 };
 
-// The mesh of a selected tile, by tile key. The previous mesh stays until a new one is built.
+// The meshes of a selected tile, by tile key: the one drawn, which is resident, and a newer
+// one waiting to be created. A tile keeps drawing its current mesh until the next is resident.
 struct mesh_state
 {
-    bool has_mesh = false;
-    tile_mesh_data mesh;
+    std::uint64_t current = 0; // Resource, or 0.
+    std::uint64_t next = 0;    // Resource, or 0.
     bool building = false;
     std::uint64_t last_used = 0;
+};
+
+// A tile drawn in the last frame, with the mesh it was drawn with.
+struct drawn_tile
+{
+    tile_id id;
+    std::uint64_t mesh = 0;
 };
 
 // A tile chosen for drawing (design document, section 7.3).
@@ -207,6 +252,17 @@ void free_mesh_job(const allocator& a, mesh_job* job) noexcept;
 // Forgets the meshes drawn from a pack.
 void drop_pack_meshes(vgl_context& ctx, std::uint32_t pack_id) noexcept;
 
+// The newest mesh of a tile, resident or not, or null.
+[[nodiscard]] const gpu_resource* latest_mesh(const vgl_context& ctx, const tile_id& t) noexcept;
+
+// Gives up a resource: frees it at once if the consumer never received it, or else destroys it
+// in the next frame.
+void retire_resource(vgl_context& ctx, std::uint64_t id) noexcept;
+
+// Frees the CPU copies of resources that tiles not used in this frame are waiting to upload,
+// least recently used first, until the CPU budget is met.
+void evict_pending_meshes(vgl_context& ctx) noexcept;
+
 } // namespace vgl::internal
 
 struct vgl_pack
@@ -225,11 +281,22 @@ struct vgl_pack
     vgl::internal::u64_map<vgl::internal::tile_state> tiles;
 };
 
+// The handle of a frame: the context, whose lists it shows.
+struct vgl_frame
+{
+    vgl_context* context = nullptr;
+};
+
+// One per context, with fields grouped by purpose rather than packed.
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 struct vgl_context
 {
     explicit vgl_context(const vgl::internal::allocator& a) noexcept
         : memory(a), decompressor(a), outstanding(a), packs(a), pending(a), selected(a), wanted(a),
-          boxes(a), meshes(a)
+          boxes(a), meshes(a), resources(a), index_lists(a), drawn(a), frame_destroys(a),
+          frame_index_lists(a), frame_meshes(a), frame_draw(a), frame_layers(a), frame_offered(a),
+          frame_selected(a), frame_drawn(a), frame_tiles(a), frame_ready(a), frame_counts(a),
+          frame_owner(a), frame_candidates(a)
     {
     }
 
@@ -259,6 +326,37 @@ struct vgl_context
     vgl::internal::vector<vgl::internal::load_request> wanted;
     vgl::internal::u64_map<vgl::internal::cached_box> boxes;  // By tile key.
     vgl::internal::u64_map<vgl::internal::mesh_state> meshes; // By tile key.
+
+    // The render interface (docs/render-interface.md).
+    std::uint64_t gpu_budget = 0;
+    std::uint64_t gpu_used = 0; // Resources offered or resident.
+    std::uint32_t texture_formats = 1u << VGL_TEXTURE_FORMAT_RGBA8;
+    std::uint64_t next_resource_id = 1;
+    vgl::internal::u64_map<vgl::internal::gpu_resource> resources; // By id.
+    vgl::internal::u64_map<std::uint64_t> index_lists;             // Resource by grid size.
+    vgl::internal::vector<vgl::internal::drawn_tile> drawn;        // In the last frame.
+    std::uint64_t render_frame = 0;
+    bool frame_open = false;
+    vgl_frame frame_handle; // The open frame's handle.
+
+    // The open frame's lists. They keep their capacity, so frames stop allocating once they
+    // have grown to the size of the view.
+    vgl::internal::vector<std::uint64_t> frame_destroys;
+    vgl::internal::vector<vgl_index_list_data> frame_index_lists;
+    vgl::internal::vector<vgl_mesh_data> frame_meshes;
+    vgl::internal::vector<std::byte> frame_draw; // Draw items, frame_draw_stride bytes apart.
+    std::uint32_t frame_draw_count = 0;
+    std::uint32_t frame_draw_stride = 0;
+    vgl::internal::vector<vgl_draw_layer> frame_layers;
+    vgl::internal::vector<std::uint64_t> frame_offered;
+    // Scratch for deciding what to draw.
+    vgl::internal::u64_map<std::uint32_t> frame_selected; // Selected tile key to index.
+    vgl::internal::u64_map<std::uint32_t> frame_drawn;    // Last frame's tile key to index.
+    vgl::internal::vector<vgl::internal::drawn_tile> frame_tiles;
+    vgl::internal::vector<std::uint8_t> frame_ready;       // Per selected tile.
+    vgl::internal::vector<std::uint32_t> frame_counts;     // Per last-frame tile, 3 counters.
+    vgl::internal::vector<std::uint32_t> frame_owner;      // Per selected tile.
+    vgl::internal::vector<std::uint64_t> frame_candidates; // Resources to upload or evict.
 };
 
 #endif // VGL_CONTEXT_CONTEXT_IMPL_HPP

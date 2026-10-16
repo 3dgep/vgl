@@ -7,6 +7,7 @@
 #define VGL_TESTS_TEST_VIEWS_HPP
 
 #include "foundation/math.hpp"
+#include "geodesy/ellipsoid.hpp"
 
 #include <vgl/context.h>
 
@@ -89,6 +90,18 @@ inline vgl_view make_view(const dmat4& view,
     v.viewport_width = width;
     v.viewport_height = height;
     return v;
+}
+
+// A camera at an altitude above a position in degrees, looking straight down.
+inline vgl_view camera_over(double lat, double lon, double altitude)
+{
+    const vgl::internal::ellipsoid e;
+    const dvec3 eye =
+        e.to_ecef({vgl::internal::radians(lat), vgl::internal::radians(lon), altitude});
+    const dvec3 ground = e.to_ecef({vgl::internal::radians(lat), vgl::internal::radians(lon), 0.0});
+    const dvec3 up = std::fabs(lat) < 80.0 ? dvec3{0.0, 0.0, 1.0} : dvec3{1.0, 0.0, 0.0};
+    return make_view(look_at(eye, ground, up),
+                     perspective_gl(vgl::internal::radians(60.0), 16.0 / 9.0, 1.0, 1e9));
 }
 
 } // namespace vgl::test

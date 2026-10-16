@@ -79,6 +79,7 @@ bool make_view_state(const vgl_view& view, view_state& out) noexcept
     const dvec3 r2{c02, a01 * a20 - a00 * a21, a00 * a11 - a01 * a10};
     const dvec3 t{v(0, 3), v(1, 3), v(2, 3)};
     out.eye = -dvec3{dot(r0, t), dot(r1, t), dot(r2, t)} * inv_det;
+    out.view_matrix = v;
 
     // Clip-space planes from the rows of P * V: w + x, w - x, w + y, w - y and w, each >= 0.
     const dmat4 m = p * v;

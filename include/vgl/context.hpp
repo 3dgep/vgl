@@ -9,9 +9,11 @@
 #include <vgl/base.hpp>
 #include <vgl/context.h>
 #include <vgl/foundation.hpp>
+#include <vgl/render.h>
 
 #include <cstdint>
 #include <limits>
+#include <span>
 #include <utility>
 
 namespace vgl
@@ -90,6 +92,19 @@ public:
     [[nodiscard]] result view_set(const vgl_view* view) noexcept
     {
         return static_cast<result>(vgl_context_view_set(handle_, view));
+    }
+
+    // The texture formats the consumer can sample, most preferred first (vgl/render.h).
+    [[nodiscard]] result texture_formats_set(std::span<const vgl_texture_format> formats) noexcept
+    {
+        return static_cast<result>(vgl_context_texture_formats_set(
+            handle_, formats.data(), static_cast<std::uint32_t>(formats.size())));
+    }
+
+    // Forgets every render resource, after the consumer lost them (vgl/render.h).
+    [[nodiscard]] result resources_reset() noexcept
+    {
+        return static_cast<result>(vgl_context_resources_reset(handle_));
     }
 
     // Takes completed work, decodes within the time budget, and selects tiles for the view.

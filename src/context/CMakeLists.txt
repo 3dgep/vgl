@@ -8,4 +8,5 @@ target_sources(vgl_objects PRIVATE
     build_meshes.cpp
     context.cpp
     context_impl.hpp
+    frame.cpp
     select_tiles.cpp)

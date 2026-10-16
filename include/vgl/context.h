@@ -41,6 +41,9 @@ typedef struct vgl_context_create_info
     /* Optional. Receives log messages; without it, the context is silent. */
     vgl_log_fn log;
     void* log_user_data;
+    /* GPU memory for the resources of the render interface, in bytes. 0 selects 512 MiB
+     * (docs/render-interface.md, section 4.3). */
+    uint64_t gpu_budget;
 } vgl_context_create_info;
 
 /**
