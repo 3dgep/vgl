@@ -9,7 +9,10 @@
 //          [--check] [--save <directory>]
 //
 // Controls: drag with the left button to move, with the right button to turn and tilt, scroll
-// to climb or descend; 1 to 6 jump to places; L switches between sunlight and a headlight.
+// to climb or descend; 1 to 6 jump to places; L switches between sunlight and a headlight. A
+// panel shows the context's statistics and the debug views: F1 shows or hides it, F2 the
+// wireframe, F3 colours by tile level, F4 the imagery source, and F5 freezes the selection,
+// so that tiles are selected for the frozen camera while you fly around it.
 //
 // With --check, the sample runs hidden: it flies to a few views with each depth convention
 // the device supports, and checks what it draws, that the conventions agree, that OpenGL
@@ -18,6 +21,7 @@
 // PPM files.
 
 #define GLFW_INCLUDE_NONE
+#include "overlay.hpp"
 #include "sample_camera.hpp"
 
 #include <vgl/defaults.hpp>
@@ -88,6 +92,8 @@ constexpr GLenum GL_DEPTH_ATTACHMENT = 0x8D00;
 constexpr GLenum GL_FRAMEBUFFER = 0x8D40;
 constexpr GLenum GL_RENDERBUFFER = 0x8D41;
 constexpr GLenum GL_CLIP_DEPTH_MODE = 0x935D;
+constexpr GLenum GL_POLYGON_MODE = 0x0B40;
+constexpr GLenum GL_FILL = 0x1B02;
 constexpr GLenum GL_NEGATIVE_ONE_TO_ONE = 0x935E;
 constexpr GLenum GL_ZERO_TO_ONE = 0x935F;
 
@@ -230,10 +236,11 @@ struct scene
 {
     vgl_depth_convention depth = VGL_DEPTH_CONVENTION_LOGARITHMIC;
     sample::camera camera;
-    bool sunlight = true;
+    sample::camera frozen; // Where tiles are selected for while the selection is frozen.
+    sample::debug_settings debug;
 };
 
-vgl_dmat4 projection_for(const scene& s, double aspect)
+vgl_dmat4 projection_for(const scene& s, const sample::camera& c, double aspect)
 {
     const double fovy = vgl::degrees_to_radians(field_of_view);
     switch (s.depth)
@@ -244,21 +251,23 @@ vgl_dmat4 projection_for(const scene& s, double aspect)
         // A near plane that grows with the altitude, which is all a conventional depth buffer
         // can do at this scale.
         return sample::perspective(
-            fovy, aspect, std::max(1.0, s.camera.altitude * 0.05), s.camera.altitude + 2.0e7);
+            fovy, aspect, std::max(1.0, c.altitude * 0.05), c.altitude + 2.0e7);
     default:
         // The logarithmic convention writes its own depth; the planes do not matter.
         return sample::perspective(fovy, aspect, 1.0, 1.0e9);
     }
 }
 
-// Sets the view for the next update, from the scene's camera.
+// Sets the view that the next update selects tiles for: the camera's, or the frozen one's.
 void view_set(vgl::context& ctx, const scene& s, int width, int height)
 {
+    const sample::camera& c = s.debug.freeze ? s.frozen : s.camera;
     auto view = vgl::init<vgl_view>();
-    view.view_matrix = sample::camera_view_matrix(s.camera);
-    view.projection_matrix = projection_for(s, static_cast<double>(width) / height);
+    view.view_matrix = sample::camera_view_matrix(c);
+    view.projection_matrix = projection_for(s, c, static_cast<double>(width) / height);
     view.viewport_width = static_cast<std::uint32_t>(width);
     view.viewport_height = static_cast<std::uint32_t>(height);
+    view.max_screen_space_error = s.debug.max_error;
     static_cast<void>(ctx.view_set(&view));
 }
 
@@ -281,14 +290,23 @@ void clear(const host_gl& gl, const scene& s, const target& t)
     gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
-// Has the backend draw the globe into the bound framebuffer.
-vgl::result draw(vgl::gl_backend& backend, const scene& s)
+// Has the backend draw the globe into the bound framebuffer, from the live camera, which
+// differs from the view the tiles were selected for while the selection is frozen.
+vgl::result draw(vgl::gl_backend& backend, const scene& s, int width, int height)
 {
+    const vgl_dmat4 view = sample::camera_view_matrix(s.camera);
+    const vgl_dmat4 projection = projection_for(s, s.camera, static_cast<double>(width) / height);
     auto info = vgl::init<vgl_gl_draw_info>();
-    if (s.sunlight)
+    info.view_matrix = &view;
+    info.projection_matrix = &projection;
+    if (s.debug.sunlight)
     {
         info.sun_direction = {1.0, 0.4, 0.3}; // Over the Atlantic, a little north.
     }
+    info.debug_flags =
+        (s.debug.wireframe ? std::uint32_t{VGL_GL_DEBUG_FLAG_WIREFRAME} : 0u) |
+        (s.debug.level_colors ? std::uint32_t{VGL_GL_DEBUG_FLAG_LEVEL_COLORS} : 0u) |
+        (s.debug.imagery_source ? std::uint32_t{VGL_GL_DEBUG_FLAG_IMAGERY_SOURCE} : 0u);
     return backend.draw(&info);
 }
 
@@ -540,7 +558,8 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
                 expect(ctx.update() == vgl::result::success, "vgl_context_update succeeds");
                 clear(gl, s, t);
                 sentinel_state_set(gl, host_vertex_array);
-                expect(draw(*backend, s) == vgl::result::success, "vgl_gl_backend_draw succeeds");
+                expect(draw(*backend, s, width, height) == vgl::result::success,
+                       "vgl_gl_backend_draw succeeds");
                 sentinel_state_check(gl, host_vertex_array, s.depth);
                 const vgl_context_statistics st = ctx.statistics_get();
                 quiet = idle(st) ? quiet + 1 : 0;
@@ -599,6 +618,28 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
             }
             images[c].push_back(std::move(pixels));
         }
+        // The debug views draw without OpenGL errors, and leave the host's state as it was,
+        // the polygon mode included.
+        s.debug.wireframe = s.debug.level_colors = s.debug.imagery_source = true;
+        clear(gl, s, t);
+        sentinel_state_set(gl, host_vertex_array);
+        expect(draw(*backend, s, width, height) == vgl::result::success,
+               "vgl_gl_backend_draw succeeds with the debug views");
+        sentinel_state_check(gl, host_vertex_array, s.depth);
+        expect(gl.GetError() == 0, "OpenGL reports no error with the debug views");
+        if (!o.es)
+        {
+            GLint mode[2] = {0, 0}; // NOLINT(modernize-avoid-c-arrays)
+            gl.GetIntegerv(GL_POLYGON_MODE, mode);
+            expect(static_cast<GLenum>(mode[0]) == GL_FILL, "the polygon mode is restored");
+        }
+        if (!o.save.empty())
+        {
+            save_image(read_image(gl, t),
+                       width,
+                       height,
+                       o.save + "/" + depth_name(s.depth) + "-debug.ppm");
+        }
         target_destroy(gl, t);
         backend->reset();
     }
@@ -638,6 +679,7 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
 struct input
 {
     scene* s = nullptr;
+    sample::overlay* ui = nullptr;
     bool dragging_left = false;
     bool dragging_right = false;
     double x = 0.0;
@@ -647,7 +689,7 @@ struct input
 void on_mouse_button(GLFWwindow* window, int button, int action, int /*mods*/)
 {
     auto* in = static_cast<input*>(glfwGetWindowUserPointer(window));
-    const bool down = action == GLFW_PRESS;
+    const bool down = action == GLFW_PRESS && !in->ui->wants_mouse();
     if (button == GLFW_MOUSE_BUTTON_LEFT)
     {
         in->dragging_left = down;
@@ -694,6 +736,10 @@ void on_cursor(GLFWwindow* window, double x, double y)
 void on_scroll(GLFWwindow* window, double /*dx*/, double dy)
 {
     auto* in = static_cast<input*>(glfwGetWindowUserPointer(window));
+    if (in->ui->wants_mouse())
+    {
+        return;
+    }
     sample::camera& c = in->s->camera;
     c.altitude = std::clamp(c.altitude * std::pow(0.85, dy), 50.0, 5.0e7);
 }
@@ -705,13 +751,38 @@ void on_key(GLFWwindow* window, int key, int /*scancode*/, int action, int /*mod
         return;
     }
     auto* in = static_cast<input*>(glfwGetWindowUserPointer(window));
+    if (in->ui->wants_keyboard())
+    {
+        return;
+    }
+    sample::debug_settings& d = in->s->debug;
     if (key == GLFW_KEY_ESCAPE)
     {
         glfwSetWindowShouldClose(window, GLFW_TRUE);
     }
     else if (key == GLFW_KEY_L)
     {
-        in->s->sunlight = !in->s->sunlight;
+        d.sunlight = !d.sunlight;
+    }
+    else if (key == GLFW_KEY_F1)
+    {
+        d.panel = !d.panel;
+    }
+    else if (key == GLFW_KEY_F2)
+    {
+        d.wireframe = !d.wireframe;
+    }
+    else if (key == GLFW_KEY_F3)
+    {
+        d.level_colors = !d.level_colors;
+    }
+    else if (key == GLFW_KEY_F4)
+    {
+        d.imagery_source = !d.imagery_source;
+    }
+    else if (key == GLFW_KEY_F5)
+    {
+        d.freeze = !d.freeze;
     }
     else if (key >= GLFW_KEY_1 && key < GLFW_KEY_1 + static_cast<int>(places.size()))
     {
@@ -741,13 +812,32 @@ int run_interactive(const options& o, GLFWwindow* window, const host_gl& gl, vgl
         return 1;
     }
 
+    // The window's callbacks first: Dear ImGui chains to them.
+    sample::overlay ui;
     input in;
     in.s = &s;
+    in.ui = &ui;
     glfwSetWindowUserPointer(window, &in);
     glfwSetMouseButtonCallback(window, on_mouse_button);
     glfwSetCursorPosCallback(window, on_cursor);
     glfwSetScrollCallback(window, on_scroll);
     glfwSetKeyCallback(window, on_key);
+    if (!ui.init(window, o.es))
+    {
+        std::fprintf(stderr, "could not set up the overlay\n");
+        return 1;
+    }
+    sample::panel_info panel;
+    panel.gl_version = reinterpret_cast<const char*>(gl.GetString(GL_VERSION));
+    panel.gl_renderer = reinterpret_cast<const char*>(gl.GetString(GL_RENDERER));
+    panel.depth = depth_name(s.depth);
+    panel.wireframe_available = !o.es;
+    if (o.es)
+    {
+        s.debug.wireframe = false;
+    }
+    bool was_frozen = false;
+    auto last_frame = std::chrono::steady_clock::now();
 
     target t;
     auto last_title = std::chrono::steady_clock::now();
@@ -781,16 +871,41 @@ int run_interactive(const options& o, GLFWwindow* window, const host_gl& gl, vgl
             s.camera.altitude = std::max(s.camera.altitude, ground->height + 50.0);
         }
 
+        // Freezing keeps the camera of that moment for selection.
+        if (s.debug.freeze && !was_frozen)
+        {
+            s.frozen = s.camera;
+        }
+        was_frozen = s.debug.freeze;
+
         view_set(ctx, s, width, height);
         static_cast<void>(ctx.update());
         clear(gl, s, t);
-        static_cast<void>(draw(*backend, s));
+        static_cast<void>(draw(*backend, s, width, height));
 
-        // Copy the frame to the window.
+        // Copy the frame to the window, and draw the overlay over it.
         gl.BindFramebuffer(GL_READ_FRAMEBUFFER, t.framebuffer);
         gl.BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
         gl.BlitFramebuffer(
             0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        gl.BindFramebuffer(GL_FRAMEBUFFER, 0);
+        const auto frame_end = std::chrono::steady_clock::now();
+        const double frame_seconds = std::chrono::duration<double>(frame_end - last_frame).count();
+        last_frame = frame_end;
+        const double aspect = static_cast<double>(width) / height;
+        panel.live = s.camera;
+        panel.frozen = s.frozen;
+        panel.credits = ctx.attribution_get();
+        // The frozen frustum reaches to about the frozen camera's horizon.
+        const double reach = std::sqrt(s.frozen.altitude * (2.0 * 6371000.0 + s.frozen.altitude));
+        ui.frame(ctx.statistics_get(),
+                 panel,
+                 frame_seconds,
+                 sample::camera_view_matrix(s.camera),
+                 projection_for(s, s.camera, aspect),
+                 sample::frustum_of(s.frozen, field_of_view, aspect, reach),
+                 s.debug);
+        ui.render();
         glfwSwapBuffers(window);
 
         ++frames;

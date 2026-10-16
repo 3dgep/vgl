@@ -86,6 +86,12 @@ uniform sampler2D u_layer1;
 uniform sampler2D u_layer2;
 uniform sampler2D u_layer3;
 
+// Debug views (vgl_gl_debug_flag), and what they show.
+uniform int u_debug;              // The flags.
+uniform float u_level;            // The tile's level.
+uniform float u_imagery_coarser;  // Levels by which the top layer is coarser than the tile.
+uniform int u_wire;               // 1 in the wireframe pass.
+
 layout(location = 0) out vec4 o_color;
 
 #ifdef VGL_LOGARITHMIC_DEPTH
@@ -112,6 +118,14 @@ vec3 height_color(float h)
         c = mix(c, stop_colors[i], t);
     }
     return c;
+}
+
+// A distinct colour per level.
+vec3 level_color(float level)
+{
+    float h = fract(level * 0.137 + 0.05) * 6.0;
+    vec3 c = clamp(vec3(abs(h - 3.0) - 1.0, 2.0 - abs(h - 2.0), 2.0 - abs(h - 4.0)), 0.0, 1.0);
+    return mix(vec3(1.0), c, 0.8);
 }
 
 // Blends a layer over the colour below it, by its alpha and opacity.
@@ -144,7 +158,32 @@ void main()
     {
         albedo = blend(albedo, u_layer3, u_layer_uv[3], u_layer_opacity.w);
     }
+    if ((u_debug & 2) != 0)
+    {
+        albedo = mix(albedo, level_color(u_level), 0.5);
+        // The tile's border, about a pixel and a half wide.
+        vec2 edge = min(v_uv, 1.0 - v_uv) / max(fwidth(v_uv), vec2(1e-6));
+        if (min(edge.x, edge.y) < 1.5)
+        {
+            albedo = vec3(0.05);
+        }
+    }
+    if ((u_debug & 4) != 0)
+    {
+        if (u_layer_count == 0)
+        {
+            albedo = mix(albedo, vec3(1.0, 0.0, 1.0), 0.6);
+        }
+        else if (u_imagery_coarser > 0.0)
+        {
+            albedo = mix(albedo, vec3(1.0, 0.5, 0.0), min(0.25 + 0.2 * u_imagery_coarser, 0.8));
+        }
+    }
     o_color = vec4(albedo * (0.3 + 0.7 * diffuse), 1.0);
+    if (u_wire != 0)
+    {
+        o_color = vec4(0.02, 0.02, 0.02, 1.0);
+    }
 #ifdef VGL_LOGARITHMIC_DEPTH
     gl_FragDepth = log2(v_log_depth) * u_log_depth * 0.5;
 #endif

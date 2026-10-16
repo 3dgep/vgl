@@ -43,12 +43,18 @@ inline constexpr GLboolean GL_TRUE = 1;
 
 inline constexpr GLenum GL_TRIANGLES = 0x0004;
 inline constexpr GLenum GL_LESS = 0x0201;
+inline constexpr GLenum GL_LEQUAL = 0x0203;
+inline constexpr GLenum GL_GEQUAL = 0x0206;
 inline constexpr GLenum GL_GREATER = 0x0204;
 inline constexpr GLenum GL_FRONT = 0x0404;
 inline constexpr GLenum GL_BACK = 0x0405;
 inline constexpr GLenum GL_CW = 0x0900;
 inline constexpr GLenum GL_CCW = 0x0901;
 inline constexpr GLenum GL_CULL_FACE = 0x0B44;
+inline constexpr GLenum GL_POLYGON_MODE = 0x0B40; // OpenGL only, as are the three below.
+inline constexpr GLenum GL_FRONT_AND_BACK = 0x0408;
+inline constexpr GLenum GL_LINE = 0x1B01;
+inline constexpr GLenum GL_FILL = 0x1B02;
 inline constexpr GLenum GL_CULL_FACE_MODE = 0x0B45;
 inline constexpr GLenum GL_FRONT_FACE = 0x0B46;
 inline constexpr GLenum GL_DEPTH_TEST = 0x0B71;
@@ -204,6 +210,9 @@ struct functions
 
     // Optional: glClipControl or glClipControlEXT, when the device has clip control.
     void(VGL_GL_APIENTRY* ClipControl)(GLenum origin, GLenum depth) = nullptr;
+
+    // Optional: glPolygonMode, for the wireframe debug view; OpenGL only.
+    void(VGL_GL_APIENTRY* PolygonMode)(GLenum face, GLenum mode) = nullptr;
 };
 
 #undef VGL_GL_DECLARE_FUNCTION

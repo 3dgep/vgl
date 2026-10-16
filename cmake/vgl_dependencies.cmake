@@ -99,8 +99,9 @@ set(VGL_STB_COMMIT 013ac3beddff3dbffafd5177e7972067cd2b5083) # stb_image 2.30
 set(VGL_STB_URL "https://raw.githubusercontent.com/nothings/stb/${VGL_STB_COMMIT}/stb_image.h")
 set(VGL_STB_SHA256 594c2fe35d49488b4382dbfaec8f98366defca819d916ac95becf3e75f4200b3)
 
-find_path(VGL_STB_INCLUDE_DIR stb_image.h PATH_SUFFIXES stb)
-if(VGL_STB_INCLUDE_DIR)
+find_path(VGL_STB_SYSTEM_INCLUDE_DIR stb_image.h PATH_SUFFIXES stb)
+if(VGL_STB_SYSTEM_INCLUDE_DIR)
+    set(VGL_STB_INCLUDE_DIR "${VGL_STB_SYSTEM_INCLUDE_DIR}")
     message(STATUS "vgl: using installed stb_image (${VGL_STB_INCLUDE_DIR})")
 elseif(VGL_FETCH_DEPENDENCIES)
     FetchContent_Declare(vgl_stb_source
@@ -110,7 +111,7 @@ elseif(VGL_FETCH_DEPENDENCIES)
         DOWNLOAD_NAME stb_image.h
         SOURCE_SUBDIR do-not-build)
     FetchContent_MakeAvailable(vgl_stb_source)
-    set(VGL_STB_INCLUDE_DIR "${vgl_stb_source_SOURCE_DIR}" CACHE PATH "Directory of stb_image.h" FORCE)
+    set(VGL_STB_INCLUDE_DIR "${vgl_stb_source_SOURCE_DIR}")
     message(STATUS "vgl: using downloaded stb_image 2.30, compiled into vgl")
 else()
     message(FATAL_ERROR "vgl: stb_image.h was not found and VGL_FETCH_DEPENDENCIES is off. "

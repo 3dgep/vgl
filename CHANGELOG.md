@@ -135,6 +135,14 @@ The pack format has its own version number, independent of the library version.
   offered within the upload and GPU budgets and decoded again after eviction or a reset. Draw
   items get one layer per imagery pack with the deepest resident texture, mapped into an
   ancestor's texture and inside its border. Imagery packs are credited when in view.
+- Debug views in the OpenGL backend: `vgl_gl_draw_info::debug_flags` with
+  `VGL_GL_DEBUG_FLAG_WIREFRAME` (OpenGL only), `VGL_GL_DEBUG_FLAG_LEVEL_COLORS` (a tint per
+  tile level, with tile borders) and `VGL_GL_DEBUG_FLAG_IMAGERY_SOURCE` (imagery coarser than
+  the tile, or missing). The polygon mode is saved and restored when the wireframe is drawn.
+- The OpenGL sample's overlay, with Dear ImGui 1.92.9b (downloaded at a pinned hash, sample
+  only): the context's statistics with memory against the budgets and a frame-time graph, the
+  credits, the camera, the debug views, a frozen selection with the frozen frustum outlined,
+  and the screen-space error. Its check draws once more with every debug view on.
 - Statistics of imagery: `textures_decoding` and `textures_waiting` (wanted by selected tiles
   and not yet created by the consumer), appended to `vgl_context_statistics`. The samples wait
   for them before they check a view.

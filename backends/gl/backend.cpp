@@ -71,6 +71,7 @@ struct saved_state
     GLint unpack_row_length = 0;
     GLint unpack_skip_rows = 0;
     GLint unpack_skip_pixels = 0;
+    std::array<GLint, 2> polygon_mode = {}; // Front and back; saved only for the wireframe.
 };
 
 constexpr std::size_t message_size = 1024;
@@ -100,6 +101,10 @@ struct vgl_gl_backend
     GLint u_layer_count = -1;
     GLint u_layer_uv = -1;
     GLint u_layer_opacity = -1;
+    GLint u_debug = -1;
+    GLint u_level = -1;
+    GLint u_imagery_coarser = -1;
+    GLint u_wire = -1;
     std::array<GLint, max_layers> u_layers = {-1, -1, -1, -1};
 
     vgl::common::pointer_map<gl_resource> resources;
@@ -203,6 +208,10 @@ vgl_result build_program(vgl_gl_backend& b, const char* function)
     b.u_layer_count = gl.GetUniformLocation(program, "u_layer_count");
     b.u_layer_uv = gl.GetUniformLocation(program, "u_layer_uv");
     b.u_layer_opacity = gl.GetUniformLocation(program, "u_layer_opacity");
+    b.u_debug = gl.GetUniformLocation(program, "u_debug");
+    b.u_level = gl.GetUniformLocation(program, "u_level");
+    b.u_imagery_coarser = gl.GetUniformLocation(program, "u_imagery_coarser");
+    b.u_wire = gl.GetUniformLocation(program, "u_wire");
     const std::array<const char*, max_layers> names = {
         "u_layer0", "u_layer1", "u_layer2", "u_layer3"};
     for (std::uint32_t k = 0; k < max_layers; ++k)
@@ -335,6 +344,11 @@ saved_state save_state(const vgl_gl_backend& b)
     gl.GetIntegerv(GL_UNPACK_ROW_LENGTH, &s.unpack_row_length);
     gl.GetIntegerv(GL_UNPACK_SKIP_ROWS, &s.unpack_skip_rows);
     gl.GetIntegerv(GL_UNPACK_SKIP_PIXELS, &s.unpack_skip_pixels);
+    if (b.gl.PolygonMode != nullptr)
+    {
+        s.polygon_mode = {static_cast<GLint>(GL_FILL), static_cast<GLint>(GL_FILL)};
+        gl.GetIntegerv(GL_POLYGON_MODE, s.polygon_mode.data());
+    }
     return s;
 }
 
@@ -389,6 +403,11 @@ void restore_state(const vgl_gl_backend& b, const saved_state& s)
     gl.PixelStorei(GL_UNPACK_ROW_LENGTH, s.unpack_row_length);
     gl.PixelStorei(GL_UNPACK_SKIP_ROWS, s.unpack_skip_rows);
     gl.PixelStorei(GL_UNPACK_SKIP_PIXELS, s.unpack_skip_pixels);
+    if (b.gl.PolygonMode != nullptr)
+    {
+        // Core profiles set both faces at once.
+        gl.PolygonMode(GL_FRONT_AND_BACK, static_cast<GLenum>(s.polygon_mode[0]));
+    }
 }
 
 const void* buffer_offset(std::uintptr_t offset)
@@ -597,6 +616,8 @@ void draw_items(const vgl_gl_backend& b,
     const functions& gl = b.gl;
     gl.UseProgram(b.program);
     gl.UniformMatrix4fv(b.u_projection, 1, GL_FALSE, to_float(projection).data());
+    gl.Uniform1i(b.u_debug, static_cast<GLint>(info.debug_flags));
+    gl.Uniform1i(b.u_wire, 0);
 
     // The sun in camera space: only the view's rotation applies to a direction.
     std::array<double, 3> light{};
@@ -702,11 +723,47 @@ void draw_items(const vgl_gl_backend& b,
             opacity[unit] = layer.opacity;
         }
         gl.Uniform1i(b.u_layer_count, static_cast<GLint>(drawn_layers));
+        if (info.debug_flags != 0)
+        {
+            gl.Uniform1f(b.u_level, static_cast<GLfloat>(item.tile.level));
+            // The top layer's scale is a little below 1 for the tile's own imagery (its border
+            // aside), and halves with each level of an ancestor.
+            const float scale = drawn_layers != 0 ? uv[4 * std::size_t{drawn_layers - 1}] : 1.0f;
+            const double coarser = std::round(-std::log2(std::max(scale, 1e-6f)));
+            gl.Uniform1f(b.u_imagery_coarser, static_cast<GLfloat>(std::max(coarser, 0.0)));
+        }
         if (drawn_layers != 0)
         {
             gl.Uniform4fv(b.u_layer_uv, static_cast<GLsizei>(drawn_layers), uv.data());
             gl.Uniform4fv(b.u_layer_opacity, 1, opacity.data());
         }
+        const gl_resource* mesh =
+            item.mesh_handle != 0 ? from_handle(item.mesh_handle) : b.resources.find(item.mesh);
+        if (mesh == nullptr)
+        {
+            continue;
+        }
+        gl.UniformMatrix4fv(b.u_model_view, 1, GL_FALSE, item.model_view);
+        gl.BindVertexArray(mesh->vertex_array);
+        gl.DrawElements(GL_TRIANGLES,
+                        static_cast<GLsizei>(item.index_count),
+                        item.index_size == 2 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT,
+                        nullptr);
+    }
+
+    // The wireframe, over the shaded tiles: the same triangles as lines, at the same depths,
+    // which the depth test lets through where they are equal.
+    if ((info.debug_flags & VGL_GL_DEBUG_FLAG_WIREFRAME) == 0 || gl.PolygonMode == nullptr)
+    {
+        return;
+    }
+    gl.PolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+    gl.DepthFunc(b.depth == VGL_DEPTH_CONVENTION_REVERSED_Z ? GL_GEQUAL : GL_LEQUAL);
+    gl.DepthMask(GL_FALSE);
+    gl.Uniform1i(b.u_wire, 1);
+    for (std::uint32_t i = 0; i < count; ++i)
+    {
+        const vgl_draw_item& item = items[i];
         const gl_resource* mesh =
             item.mesh_handle != 0 ? from_handle(item.mesh_handle) : b.resources.find(item.mesh);
         if (mesh == nullptr)
@@ -850,6 +907,17 @@ extern "C" VGL_GL_API vgl_result vgl_gl_backend_draw(vgl_gl_backend* backend,
             VGL_LOG_LEVEL_ERROR,
             "vgl_gl_backend_draw: info has a matrix or sun direction that is not finite, or a "
             "negative far distance");
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    constexpr std::uint32_t known_flags = VGL_GL_DEBUG_FLAG_WIREFRAME |
+                                          VGL_GL_DEBUG_FLAG_LEVEL_COLORS |
+                                          VGL_GL_DEBUG_FLAG_IMAGERY_SOURCE;
+    if ((info.debug_flags & ~known_flags) != 0 || info.reserved != 0)
+    {
+        log(b,
+            VGL_LOG_LEVEL_ERROR,
+            "vgl_gl_backend_draw: info->debug_flags has unknown flags, or info->reserved is not "
+            "zero");
         return VGL_RESULT_INVALID_ARGUMENT;
     }
     if (!b.ready)

@@ -43,6 +43,32 @@ if(TARGET vgl_gl AND NOT ANDROID AND NOT IOS)
         message(STATUS "vgl: using downloaded GLFW ${VGL_GLFW_VERSION} for the samples")
     endif()
 
+    # Dear ImGui draws the OpenGL sample's statistics and debug controls. It is a
+    # sample-only dependency like GLFW, downloaded at a pinned release with a
+    # checked hash, and built here with its GLFW and OpenGL 3 backends.
+    if(TARGET glfw AND VGL_FETCH_DEPENDENCIES AND NOT TARGET vgl_imgui)
+        include(FetchContent)
+        FetchContent_Declare(vgl_imgui_source
+            URL "https://github.com/ocornut/imgui/archive/refs/tags/v1.92.9b.tar.gz"
+            URL_HASH SHA256=21d8a0a565e85dce943e375db00812c2f3f0ab21f3f0f7964e364a63422d7f99
+            SOURCE_SUBDIR do-not-build
+            DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+        FetchContent_MakeAvailable(vgl_imgui_source)
+        set(imgui_dir "${vgl_imgui_source_SOURCE_DIR}")
+        add_library(vgl_imgui STATIC
+            "${imgui_dir}/imgui.cpp"
+            "${imgui_dir}/imgui_draw.cpp"
+            "${imgui_dir}/imgui_tables.cpp"
+            "${imgui_dir}/imgui_widgets.cpp"
+            "${imgui_dir}/backends/imgui_impl_glfw.cpp"
+            "${imgui_dir}/backends/imgui_impl_opengl3.cpp")
+        target_include_directories(vgl_imgui SYSTEM PUBLIC "${imgui_dir}" "${imgui_dir}/backends")
+        target_link_libraries(vgl_imgui PUBLIC glfw)
+        target_compile_features(vgl_imgui PUBLIC cxx_std_11)
+        set_target_properties(vgl_imgui PROPERTIES FOLDER third_party POSITION_INDEPENDENT_CODE ON)
+        message(STATUS "vgl: using downloaded Dear ImGui 1.92.9b for the OpenGL sample")
+    endif()
+
     if(TARGET glfw)
         # The check needs a display and a driver, which not every build machine
         # has, so it is a test only on request. CI runs it under Xvfb with Mesa.

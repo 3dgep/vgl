@@ -163,7 +163,24 @@ typedef struct vgl_gl_draw_info
     /* Bytes of resources to upload in this draw (vgl_frame_begin_info.upload_budget). 0
      * selects 16 MiB. */
     uint64_t upload_budget;
+    /* Debug views: a combination of vgl_gl_debug_flag values. 0 draws normally. */
+    uint32_t debug_flags;
+    uint32_t reserved;
 } vgl_gl_draw_info;
+
+/* Debug views of vgl_gl_draw_info.debug_flags, for inspecting level of detail and loading. */
+typedef enum vgl_gl_debug_flag
+{
+    /* The triangles as lines over the shading. OpenGL only: OpenGL ES has no line polygon
+     * mode, and ignores it. */
+    VGL_GL_DEBUG_FLAG_WIREFRAME = 0x1,
+    /* Each tile tinted by its level, with its borders outlined. */
+    VGL_GL_DEBUG_FLAG_LEVEL_COLORS = 0x2,
+    /* Tiles drawn with imagery coarser than themselves tinted orange, more strongly the more
+     * levels coarser it is, and tiles without imagery magenta. */
+    VGL_GL_DEBUG_FLAG_IMAGERY_SOURCE = 0x4,
+    VGL_GL_DEBUG_FLAG_MAX_ENUM = 0x7FFFFFFF
+} vgl_gl_debug_flag;
 
 /**
  * Draws the globe into the current framebuffer: takes a frame from the context, applies its

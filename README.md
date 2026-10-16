@@ -89,7 +89,10 @@ The Direct3D 11 and Ogre backends are still empty placeholders.
 
 The samples run on the sample data in `samples/data`: `vgl-headless` without a GPU, `vgl-gl`
 in a window (`--es` for OpenGL ES, `--depth reversed` for reversed-Z), and `vgl-c`, the same
-in C.
+in C. In `vgl-gl`, drag with the left mouse button to move, with the right one to turn and tilt,
+and scroll to climb; 1 to 6 jump to places. Its panel (F1) shows the runtime statistics and the
+debug views: wireframe (F2), colours by tile level (F3), the imagery source (F4) and a frozen
+selection (F5) to inspect level of detail and culling from outside.
 
 ### Using vgl
 
