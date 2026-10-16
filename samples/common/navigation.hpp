@@ -17,8 +17,8 @@
 //
 // Points under the cursor are found on the ellipsoid raised to the terrain's height under the
 // camera, which is close enough to grab at the sample's resolution. That height is taken when a
-// drag, throw or smooth zoom begins and held until it ends: the height under the camera changes
-// as it moves, and the point being held would otherwise slide with it.
+// drag, throw, smooth zoom or key movement begins and held until it ends: the height under the
+// camera changes as it moves, and the point being held would otherwise slide with it.
 
 #ifndef VGL_SAMPLES_NAVIGATION_HPP
 #define VGL_SAMPLES_NAVIGATION_HPP
@@ -58,7 +58,7 @@ public:
     void viewport(double width, double height, double field_of_view);
 
     // The terrain's height above the ellipsoid under the camera, for finding points. It takes
-    // effect when no drag, throw or smooth zoom is under way.
+    // effect when no drag, throw, smooth zoom or key movement is under way.
     void ground(double height);
 
     void press(drag mode, double x, double y, const camera& c);
@@ -86,7 +86,9 @@ private:
     void record();
     // Starts a throw if the pan was moving when it was released.
     void start_throw(const camera& c);
-    void pan_by(camera& c, double x, double y, double dx, double dy) const;
+    // Moves the camera over the ground, forward and to the right by distances in metres, keeping
+    // its height.
+    void walk(camera& c, double forward, double right) const;
     // Turns the globe about its centre until the point p appears at (x, y).
     void bring(camera& c, const vgl_dvec3& p, double x, double y) const;
     void orbit_by(camera& c, const vgl_dvec3& pivot, double yaw, double tilt) const;
@@ -128,6 +130,14 @@ private:
     vgl_dvec3 throw_axis_{};
     double throw_rate_ = 0.0; // Radians per second.
     double throw_stop_ = 0.0; // The rate at which it stops.
+
+    bool keys_moving_ = false; // Keys moved the camera at the last update.
+    // The speed of key movement forward and to the right, in view heights per second, and how
+    // fast each changes.
+    double walk_forward_ = 0.0;
+    double walk_forward_rate_ = 0.0;
+    double walk_right_ = 0.0;
+    double walk_right_rate_ = 0.0;
 
     // A smooth zoom: the natural logarithm of the factor still to apply, towards a point.
     double zoom_left_ = 0.0;

@@ -19,6 +19,12 @@ constexpr double max_altitude = 5.0e7; // Metres above the ellipsoid.
 constexpr double max_tilt = 85.0;      // Degrees from looking straight down at the pivot.
 constexpr double throw_window = 0.1;   // Seconds of a pan that set the speed of its throw.
 constexpr double throw_decay = 3.0;    // How fast a throw slows down, per second.
+// Keys move the camera over the ground at up to four view heights per second. The speed eases in
+// and out, as a critically damped spring: starting, it reaches 83% in a second and 99% in two;
+// stopping or reversing, it falls below 5% in 0.15 seconds.
+constexpr double walk_top_speed = 4.0;
+constexpr double walk_start = 3.2; // Per second.
+constexpr double walk_stop = 36.0;
 
 vgl_dvec3 add(const vgl_dvec3& a, const vgl_dvec3& b)
 {
@@ -64,6 +70,27 @@ pose pose_of(const camera& c)
 pose rotated(const pose& p, const vgl_dvec3& axis, double angle)
 {
     return {rotate(p.eye, axis, angle), rotate(p.forward, axis, angle), rotate(p.up, axis, angle)};
+}
+
+// One direction of a key movement over dt: the speed approaches the target as a critically
+// damped spring, solved exactly, so that it goes the same however the time is split into frames.
+// Returns the distance covered, in the speed's units times seconds.
+double approach(double& speed, double& rate, double target, double dt)
+{
+    const bool stopping = target == 0.0 || target * speed < 0.0;
+    const double omega = stopping ? walk_stop : walk_start;
+    const double e0 = speed - target;
+    const double c = rate + omega * e0;
+    const double decay = std::exp(-omega * dt);
+    const double covered = target * dt + e0 * (1.0 - decay) / omega +
+                           c * (1.0 - decay * (1.0 + omega * dt)) / (omega * omega);
+    speed = target + (e0 + c * dt) * decay;
+    rate = (rate - omega * c * dt) * decay;
+    if (target == 0.0 && std::abs(speed) < 1e-5 && std::abs(rate) < 1e-3)
+    {
+        speed = rate = 0.0; // At rest.
+    }
+    return covered;
 }
 
 // The surface normal of the ellipsoid at a geodetic position, in degrees.
@@ -150,7 +177,7 @@ void globe_navigation::settle()
 {
     // Between movements, points are found at the latest height; during one, at the height it
     // began with.
-    if (mode_ == drag::none && !released_ && !throwing_ && zoom_left_ == 0.0)
+    if (mode_ == drag::none && !released_ && !throwing_ && zoom_left_ == 0.0 && !keys_moving_)
     {
         ground_ = latest_ground_;
     }
@@ -233,16 +260,30 @@ void globe_navigation::bring(camera& c, const vgl_dvec3& p, double x, double y) 
     }
 }
 
-void globe_navigation::pan_by(camera& c, double x, double y, double dx, double dy) const
+void globe_navigation::walk(camera& c, double forward, double right) const
 {
-    // Turn the globe about its centre so that the point at (x, y) moves to (x + dx, y + dy):
-    // the camera turns the other way.
-    // The point under (x, y) moves to (x + dx, y + dy).
-    vgl_dvec3 from{};
-    if (pick(c, x, y, from))
+    // Turn the globe about its centre, carrying the camera over the ground in the direction it
+    // faces (or, looking straight down, the image's up), at the same height.
+    const double lat = vgl::degrees_to_radians(c.latitude);
+    const double lon = vgl::degrees_to_radians(c.longitude);
+    const double heading = vgl::degrees_to_radians(c.heading);
+    const vgl_dvec3 east{-std::sin(lon), std::cos(lon), 0.0};
+    const vgl_dvec3 north{
+        -std::sin(lat) * std::cos(lon), -std::sin(lat) * std::sin(lon), std::cos(lat)};
+    const vgl_dvec3 ahead = add(scale(north, std::cos(heading)), scale(east, std::sin(heading)));
+    const vgl_dvec3 side = add(scale(east, std::cos(heading)), scale(north, -std::sin(heading)));
+    const vgl_dvec3 towards = add(scale(ahead, forward), scale(side, right));
+    const double along = length(towards);
+    if (along < 1e-12)
     {
-        bring(c, from, x + dx, y + dy);
+        return;
     }
+    // Turning the eye about eye x towards moves it towards, through the same angle in every
+    // direction, since the axis is square to the eye.
+    const vgl_dvec3 axis = normalize(cross(camera_eye(c), towards));
+    const double altitude = c.altitude;
+    c = camera_of(rotated(pose_of(c), axis, along / semi_major), c, true);
+    c.altitude = altitude;
 }
 
 void globe_navigation::orbit_by(camera& c, const vgl_dvec3& pivot, double yaw, double tilt) const
@@ -316,7 +357,12 @@ void globe_navigation::zoom_by(camera& c, const vgl_dvec3& towards, double facto
         }
         if (visible)
         {
+            // Turning about the centre of an ellipsoid changes the height above it a little, by
+            // how far the turn goes: keep the height, so that a zoom reaches the same one however
+            // it is split into steps.
+            const double altitude = next.altitude;
             bring(next, towards, x, y);
+            next.altitude = altitude;
         }
         c = next;
         return;
@@ -548,6 +594,8 @@ void globe_navigation::stop()
     released_ = false;
     throwing_ = false;
     throw_rate_ = 0.0;
+    walk_forward_ = walk_forward_rate_ = 0.0;
+    walk_right_ = walk_right_rate_ = 0.0;
     zoom_left_ = 0.0;
     settle();
 }
@@ -574,8 +622,15 @@ void globe_navigation::update(double dt, const navigation_keys& keys, camera& c)
     }
     if (throwing_)
     {
-        c = camera_of(rotated(pose_of(c), throw_axis_, throw_rate_ * dt), c, true);
-        throw_rate_ *= std::exp(-dt * throw_decay);
+        // The rate decays exponentially, and the angle is its integral over dt: the throw covers
+        // the same ground in the same time however the time is split into frames.
+        const double decay = std::exp(-dt * throw_decay);
+        const double angle = throw_rate_ * (1.0 - decay) / throw_decay;
+        // At the same height: turning about the centre of an ellipsoid would change it a little.
+        const double altitude = c.altitude;
+        c = camera_of(rotated(pose_of(c), throw_axis_, angle), c, true);
+        c.altitude = altitude;
+        throw_rate_ *= decay;
         throwing_ = throw_rate_ > throw_stop_;
         settle();
     }
@@ -590,30 +645,41 @@ void globe_navigation::update(double dt, const navigation_keys& keys, camera& c)
         settle();
     }
 
-    // Keys: move at a third of the view per second, turn at 45 and tilt at 30 degrees per second.
+    // Keys: move over the ground, in view heights (at the camera's height above the ground) per
+    // second, easing in and stopping quickly, the same in every direction; with shift, turn at
+    // 45 and tilt at 30 degrees per second. While keys move the camera, the ground height they
+    // began with holds.
     const double cx = width_ / 2.0;
     const double cy = height_ / 2.0;
     const double horizontal = (keys.right ? 1.0 : 0.0) - (keys.left ? 1.0 : 0.0);
     const double vertical = (keys.up ? 1.0 : 0.0) - (keys.down ? 1.0 : 0.0);
-    if (horizontal != 0.0 || vertical != 0.0)
+    if (keys.shift && (horizontal != 0.0 || vertical != 0.0))
     {
-        if (keys.shift)
-        {
-            orbit_by(c,
-                     anchor(c, cx, cy),
-                     vgl::degrees_to_radians(horizontal * 45.0 * dt),
-                     vgl::degrees_to_radians(-vertical * 30.0 * dt));
-        }
-        else
-        {
-            const double speed = height_ / 3.0 * dt;
-            pan_by(c, cx, cy, -horizontal * speed, vertical * speed);
-        }
+        orbit_by(c,
+                 anchor(c, cx, cy),
+                 vgl::degrees_to_radians(horizontal * 45.0 * dt),
+                 vgl::degrees_to_radians(-vertical * 30.0 * dt));
     }
+    // Diagonally as fast as straight on.
+    const double top =
+        horizontal != 0.0 && vertical != 0.0 ? walk_top_speed / std::sqrt(2.0) : walk_top_speed;
+    const double forward =
+        approach(walk_forward_, walk_forward_rate_, keys.shift ? 0.0 : vertical * top, dt);
+    const double right =
+        approach(walk_right_, walk_right_rate_, keys.shift ? 0.0 : horizontal * top, dt);
+    if (forward != 0.0 || right != 0.0)
+    {
+        const double view = std::max(c.altitude - ground_, 1.0) * 2.0 *
+                            std::tan(vgl::degrees_to_radians(field_of_view_) / 2.0);
+        walk(c, forward * view, right * view);
+    }
+    keys_moving_ = horizontal != 0.0 || vertical != 0.0 || keys.zoom_in != keys.zoom_out ||
+                   walk_forward_ != 0.0 || walk_right_ != 0.0;
     if (keys.zoom_in != keys.zoom_out)
     {
         zoom_by(c, anchor(c, cx, cy), std::exp((keys.zoom_in ? -1.2 : 1.2) * dt));
     }
+    settle();
 }
 
 } // namespace sample

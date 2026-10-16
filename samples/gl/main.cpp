@@ -46,6 +46,7 @@
 #include <fstream>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #ifndef VGL_SAMPLE_DATA_DIR
@@ -677,6 +678,35 @@ void navigation_check()
             nav.update(0.008, {}, t);
             nav.update(0.008, {}, t);
             expect(turned(held, t) == 0.0, "letting go after holding still does not throw" + where);
+
+            // The same throw over 0.6 seconds in even frames and in very uneven ones ends in the
+            // same place: how far it goes depends on the time alone.
+            const auto thrown = [&](const std::vector<double>& steps) {
+                sample::camera th = start;
+                nav.stop();
+                nav.press(drag::pan, 600.0, 420.0, th);
+                for (int k = 1; k <= 20; ++k)
+                {
+                    nav.move(600.0 + 3.0 * k, 420.0 - 3.0 * k, th);
+                    nav.update(0.008, {}, th);
+                }
+                nav.release();
+                for (const double dt : steps)
+                {
+                    nav.update(dt, {}, th);
+                }
+                nav.stop();
+                return th;
+            };
+            const sample::camera even = thrown(std::vector<double>(24, 0.025));
+            std::vector<double> uneven;
+            for (int k = 0; k < 6; ++k)
+            {
+                uneven.insert(uneven.end(), {0.002, 0.048, 0.01, 0.04});
+            }
+            const sample::camera bumpy_throw = thrown(uneven);
+            expect(turned(even, bumpy_throw) < 1e-4 * turned(start, even),
+                   "a throw goes as far in uneven frames as in even ones" + where);
         }
 
         // Zoom towards the cursor.
@@ -710,6 +740,143 @@ void navigation_check()
                    std::abs(rising.latitude - c.latitude) < 1e-9 &&
                    std::abs(rising.longitude - c.longitude) < 1e-9,
                "a smooth zoom holds the ground height it began with" + where);
+
+        // The same zoom over a third of a second, partway, in even frames and in very uneven
+        // ones: how far it has gone depends on the time alone.
+        const auto zoomed = [&](const std::vector<double>& steps) {
+            sample::camera z = start;
+            nav.stop();
+            nav.scroll(2.0, zx, zy, z);
+            for (const double dt : steps)
+            {
+                nav.update(dt, {}, z);
+            }
+            nav.stop();
+            return z;
+        };
+        const sample::camera zoom_even = zoomed(std::vector<double>(10, 0.03));
+        std::vector<double> zoom_uneven;
+        for (int k = 0; k < 3; ++k)
+        {
+            zoom_uneven.insert(zoom_uneven.end(), {0.002, 0.07, 0.028});
+        }
+        const sample::camera zoom_bumpy = zoomed(zoom_uneven);
+        // The same height, and the same view to within a hundredth of a pixel at the centre and
+        // off it.
+        bool same_view = std::abs(zoom_bumpy.altitude - zoom_even.altitude) <
+                         1e-6 * std::abs(start.altitude - zoom_even.altitude);
+        for (const auto& [px, py] :
+             {std::pair{w / 2.0, h / 2.0}, std::pair{w / 2.0 + 120.0, h / 2.0 + 90.0}})
+        {
+            vgl_dvec3 seen{};
+            same_view = same_view && nav.pick(zoom_even, px, py, seen) &&
+                        project(zoom_bumpy, seen, w, h, x, y) && std::abs(x - px) < 0.01 &&
+                        std::abs(y - py) < 0.01;
+        }
+        expect(same_view, "a zoom goes as far in uneven frames as in even ones" + where);
+
+        // Keys move over the ground as fast forward as sideways, at the same height, as far in
+        // uneven frames as in even ones, and hold the ground height they began with.
+        {
+            const auto travelled = [](const sample::camera& from, const sample::camera& to) {
+                const vgl_dvec3 a = sample::normalize(sample::camera_eye(from));
+                const vgl_dvec3 b = sample::normalize(sample::camera_eye(to));
+                const vgl_dvec3 axis = sample::cross(a, b);
+                return std::atan2(std::sqrt(sample::dot(axis, axis)), sample::dot(a, b));
+            };
+            const auto keyed = [&](const sample::navigation_keys& keys,
+                                   const std::vector<double>& steps,
+                                   bool ground_rises) {
+                sample::camera k = start;
+                nav.stop();
+                for (std::size_t i = 0; i < steps.size(); ++i)
+                {
+                    if (ground_rises)
+                    {
+                        nav.ground(10.0 * static_cast<double>(i));
+                    }
+                    nav.update(steps[i], keys, k);
+                }
+                nav.ground(0.0);
+                sample::camera idle = k;
+                nav.update(0.01, {}, idle); // Keys up: the latest ground height applies again.
+                return k;
+            };
+            sample::navigation_keys forward;
+            forward.up = true;
+            sample::navigation_keys sideways;
+            sideways.right = true;
+            const std::vector<double> even(30, 0.02);
+            std::vector<double> uneven;
+            for (int k = 0; k < 6; ++k)
+            {
+                uneven.insert(uneven.end(), {0.002, 0.05, 0.013, 0.035});
+            }
+            const sample::camera ahead = keyed(forward, even, false);
+            const sample::camera aside = keyed(sideways, even, false);
+            const double d_ahead = travelled(start, ahead);
+            const double d_aside = travelled(start, aside);
+            expect(d_ahead > 0.0 && std::abs(d_ahead - d_aside) < 1e-4 * d_ahead,
+                   "keys move as fast forward as sideways" + where);
+            expect(std::abs(ahead.altitude - start.altitude) < 1e-6 &&
+                       std::abs(aside.altitude - start.altitude) < 1e-6,
+                   "keys keep the height" + where);
+            const sample::camera ahead_uneven = keyed(forward, uneven, false);
+            bool same = true;
+            for (const auto& [px, py] :
+                 {std::pair{w / 2.0, h / 2.0}, std::pair{w / 2.0 + 120.0, h / 2.0 + 90.0}})
+            {
+                vgl_dvec3 seen{};
+                same = same && nav.pick(ahead, px, py, seen) &&
+                       project(ahead_uneven, seen, w, h, x, y) && std::abs(x - px) < 0.01 &&
+                       std::abs(y - py) < 0.01;
+            }
+            expect(same, "keys move as far in uneven frames as in even ones" + where);
+            const sample::camera ahead_rising = keyed(forward, even, true);
+            expect(travelled(ahead, ahead_rising) < 1e-6 * d_ahead,
+                   "keys hold the ground height they began with" + where);
+
+            // Holding a key speeds up smoothly to four view heights per second over about two
+            // seconds; letting go stops within a fraction of one.
+            constexpr double top = 4.0;
+            const double view =
+                start.altitude * 2.0 * std::tan(vgl::degrees_to_radians(field_of_view) / 2.0);
+            sample::camera k = start;
+            nav.stop();
+            constexpr double dt = 0.01;
+            double speed = 0.0;
+            double at_tenth = 0.0;
+            double at_one = 0.0;
+            bool rising_smoothly = true;
+            for (int i = 1; i <= 200; ++i)
+            {
+                const sample::camera before = k;
+                nav.update(dt, forward, k);
+                const double now_speed = travelled(before, k) * 6378137.0 / dt / view;
+                rising_smoothly =
+                    rising_smoothly && now_speed >= speed && now_speed - speed < 0.05 * top;
+                speed = now_speed;
+                at_tenth = i == 10 ? speed : at_tenth;
+                at_one = i == 100 ? speed : at_one;
+            }
+            expect(rising_smoothly && at_tenth < 0.1 * top && at_one > 0.75 * top &&
+                       at_one < 0.9 * top && speed > 0.97 * top && speed < top * 1.0001,
+                   "holding a key speeds up smoothly" + where);
+            const double held_speed = speed;
+            double after_stop = 0.0;
+            bool stopped = false;
+            for (int i = 1; i <= 50; ++i)
+            {
+                const sample::camera before = k;
+                nav.update(dt, {}, k);
+                speed = travelled(before, k) * 6378137.0 / dt / view;
+                after_stop = i == 15 ? speed : after_stop;
+                stopped = speed == 0.0;
+            }
+            expect(after_stop < 0.05 * held_speed && stopped,
+                   "letting go of a key stops quickly" + where);
+            nav.stop();
+        }
 
         // Orbit around the centre, tilting as far as it goes.
         c = start;
@@ -1165,6 +1332,7 @@ int run_interactive(const options& o, GLFWwindow* window, const host_gl& gl, vgl
     }
     bool was_frozen = false;
     auto last_frame = std::chrono::steady_clock::now();
+    auto last_navigated = last_frame;
 
     target t;
     auto last_title = std::chrono::steady_clock::now();
@@ -1215,8 +1383,12 @@ int run_interactive(const options& o, GLFWwindow* window, const host_gl& gl, vgl
                 held(GLFW_KEY_PAGE_DOWN) || held(GLFW_KEY_MINUS) || held(GLFW_KEY_KP_SUBTRACT);
             keys.shift = held(GLFW_KEY_LEFT_SHIFT) || held(GLFW_KEY_RIGHT_SHIFT);
         }
+        // From one update to the next, so that the time spent updating and drawing counts too:
+        // movements then keep their speed however long frames take.
         const auto navigated = std::chrono::steady_clock::now();
-        nav.update(std::chrono::duration<double>(navigated - last_frame).count(), keys, s.camera);
+        nav.update(
+            std::chrono::duration<double>(navigated - last_navigated).count(), keys, s.camera);
+        last_navigated = navigated;
 
         // Contours at an interval that follows the altitude.
         if (s.debug.contour_auto)

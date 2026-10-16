@@ -167,7 +167,15 @@ The pack format has its own version number, independent of the library version.
   down instead of turning the view over. A throw keeps the globe turning about its centre at
   the rate of the pan's last tenth of a second, measured on the clock of the frames, so that it
   starts at the speed of the hand, however the mouse events and frames fall, and slows down
-  smoothly. WASD move as the arrows do.
+  smoothly: its decay is integrated exactly, so that it goes as far in uneven frames as in even
+  ones, and the OpenGL sample times navigation from one update to the next, so that the time
+  spent updating and drawing counts too. Zooms and throws keep the height they set while the
+  globe turns, so that zooms reach the same height in uneven frames as in even ones. The arrow
+  keys and WASD move the camera over the ground at up to four view heights per second, the same
+  forward as sideways, at a steady height, instead of moving the point at the centre of the view
+  by pixels, which was faster forward than sideways when tilted. The speed eases in over about
+  two seconds and stops within about 0.15 seconds, as a critically damped spring solved exactly
+  for each frame. WASD move as the arrows do.
 - The wireframe debug view is drawn in bright cyan, which shows against dark and light ground.
 - The OpenGL sample's overlay, with Dear ImGui 1.92.9b (downloaded at a pinned hash, sample
   only): the context's statistics with memory against the budgets and a frame-time graph, the
