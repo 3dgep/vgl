@@ -64,6 +64,9 @@ if(TARGET vgl_gl AND NOT ANDROID AND NOT IOS)
             "${imgui_dir}/backends/imgui_impl_opengl3.cpp")
         target_include_directories(vgl_imgui SYSTEM PUBLIC "${imgui_dir}" "${imgui_dir}/backends")
         target_link_libraries(vgl_imgui PUBLIC glfw)
+        # Its OpenGL backend loads its own functions; without this, GLFW's header would include
+        # the system's GL/gl.h, which not every machine has.
+        target_compile_definitions(vgl_imgui PRIVATE GLFW_INCLUDE_NONE)
         target_compile_features(vgl_imgui PUBLIC cxx_std_11)
         set_target_properties(vgl_imgui PROPERTIES FOLDER third_party POSITION_INDEPENDENT_CODE ON)
         message(STATUS "vgl: using downloaded Dear ImGui 1.92.9b for the OpenGL sample")
