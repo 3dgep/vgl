@@ -280,6 +280,9 @@ struct vgl_pack
     vgl::internal::pack::manifest manifest;
     vgl::internal::u64_map<vgl::internal::shard_state> shards;
     vgl::internal::u64_map<vgl::internal::tile_state> tiles;
+    // The pack's attribution lines, each null-terminated, one after another.
+    vgl::internal::buffer<char> credits;
+    std::uint32_t credit_count = 0;
 };
 
 // The handle of a frame: the context, whose lists it shows.

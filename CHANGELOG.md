@@ -85,6 +85,10 @@ The pack format has its own version number, independent of the library version.
 - Render interface specification (`docs/render-interface.md`), accepted:
   per-frame resource events and draw lists that backends and hosts pull, upload and GPU
   budgets, transforms, vertex and texture formats, depth conventions and threading.
+- Attribution (FR-08): `vgl_context_attribution_get` lists the attribution lines of the packs
+  whose tiles the view selects or the last frame drew, in pack priority order, each distinct
+  line once. C++: `vgl::context::attribution_get`. The headless sample prints the credits and
+  checks them.
 - Statistics: `vgl_context_statistics_get` reports memory against the budgets, work under
   way, the view and the last frame, totals of reads and loaded tiles, the mean tile load time,
   and the times of the last update and frame. C++: `vgl::context::statistics_get`.

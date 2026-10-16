@@ -22,6 +22,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 #ifndef VGL_SAMPLE_DATA_DIR
 #    define VGL_SAMPLE_DATA_DIR "."
@@ -318,6 +319,19 @@ int main(int argc, char** argv)
         expect(s.gpu_used == gpu.bytes(), "the consumer holds what the core counts");
         expect(s.gpu_used <= s.gpu_budget, "the GPU budget holds");
         expect(s.cpu_used <= s.cpu_budget, "the CPU budget holds");
+        // GEBCO covers every view, so its credit must be shown in every view.
+        const std::vector<const char*> lines = ctx->attribution_get();
+        expect(std::any_of(lines.begin(),
+                           lines.end(),
+                           [](const char* line) { return std::strstr(line, "GEBCO") != nullptr; }),
+               "GEBCO is credited");
+    }
+
+    // The credits a host would display with the last view.
+    std::printf("\ncredits:\n");
+    for (const char* line : ctx->attribution_get())
+    {
+        std::printf("  %s\n", line);
     }
 
     // Heights above mean sea level at a few well-known places. At this sample's resolution of

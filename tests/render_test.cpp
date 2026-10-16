@@ -18,6 +18,7 @@
 #include <cstring>
 #include <map>
 #include <set>
+#include <string>
 #include <vector>
 
 namespace
@@ -666,4 +667,105 @@ TEST_CASE(statistics_describe_the_context)
     CHECK_EQ(vgl_context_statistics_get(f.ctx, &old), VGL_RESULT_INVALID_ARGUMENT);
     CHECK_EQ(vgl_context_statistics_get(nullptr, &s), VGL_RESULT_INVALID_ARGUMENT);
     CHECK_EQ(vgl_context_statistics_get(f.ctx, nullptr), VGL_RESULT_INVALID_ARGUMENT);
+}
+
+namespace
+{
+
+std::vector<std::string> credits(const vgl_context* ctx)
+{
+    std::uint32_t count = 0;
+    CHECK_EQ(vgl_context_attribution_get(ctx, &count, nullptr), VGL_RESULT_SUCCESS);
+    std::vector<const char*> lines(count);
+    std::vector<std::string> out;
+    if (count == 0)
+    {
+        return out;
+    }
+    CHECK_EQ(vgl_context_attribution_get(ctx, &count, lines.data()), VGL_RESULT_SUCCESS);
+    for (std::uint32_t i = 0; i < count; ++i)
+    {
+        out.emplace_back(lines[i]);
+    }
+    return out;
+}
+
+} // namespace
+
+TEST_CASE(attribution_names_the_packs_in_view)
+{
+    const test_pack low = make_pack(layer_type::elevation, 0, "Low");
+    const test_pack high = make_pack(layer_type::elevation, 40, "High");
+    const test_pack twin = make_pack(layer_type::elevation, 20, "Low"); // Same lines as low.
+    memory_io io;
+    io.packs["mem://low"] = &low;
+    io.packs["mem://high"] = &high;
+    io.packs["mem://twin"] = &twin;
+    vgl_context_create_info info{};
+    info.struct_size = sizeof(info);
+    info.io = &io.table;
+    vgl_context* ctx = nullptr;
+    REQUIRE(vgl_context_create(&info, &ctx) == VGL_RESULT_SUCCESS);
+    vgl_pack_create_info create{};
+    create.struct_size = sizeof(create);
+    create.uri = "mem://low";
+    vgl_pack* p_low = nullptr;
+    REQUIRE(vgl_pack_create(ctx, &create, &p_low) == VGL_RESULT_SUCCESS);
+
+    // Nothing in view, nothing to credit.
+    CHECK(credits(ctx).empty());
+    std::uint32_t count = 7;
+    CHECK_EQ(vgl_context_attribution_get(nullptr, &count, nullptr), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_context_attribution_get(ctx, nullptr, nullptr), VGL_RESULT_INVALID_ARGUMENT);
+
+    fake_gpu gpu;
+    const position p = inside({3, 6, 2}, 0.5, 0.5);
+    const vgl_view v = camera_over(p.lat, p.lon, 50000.0);
+    REQUIRE(vgl_context_view_set(ctx, &v) == VGL_RESULT_SUCCESS);
+    settle(ctx, io, gpu);
+    std::vector<std::string> lines = credits(ctx);
+    REQUIRE(lines.size() == 2);
+    CHECK(lines[0] == "Low A");
+    CHECK(lines[1] == "Low B");
+
+    // Two-call pattern: too small an array is filled and reported incomplete.
+    const char* one[1] = {};
+    count = 1;
+    CHECK_EQ(vgl_context_attribution_get(ctx, &count, one), VGL_RESULT_INCOMPLETE);
+    CHECK_EQ(count, 1u);
+    CHECK(std::string(one[0]) == "Low A");
+
+    // A higher-priority pack covers the view: only its lines remain.
+    create.uri = "mem://high";
+    create.priority = 1;
+    vgl_pack* p_high = nullptr;
+    REQUIRE(vgl_pack_create(ctx, &create, &p_high) == VGL_RESULT_SUCCESS);
+    settle(ctx, io, gpu);
+    lines = credits(ctx);
+    REQUIRE(lines.size() == 2);
+    CHECK(lines[0] == "High A");
+
+    // Below it, another pack with the same lines as the first: each line is listed once.
+    CHECK_EQ(vgl_pack_destroy(p_high), VGL_RESULT_SUCCESS);
+    create.uri = "mem://twin";
+    create.priority = 0;
+    vgl_pack* p_twin = nullptr;
+    REQUIRE(vgl_pack_create(ctx, &create, &p_twin) == VGL_RESULT_SUCCESS);
+    // While the view switches from one to the other, both are in view: the last frame drew
+    // one, the view selects the other. Their shared lines appear once throughout.
+    for (int i = 0; i < 40; ++i)
+    {
+        REQUIRE(vgl_context_update(ctx, nullptr) == VGL_RESULT_SUCCESS);
+        gpu.frame(ctx);
+        CHECK_EQ(credits(ctx).size(), 2u);
+    }
+
+    // Without a view or frames, nothing is credited.
+    REQUIRE(vgl_context_view_set(ctx, nullptr) == VGL_RESULT_SUCCESS);
+    gpu.frame(ctx);
+    CHECK(credits(ctx).empty());
+
+    CHECK_EQ(vgl_pack_destroy(p_twin), VGL_RESULT_SUCCESS);
+    CHECK_EQ(vgl_pack_destroy(p_low), VGL_RESULT_SUCCESS);
+    CHECK_EQ(vgl_context_destroy(ctx), VGL_RESULT_SUCCESS);
 }

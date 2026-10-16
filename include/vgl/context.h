@@ -277,6 +277,34 @@ VGL_API vgl_result vgl_context_height_query(vgl_context* context,
                                             double* out_height);
 
 /* ---------------------------------------------------------------------------------------- */
+/* Attribution                                                                              */
+/* ---------------------------------------------------------------------------------------- */
+
+/**
+ * Gets the credits of the data in view (FR-08): the attribution lines of every pack whose tiles
+ * the view selects or the last frame drew, in pack priority order, each distinct line once.
+ * Hosts display them while the data is visible, as the data's licenses require. Uses the
+ * two-call pattern (docs/c-api.md, section 6.3).
+ *
+ * @param context      The context.
+ * @param inout_count  In: the capacity of out_strings. Out: the number of lines written, or
+ *                     available if out_strings is null.
+ * @param out_strings  Optional. Receives UTF-8 lines, valid until the pack they come from is
+ *                     destroyed.
+ *
+ * @retval VGL_RESULT_SUCCESS           All lines were written, or counted.
+ * @retval VGL_RESULT_INCOMPLETE        out_strings was too small; *inout_count lines were
+ *                                      written.
+ * @retval VGL_RESULT_INVALID_ARGUMENT  context or inout_count is null.
+ *
+ * @par Thread safety
+ * Context-synchronized.
+ */
+VGL_API vgl_result vgl_context_attribution_get(const vgl_context* context,
+                                               uint32_t* inout_count,
+                                               const char** out_strings);
+
+/* ---------------------------------------------------------------------------------------- */
 /* Statistics                                                                               */
 /* ---------------------------------------------------------------------------------------- */
 

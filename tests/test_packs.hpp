@@ -65,8 +65,10 @@ inline std::vector<std::int16_t> terrain(std::uint32_t size, std::uint64_t seed)
 // Levels 0 to 3, shard level 2. Tiles exist over the region of level-2 tiles (2, 3, 1) and
 // (2, 4, 1), and all of levels 0 and 1. The level-3 tiles in column 8 have nodata in their top
 // row. A geoid pack is the constant geoid_height. offset_shift moves every elevation by that
-// many steps, to tell packs apart.
-inline test_pack make_pack(layer_type type = layer_type::elevation, int offset_shift = 0)
+// many steps, to tell packs apart. The pack credits "<credit> A" and "<credit> B".
+inline test_pack make_pack(layer_type type = layer_type::elevation,
+                           int offset_shift = 0,
+                           const std::string& credit = "Test data")
 {
     test_pack p;
     bake::manifest_contents m;
@@ -82,6 +84,8 @@ inline test_pack make_pack(layer_type type = layer_type::elevation, int offset_s
     m.layer.east = 180.0;
     m.layer.north = 90.0;
     m.height_steps = {0.5, 0.5, 0.25, 0.125};
+    m.metadata = {
+        {"name", "Test pack"}, {"attribution", credit + " A"}, {"attribution", credit + " B"}};
     p.steps = m.height_steps;
 
     const auto encode = [&](const tile_id& t, std::uint8_t child_mask) {

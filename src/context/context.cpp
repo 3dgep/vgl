@@ -230,6 +230,38 @@ void handle_manifest(vgl_context& ctx, vgl_pack& p, vgl_io_request& r) noexcept
         }
         ctx.geoid = &p;
     }
+    // Copy the attribution lines, null-terminated, for vgl_context_attribution_get.
+    constexpr std::string_view attribution_key = "attribution";
+    std::size_t size = 0;
+    for (std::uint32_t i = 0; i < p.manifest.metadata_count(); ++i)
+    {
+        const pk::metadata_entry e = p.manifest.metadata(i);
+        size += e.key == attribution_key ? e.value.size() + 1 : 0;
+    }
+    if (size != 0)
+    {
+        if (!p.credits.allocate(ctx.memory, size))
+        {
+            fail_pack(ctx, p, VGL_RESULT_OUT_OF_MEMORY, "its attribution could not be copied");
+            if (ctx.geoid == &p)
+            {
+                ctx.geoid = nullptr;
+            }
+            return;
+        }
+        char* out = p.credits.data();
+        for (std::uint32_t i = 0; i < p.manifest.metadata_count(); ++i)
+        {
+            const pk::metadata_entry e = p.manifest.metadata(i);
+            if (e.key == attribution_key)
+            {
+                std::memcpy(out, e.value.data(), e.value.size());
+                out += e.value.size();
+                *out++ = '\0';
+                ++p.credit_count;
+            }
+        }
+    }
     p.state = VGL_PACK_STATE_READY;
 }
 

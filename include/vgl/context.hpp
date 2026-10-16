@@ -15,6 +15,7 @@
 #include <limits>
 #include <span>
 #include <utility>
+#include <vector>
 
 namespace vgl
 {
@@ -99,6 +100,21 @@ public:
     {
         return static_cast<result>(vgl_context_texture_formats_set(
             handle_, formats.data(), static_cast<std::uint32_t>(formats.size())));
+    }
+
+    // The credits of the data in view, each line once (vgl_context_attribution_get). The
+    // strings stay valid until the pack they come from is destroyed.
+    [[nodiscard]] std::vector<const char*> attribution_get() const
+    {
+        std::uint32_t count = 0;
+        if (vgl_context_attribution_get(handle_, &count, nullptr) != VGL_RESULT_SUCCESS)
+        {
+            return {};
+        }
+        std::vector<const char*> lines(count);
+        static_cast<void>(vgl_context_attribution_get(handle_, &count, lines.data()));
+        lines.resize(count);
+        return lines;
     }
 
     // What the context holds and does. The context must be valid.
