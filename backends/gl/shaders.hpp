@@ -32,11 +32,13 @@ uniform mat4 u_projection;
 uniform vec4 u_geoid;  // The geoid's heights at the corners: north-west, north-east, south-west, south-east.
 uniform vec3 u_centre; // The tile's centre, along the ECEF axes; for directions only.
 uniform int u_sea;     // 1 raises terrain below mean sea level to it.
+uniform float u_min_height; // The mesh's lowest terrain height; its skirts hang below it.
 
 out vec3 v_position; // Camera space.
 out vec3 v_normal;   // Camera space.
 out vec3 v_up;       // The vertical, in camera space.
 out float v_height;  // Above mean sea level.
+out float v_skirt;   // Above 0 on the skirts, with the sea surface.
 out vec2 v_uv;
 
 #ifdef VGL_LOGARITHMIC_DEPTH
@@ -60,9 +62,16 @@ void main()
     // Mean sea level under the vertex, from the geoid at the tile's corners.
     float geoid = mix(mix(u_geoid.x, u_geoid.y, a_uv.x), mix(u_geoid.z, u_geoid.w, a_uv.x), a_uv.y);
     v_height = a_height - geoid;
+    v_skirt = u_sea != 0 && a_height < u_min_height ? 1.0 : 0.0;
     vec3 up = normalize(u_centre + a_position);
     vec3 position = a_position;
-    if (u_sea != 0 && v_height < 0.0)
+    if (u_sea != 0 && a_height < u_min_height)
+    {
+        // A skirt: raised as far as the tile's lowest point is, so that it still hangs below the
+        // raised surface and covers the cracks between tiles of different levels.
+        position += up * max(geoid - u_min_height, 0.0);
+    }
+    else if (u_sea != 0 && v_height < 0.0)
     {
         position += up * -v_height; // Up to the sea surface.
     }
@@ -86,6 +95,7 @@ in vec3 v_position;
 in vec3 v_normal;
 in vec3 v_up;
 in float v_height; // Above mean sea level.
+in float v_skirt;
 in vec2 v_uv;
 uniform int u_sea;
 
@@ -249,7 +259,9 @@ void main()
         albedo = mix(albedo, vec3(0.08, 0.05, 0.03), major * 0.85);
     }
     vec3 lit = albedo * (0.3 + 0.7 * diffuse);
-    if (u_sea != 0 && v_height < 0.0)
+    // Skirts take the colour of the edge above them, as without the sea, so that they do not
+    // show as water where they fill a crack on land.
+    if (u_sea != 0 && v_height < 0.0 && v_skirt == 0.0)
     {
         // Water: the imagery's ocean, or a deep blue, under a level surface with a glint of
         // the light.

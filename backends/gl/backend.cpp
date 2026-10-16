@@ -44,6 +44,7 @@ struct gl_resource
     GLuint vertex_array = 0; // Meshes: the vertex layout and the index list's buffer.
     GLuint texture = 0;      // Textures.
     std::uint32_t grid = 0;  // Meshes: vertices along a side of the grid, or 0 if unknown.
+    float min_height = 0.0f; // Meshes: the lowest terrain height; the skirts hang below it.
 };
 
 // The host's state that drawing changes (NFR-08; vgl/gl.h lists it).
@@ -105,6 +106,7 @@ struct vgl_gl_backend
     GLint u_level = -1;
     GLint u_imagery_coarser = -1;
     GLint u_cells = -1;
+    GLint u_min_height = -1;
     GLint u_contour_interval = -1;
     GLint u_geoid = -1;
     GLint u_centre = -1;
@@ -216,6 +218,7 @@ vgl_result build_program(vgl_gl_backend& b, const char* function)
     b.u_level = gl.GetUniformLocation(program, "u_level");
     b.u_imagery_coarser = gl.GetUniformLocation(program, "u_imagery_coarser");
     b.u_cells = gl.GetUniformLocation(program, "u_cells");
+    b.u_min_height = gl.GetUniformLocation(program, "u_min_height");
     b.u_contour_interval = gl.GetUniformLocation(program, "u_contour_interval");
     b.u_geoid = gl.GetUniformLocation(program, "u_geoid");
     b.u_centre = gl.GetUniformLocation(program, "u_centre");
@@ -461,6 +464,8 @@ void create_mesh(vgl_gl_backend& b, vgl_frame* frame, const vgl_mesh_data& d)
     {
         r->grid = grid;
     }
+    // Vertex heights are floats, so a skirt's is below the lowest terrain height as a float.
+    r->min_height = static_cast<float>(d.min_height);
     gl.GenBuffers(1, &r->buffer);
     gl.GenVertexArrays(1, &r->vertex_array);
     gl.BindVertexArray(r->vertex_array);
@@ -756,6 +761,10 @@ void draw_items(const vgl_gl_backend& b,
             continue;
         }
         gl.UniformMatrix4fv(b.u_model_view, 1, GL_FALSE, item.model_view);
+        if (info.sea_surface != VGL_FALSE)
+        {
+            gl.Uniform1f(b.u_min_height, mesh->min_height);
+        }
         if ((info.debug_flags & VGL_GL_DEBUG_FLAG_WIREFRAME) != 0)
         {
             gl.Uniform1f(b.u_cells, static_cast<GLfloat>(mesh->grid > 1 ? mesh->grid - 1 : 0));

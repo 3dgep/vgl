@@ -147,7 +147,10 @@ The pack format has its own version number, independent of the library version.
   (`vgl_draw_item::geoid_heights` and `has_geoid`, appended), sampled from the geoid pack and
   filled in for meshes built before it loaded.
 - A sea surface in the OpenGL backend (`vgl_gl_draw_info::sea_surface`, F8 in the OpenGL
-  sample): terrain below mean sea level is raised to the geoid and shaded as water. Its colours
+  sample): terrain below mean sea level is raised to the geoid and shaded as water. Skirts are
+  raised only as far as their tile's lowest point, so that they still hang below the raised
+  surface, and keep the colour of the edge above them, rather than showing as strips of water
+  along land in tiles that reach below sea level. Its colours
   by height and contour lines are now above mean sea level, with smoother hypsometric tints,
   anti-aliased contours that fade out where they crowd, and an automatic interval of about a
   250th of the altitude.
