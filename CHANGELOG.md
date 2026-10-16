@@ -112,6 +112,11 @@ The pack format has its own version number, independent of the library version.
   linked by its toolchain.
 - The documentation of `vgl_view` said that hosts with row-vector matrices pass them
   transposed; they pass them unchanged, as section 4.2 of the C API conventions says.
+- The design document's open questions are settled with recommended choices (section 16):
+  Ogre 14 (14.6.0 when decided) with Direct3D 11, OpenGL 3+, OpenGL ES 3, Vulkan and Metal;
+  the OpenGL / OpenGL ES backend first, then Direct3D 11; Windows 10, macOS 11 (universal),
+  Android 7.0 (API 24, 64-bit) and iOS 15; Blue Marble and Sentinel-2 cloudless 2016 imagery;
+  bathymetry with an optional sea surface; hosting on an object store without egress fees.
 - C API conventions, section 12: a context may be destroyed while I/O requests are
   outstanding. It cancels them, and the host completes them later, as before; the completions
   are discarded. Previously this was an error.

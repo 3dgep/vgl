@@ -178,7 +178,7 @@
     {
       "name": "android-arm64",
       "displayName": "Android arm64-v8a, static (cross-build)",
-      "description": "Needs ANDROID_NDK set to an NDK (r27c is tested). The minimum API level is provisional until the client confirms it.",
+      "description": "Needs ANDROID_NDK set to an NDK (r27c is tested). The minimum is Android 7.0 (API 24), 64-bit (design document, section 4).",
       "inherits": "base",
       "generator": "Ninja Multi-Config",
       "toolchainFile": "$env{ANDROID_NDK}/build/cmake/android.toolchain.cmake",
@@ -198,7 +198,7 @@
     {
       "name": "ios-arm64",
       "displayName": "iOS arm64, static (cross-build)",
-      "description": "The minimum iOS version is provisional until the client confirms it.",
+      "description": "The minimum is iOS 15 (design document, section 4).",
       "inherits": "base",
       "generator": "Ninja Multi-Config",
       "condition": {

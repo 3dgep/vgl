@@ -1,6 +1,6 @@
 # vgl (Virtual Globe Library)
 
-vgl is a lightweight, open-source C++ library for rendering a virtual globe, with backends for OpenGL / OpenGL ES, Direct3D 11 and Ogre (classic, 1.x). The runtime targets Windows, Linux, macOS, Android and iOS and must stay platform-independent; the baker runs on Windows and Linux only. It is maintained by Jeremiah van Oosten at github.com/3dgep/vgl under the MIT license.
+vgl is a lightweight, open-source C++ library for rendering a virtual globe, with backends for OpenGL / OpenGL ES, Direct3D 11 and Ogre 14 (the classic line). The runtime targets Windows, Linux, macOS, Android and iOS and must stay platform-independent; the baker runs on Windows and Linux only. It is maintained by Jeremiah van Oosten at github.com/3dgep/vgl under the MIT license.
 
 ## Source of truth
 
@@ -29,13 +29,6 @@ Planning is complete, and milestone M0 (design document, section 14) is done: al
 - **Commits:** sign off every commit (`git commit -s`) for the Developer Certificate of Origin.
 - **Writing style:** never use em dashes in any text: code comments, documentation, commit messages or replies.
 
-## Open questions
+## Former open questions
 
-These are waiting on answers from a prospective user of the library (see design document, section 16). Do not assume answers to them:
-
-- Ogre: classic Ogre (1.x) is confirmed; the exact release and the render systems per platform (Metal or OpenGL on macOS and iOS) are open
-- Graphics API of their C project, which decides the first backend
-- Platforms: Windows, Linux, macOS, Android and iOS are confirmed; minimum OS versions, Intel Macs, and 32-bit ARM are open
-- Imagery: source, resolution, coverage and format
-- Oceans: render bathymetry, or a flat sea surface
-- Hosting for the web-served data
+The questions that waited on the client are settled with recommended choices (design document, section 16): Ogre 14 (14.6.0 when decided); the OpenGL / OpenGL ES backend first, then Direct3D 11; Windows 10, macOS 11 (universal), Android 7.0 (API 24, 64-bit only) and iOS 15; Blue Marble and Sentinel-2 cloudless 2016 imagery; bathymetry with an optional sea surface; hosting on an object store without egress fees. Change them only by updating the design document.
