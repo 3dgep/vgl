@@ -195,6 +195,15 @@ typedef struct vgl_draw_item
     vgl_dvec3 centre;
     double min_height;
     double max_height;
+    /* The geoid's height above the ellipsoid at the tile's corners, in metres: north-west,
+     * north-east, south-west and south-east. Interpolated bilinearly over the mesh's texture
+     * coordinates (u east, v south), it gives mean sea level under each vertex: a vertex's
+     * height above mean sea level is its height minus that, and a sea surface lies there.
+     * Zero where has_geoid is VGL_FALSE: the context has no geoid pack, or it has not loaded
+     * there yet. */
+    float geoid_heights[4];
+    vgl_bool has_geoid;
+    uint32_t reserved;
 } vgl_draw_item;
 
 /* Parameters of a frame. Zero-initialize, set struct_size, then fill in. */

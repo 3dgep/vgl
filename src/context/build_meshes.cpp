@@ -297,6 +297,31 @@ bool ensure_index_list(vgl_context& ctx, std::uint32_t grid) noexcept
     return true;
 }
 
+// Fills a mesh's geoid heights at its corners, once the geoid pack has them there. Corners are
+// sampled at their own positions, so neighbouring tiles share them.
+void fill_geoid(vgl_context& ctx, gpu_resource& r) noexcept
+{
+    if (r.has_geoid || r.resource_kind != gpu_resource::kind::mesh)
+    {
+        return;
+    }
+    const degree_region b = tile_bounds(r.tile);
+    const std::array<double, 4> lat = {b.north, b.north, b.south, b.south};
+    const std::array<double, 4> lon = {b.west, b.east, b.west, b.east};
+    std::array<float, 4> heights = {};
+    for (std::size_t k = 0; k < 4; ++k)
+    {
+        double h = 0.0;
+        if (!sample_geoid(ctx, lat[k], lon[k], h))
+        {
+            return;
+        }
+        heights[k] = static_cast<float>(h);
+    }
+    r.geoid = heights;
+    r.has_geoid = true;
+}
+
 // Erases a mesh state that holds nothing.
 void forget_if_empty(vgl_context& ctx, std::uint64_t key) noexcept
 {
@@ -363,7 +388,9 @@ void handle_mesh_built(vgl_context& ctx, mesh_job* job) noexcept
         if (has_list && ctx.resources.insert(id, std::move(r)) != nullptr)
         {
             ++ctx.next_resource_id;
-            ctx.cpu_used += ctx.resources.find(id)->cpu_bytes();
+            gpu_resource* installed = ctx.resources.find(id);
+            ctx.cpu_used += installed->cpu_bytes();
+            fill_geoid(ctx, *installed);
             // The map may have moved m; find it again.
             m = ctx.meshes.find(tile_key(job->id));
             if (m->next != 0)
@@ -392,6 +419,14 @@ void build_meshes(vgl_context& ctx, std::chrono::steady_clock::time_point deadli
             }
         }
         m->last_used = ctx.frame;
+        // Meshes built before the geoid pack had loaded there get their geoid heights now.
+        for (const std::uint64_t id : {m->current, m->next})
+        {
+            if (gpu_resource* r = id != 0 ? ctx.resources.find(id) : nullptr; r != nullptr)
+            {
+                fill_geoid(ctx, *r);
+            }
+        }
         const gpu_resource* latest = latest_mesh(ctx, s.id);
         const bool current =
             latest != nullptr && latest->source == s.source && latest->pack_id == s.pack_id;

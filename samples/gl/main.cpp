@@ -11,11 +11,12 @@
 // Controls, as in Google Earth (samples/common/navigation.hpp, shared by the samples): drag to grab
 // the globe, scroll or double-click to zoom to the cursor, shift-drag or middle-drag to orbit and
 // tilt, ctrl-drag to look around, right-drag to zoom; arrows move, with shift they turn and tilt,
-// page up and down zoom; N turns north up, U looks straight down, R does both. 1 to 6 jump to
+// page up and down zoom; N turns north up, U looks straight down, R does both. 1 to 7 jump to
 // places, and L switches between sunlight and a headlight. A panel shows the context's statistics
 // and the debug views: F1 shows or hides it, F2 the wireframe, F3 colours by tile level, F4 the
 // imagery source, F5 freezes the selection, so that tiles are selected for the frozen camera while
-// you fly around it, F6 colours by height instead of imagery, and F7 draws contour lines.
+// you fly around it, F6 colours by height instead of imagery, F7 draws contour lines, and F8 a
+// sea surface over the ocean floor.
 //
 // With --check, the sample runs hidden: it flies to a few views with each depth convention
 // the device supports, and checks what it draws, that the conventions agree, that OpenGL
@@ -314,14 +315,15 @@ vgl::result draw(vgl::gl_backend& backend, const scene& s, int width, int height
         (s.debug.height_colors ? std::uint32_t{VGL_GL_DEBUG_FLAG_HEIGHT_COLORS} : 0u) |
         (s.debug.contours ? std::uint32_t{VGL_GL_DEBUG_FLAG_CONTOURS} : 0u);
     info.contour_interval = s.debug.contour_interval;
+    info.sea_surface = s.debug.sea ? VGL_TRUE : VGL_FALSE;
     return backend.draw(&info);
 }
 
-// A contour interval for an altitude: about a fortieth of it, rounded down to 1, 2 or 5 times
-// a power of ten, from 1 m to 2,000 m.
+// A contour interval for an altitude: about a 250th of it, rounded down to 1, 2 or 5 times a
+// power of ten, from 1 m to 2,000 m. From 300 km that is 1,000 m, from 60 km 200 m.
 float contour_interval_for(double altitude)
 {
-    const double target = std::clamp(altitude / 40.0, 1.0, 2000.0);
+    const double target = std::clamp(altitude / 250.0, 1.0, 2000.0);
     const double power = std::pow(10.0, std::floor(std::log10(target)));
     double step = power;
     for (const double m : {2.0, 5.0})
@@ -375,13 +377,14 @@ struct place
     double most_coverage;
 };
 
-const std::array<place, 6> places{{
+const std::array<place, 7> places{{
     {"orbit, Atlantic", {30.0, -30.0, 2.0e7, 0.0, 90.0}, 0.06, 0.12},
     {"Europe", {48.0, 10.0, 5.0e6, 0.0, 90.0}, 0.45, 0.70},
     {"Alps", {44.5, 9.0, 3.0e5, 0.0, 35.0}, 0.65, 0.82},
     {"Himalaya", {26.0, 86.9, 6.0e4, 0.0, 20.0}, 0.58, 0.77},
     {"Mid-Atlantic Ridge", {20.0, -50.0, 1.5e6, 90.0, 40.0}, 0.38, 0.55},
     {"Sahara", {23.0, 12.0, 1.0e6, 0.0, 90.0}, 0.99, 1.0},
+    {"Sognefjord", {61.1, 6.2, 1.5e4, 60.0, 25.0}, 0.75, 0.9},
 }};
 
 // ---------------------------------------------------------------------------------------------
@@ -734,13 +737,31 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
                              ',',
                              '_');
                 save_image(pixels, width, height, name);
+                // The same view as elevation: colours by height, and contours at the interval
+                // the interactive sample would choose.
+                scene elevation = s;
+                elevation.debug.height_colors = true;
+                elevation.debug.contours = true;
+                elevation.debug.contour_interval = contour_interval_for(s.camera.altitude);
+                clear(gl, elevation, t);
+                static_cast<void>(draw(*backend, elevation, width, height));
+                std::string elevation_name = name;
+                elevation_name.insert(elevation_name.size() - 4, "-elevation");
+                save_image(read_image(gl, t), width, height, elevation_name);
+                // And with the sea surface over the imagery.
+                scene sea = s;
+                sea.debug.sea = true;
+                clear(gl, sea, t);
+                static_cast<void>(draw(*backend, sea, width, height));
+                name.insert(name.size() - 4, "-sea");
+                save_image(read_image(gl, t), width, height, name);
             }
             images[c].push_back(std::move(pixels));
         }
         // The debug views draw without OpenGL errors, and leave the host's state as it was,
         // the polygon mode included.
         s.debug.wireframe = s.debug.level_colors = s.debug.imagery_source = true;
-        s.debug.height_colors = s.debug.contours = true;
+        s.debug.height_colors = s.debug.contours = s.debug.sea = true;
         clear(gl, s, t);
         sentinel_state_set(gl, host_vertex_array);
         expect(draw(*backend, s, width, height) == vgl::result::success,
@@ -933,6 +954,10 @@ void on_key(GLFWwindow* window, int key, int /*scancode*/, int action, int /*mod
     {
         d.contours = !d.contours;
     }
+    else if (key == GLFW_KEY_F8)
+    {
+        d.sea = !d.sea;
+    }
     else if (key == GLFW_KEY_N || key == GLFW_KEY_R)
     {
         in->nav->stop();
@@ -1057,7 +1082,7 @@ int run_interactive(const options& o, GLFWwindow* window, const host_gl& gl, vgl
         const auto navigated = std::chrono::steady_clock::now();
         nav.update(std::chrono::duration<double>(navigated - last_frame).count(), keys, s.camera);
 
-        // Contours about every fortieth of the altitude, at 1, 2 or 5 times a power of ten.
+        // Contours at an interval that follows the altitude.
         if (s.debug.contour_auto)
         {
             s.debug.contour_interval = contour_interval_for(s.camera.altitude);
@@ -1273,10 +1298,13 @@ int main(int argc, char** argv)
     const std::string terrain_uri = o.data + "/packs/gebco";
     const std::string geoid_uri = o.data + "/packs/egm2008";
     const std::string imagery_uri = o.data + "/packs/bluemarble";
+    const std::string detail_uri = o.data + "/packs/glo30-sognefjord";
     vgl::expected<vgl::pack> terrain = vgl::pack::create(*ctx, terrain_uri.c_str());
+    // Finer terrain over the Sognefjord, above the global GEBCO.
+    vgl::expected<vgl::pack> detail = vgl::pack::create(*ctx, detail_uri.c_str(), 1);
     vgl::expected<vgl::pack> geoid = vgl::pack::create(*ctx, geoid_uri.c_str());
     vgl::expected<vgl::pack> imagery = vgl::pack::create(*ctx, imagery_uri.c_str());
-    if (!terrain || !geoid || !imagery)
+    if (!terrain || !geoid || !imagery || !detail)
     {
         std::fprintf(stderr, "could not add the packs\n");
         return 1;
@@ -1289,6 +1317,7 @@ int main(int argc, char** argv)
     terrain->reset();
     geoid->reset();
     imagery->reset();
+    detail->reset();
     ctx->reset();
     reader->reset();
     pool->reset();

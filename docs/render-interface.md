@@ -247,12 +247,17 @@ typedef struct vgl_draw_item
                                       that compose their own transforms. */
     double min_height;             /* the terrain's range */
     double max_height;
+    float geoid_heights[4];        /* The geoid at the corners: north-west, north-east,
+                                      south-west, south-east. */
+    vgl_bool has_geoid;            /* VGL_FALSE without a geoid pack, or before it loads */
+    uint32_t reserved;
 } vgl_draw_item;
 ```
 
 - **Transforms.** The core composes `view × translate(centre)` in double precision and rounds the result to `float`, so consumers get jitter-free matrices without doing any double-precision work. The projection stays with the consumer, since only the consumer knows its depth convention (section 8). An engine that composes transforms itself uses `centre`.
 - **Order.** Items are sorted by distance from the camera, nearest first, which helps early depth rejection. Consumers may reorder them.
 - **Layers.** The material model is the design's narrow one: a terrain tile with imagery layers blended bottom to top. An item's layers are `layer_count` entries of the frame's layer list (`vgl_frame_draw_layers_get`), from `first_layer`; an index rather than a pointer keeps the item free of padding. Each imagery pack gives a layer, from the lowest priority at the bottom to the highest at the top, with the deepest resident texture over the tile: its own imagery tile, or an ancestor's while its own is loading or where the pack has nothing finer. `uv_scale_offset` maps the mesh's texture coordinates into that texture: into the part of the ancestor the tile covers, and inside the texture's border (section 7). Layers blend by the texture's alpha times `opacity`. A tile with no imagery has no layers; backends then shade by height and normal. The OpenGL backend blends the top four layers of an item.
+- **Mean sea level and the sea surface.** Vertex heights are above the ellipsoid. For heights above mean sea level, and for a sea surface over the ocean floor (design document, section 7.6), an item carries the geoid's height at the tile's four corners, sampled from the context's geoid pack at the corners themselves, so that neighbouring tiles share them. Consumers interpolate them bilinearly over the mesh's texture coordinates: a vertex's height above mean sea level is its height minus that value, and a sea surface lies at it, along the local vertical. Over a tile of a few degrees, as close views draw, the geoid barely varies, so the corners are enough; over a coarse tile seen from afar, the error of tens of metres does not show. Without a geoid pack, or before it has a tile there, `has_geoid` is `VGL_FALSE` and the heights are zero, which makes the ellipsoid sea level. A mesh built before the geoid loaded gets its corners when it does.
 - **Growth.** The draw list is an array, so consumers step through it by `sizeof(vgl_draw_item)` of the header they were compiled against. To keep that safe, `vgl_frame_begin_info` has a field in which the consumer states that size, and the core writes items of that size. Fields are only ever appended.
 
 ## 6. Vertex and index formats
@@ -398,3 +403,4 @@ Imagery filled in what sections 5 and 7 had left open, again without touching th
 - The core keeps imagery encoded and decodes it into a texture when one is wanted, so that a texture evicted from the GPU or lost with the device costs a decode, not a read (section 7).
 - Textures that selected tiles want are exempt from GPU eviction, as their meshes are (section 4.3).
 - The consumer's formats are kept in the order it listed them, so that it can prefer RGBA8_SRGB to RGBA8 or the other way round (section 7).
+- Draw items carry the geoid at the tile's corners, appended to the item (section 5), so that consumers can show heights above mean sea level and draw the sea surface: the specification the design document had left to the first backend.

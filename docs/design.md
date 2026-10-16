@@ -343,7 +343,7 @@ The backend targets Ogre 14, the classic line (14.6.0 when this was decided); Og
 
 #### Sea surface
 
-Terrain includes the ocean floor (section 9), since some applications want bathymetry. An optional sea surface covers it: where the terrain lies below mean sea level, backends can draw water at the height of the geoid, so applications that want a flat sea get one without a separate dataset. The geoid pack provides the height; how it reaches the backends is specified with the first backend.
+Terrain includes the ocean floor (section 9), since some applications want bathymetry. An optional sea surface covers it: where the terrain lies below mean sea level, backends can draw water at the height of the geoid, so applications that want a flat sea get one without a separate dataset. The geoid pack provides the height, which reaches the backends as the geoid's height at each drawn tile's corners, interpolated over the tile ([render interface](render-interface.md), section 5). The OpenGL backend draws the sea surface on request (`vgl_gl_draw_info::sea_surface`): terrain below mean sea level is raised to it and shaded as water, with the imagery's ocean colour where there is imagery. Its colours by height and contour lines use heights above mean sea level too.
 
 ---
 
@@ -479,7 +479,7 @@ Because shards are plain range-readable files, the first version of the client's
 | Pure C | The OpenGL sample's core written in C99 against the C API (`samples/c`, `vgl-c`). This mirrors the client's integration; if it is awkward to write, the API needs to change. |
 | Headless | Runs tile selection and loading with a scripted camera and prints statistics, without a GPU. Doubles as a test and benchmark. |
 
-All samples use a small dataset baked from public-domain sources, so they work offline and also exercise the baker. It lives in the repository, in `samples/data`: GEBCO to level 3 and the EGM2008 geoid to level 2, about 4 MB, with the bake configurations that produce them. The headless, OpenGL and pure-C samples check their own results with `--check`. The headless check runs as a test everywhere; the OpenGL checks need a display, and run as tests when `VGL_TEST_GL` is on, as in CI. GLFW and Dear ImGui are used only by the samples, GLFW from an installed package or downloaded, and Dear ImGui downloaded, at pinned versions with checked hashes like the library's dependencies; Android and iOS build no OpenGL sample, since GLFW is for desktops.
+All samples use a small dataset baked from freely licensed sources (public domain, or free with attribution, which the packs carry), so they work offline and also exercise the baker. It lives in the repository, in `samples/data`: GEBCO to level 3 and the EGM2008 geoid to level 2, Blue Marble to level 3, and Copernicus GLO-30 to level 11 over the Sognefjord for detail somewhere, about 17 MB, with the bake configurations that produce them. The headless, OpenGL and pure-C samples check their own results with `--check`. The headless check runs as a test everywhere; the OpenGL checks need a display, and run as tests when `VGL_TEST_GL` is on, as in CI. GLFW and Dear ImGui are used only by the samples, GLFW from an installed package or downloaded, and Dear ImGui downloaded, at pinned versions with checked hashes like the library's dependencies; Android and iOS build no OpenGL sample, since GLFW is for desktops.
 
 ---
 

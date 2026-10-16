@@ -802,6 +802,22 @@ sample_pack(vgl_context& ctx, vgl_pack& p, double lat, double lon, vgl_result& e
 
 } // namespace
 
+bool sample_geoid(vgl_context& ctx, double lat, double lon, double& out) noexcept
+{
+    if (ctx.geoid == nullptr || ctx.geoid->state != VGL_PACK_STATE_READY)
+    {
+        return false;
+    }
+    vgl_result error = VGL_RESULT_SUCCESS;
+    const sample s = sample_pack(ctx, *ctx.geoid, lat, lon, error);
+    if (!s.valid)
+    {
+        return false;
+    }
+    out = s.value;
+    return true;
+}
+
 void decode_job::run() noexcept
 {
     zstd_decompressor* d = core->acquire_decompressor();

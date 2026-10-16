@@ -1075,3 +1075,41 @@ TEST_CASE(imagery_is_credited_and_can_be_removed)
     lines = credits(f.ctx);
     CHECK(std::find(lines.begin(), lines.end(), "Test imagery") == lines.end());
 }
+
+TEST_CASE(draw_items_carry_the_geoid_at_their_corners)
+{
+    // Without a geoid pack, the draw items say so.
+    fixture f;
+    REQUIRE(f.ctx != nullptr);
+    fake_gpu gpu;
+    const position p = inside({3, 6, 2}, 0.5, 0.5);
+    f.look(p.lat, p.lon, 50000.0);
+    settle(f.ctx, f.io, gpu);
+    REQUIRE(!gpu.items.empty());
+    for (const vgl_draw_item& item : gpu.items)
+    {
+        CHECK_EQ(item.has_geoid, VGL_FALSE);
+        CHECK_EQ(item.geoid_heights[0], 0.0f);
+    }
+
+    // With one, every drawn mesh gets its corners once the geoid has loaded there, also the
+    // meshes built before it did. The test geoid is a constant height.
+    const test_pack geoid = make_pack(layer_type::geoid);
+    f.io.packs["mem://geoid"] = &geoid;
+    vgl_pack_create_info create{};
+    create.struct_size = sizeof(create);
+    create.uri = "mem://geoid";
+    vgl_pack* g = nullptr;
+    REQUIRE(vgl_pack_create(f.ctx, &create, &g) == VGL_RESULT_SUCCESS);
+    settle(f.ctx, f.io, gpu);
+    REQUIRE(!gpu.items.empty());
+    for (const vgl_draw_item& item : gpu.items)
+    {
+        CHECK_EQ(item.has_geoid, VGL_TRUE);
+        for (const float h : item.geoid_heights)
+        {
+            CHECK_NEAR(h, geoid_height, 1e-3);
+        }
+    }
+    CHECK_EQ(vgl_pack_destroy(g), VGL_RESULT_SUCCESS);
+}

@@ -168,6 +168,11 @@ typedef struct vgl_gl_draw_info
     uint32_t reserved;
     /* Height between contour lines (VGL_GL_DEBUG_FLAG_CONTOURS), in metres. 0 selects 500. */
     double contour_interval;
+    /* VGL_TRUE draws a sea surface: terrain below mean sea level is raised to it and shaded
+     * as water, for applications that want a flat sea rather than the ocean floor. It needs a
+     * geoid pack (vgl_draw_item.has_geoid); without one, mean sea level is the ellipsoid. */
+    vgl_bool sea_surface;
+    uint32_t reserved2;
 } vgl_gl_draw_info;
 
 /* Debug views of vgl_gl_draw_info.debug_flags, for inspecting level of detail and loading. */
@@ -181,11 +186,12 @@ typedef enum vgl_gl_debug_flag
     /* Tiles drawn with imagery coarser than themselves tinted orange, more strongly the more
      * levels coarser it is, and tiles without imagery magenta. */
     VGL_GL_DEBUG_FLAG_IMAGERY_SOURCE = 0x4,
-    /* Colours by height, from the deep ocean floor to snow, instead of the imagery. */
+    /* Colours by height above mean sea level, from the deep ocean floor to snow, instead of
+     * the imagery. */
     VGL_GL_DEBUG_FLAG_HEIGHT_COLORS = 0x8,
-    /* Contour lines every contour_interval metres, every fifth one heavier. Heights are above
-     * the ellipsoid, so the lines are offset from those above mean sea level by the geoid
-     * height, within about 100 m. */
+    /* Contour lines every contour_interval metres above mean sea level, every fifth one
+     * heavier. Without a geoid pack, heights are above the ellipsoid, which differs from mean
+     * sea level by up to about 100 m. */
     VGL_GL_DEBUG_FLAG_CONTOURS = 0x10,
     VGL_GL_DEBUG_FLAG_MAX_ENUM = 0x7FFFFFFF
 } vgl_gl_debug_flag;

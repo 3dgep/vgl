@@ -106,6 +106,9 @@ struct vgl_gl_backend
     GLint u_imagery_coarser = -1;
     GLint u_wire = -1;
     GLint u_contour_interval = -1;
+    GLint u_geoid = -1;
+    GLint u_centre = -1;
+    GLint u_sea = -1;
     std::array<GLint, max_layers> u_layers = {-1, -1, -1, -1};
 
     vgl::common::pointer_map<gl_resource> resources;
@@ -214,6 +217,9 @@ vgl_result build_program(vgl_gl_backend& b, const char* function)
     b.u_imagery_coarser = gl.GetUniformLocation(program, "u_imagery_coarser");
     b.u_wire = gl.GetUniformLocation(program, "u_wire");
     b.u_contour_interval = gl.GetUniformLocation(program, "u_contour_interval");
+    b.u_geoid = gl.GetUniformLocation(program, "u_geoid");
+    b.u_centre = gl.GetUniformLocation(program, "u_centre");
+    b.u_sea = gl.GetUniformLocation(program, "u_sea");
     const std::array<const char*, max_layers> names = {
         "u_layer0", "u_layer1", "u_layer2", "u_layer3"};
     for (std::uint32_t k = 0; k < max_layers; ++k)
@@ -620,6 +626,7 @@ void draw_items(const vgl_gl_backend& b,
     gl.UniformMatrix4fv(b.u_projection, 1, GL_FALSE, to_float(projection).data());
     gl.Uniform1i(b.u_debug, static_cast<GLint>(info.debug_flags));
     gl.Uniform1i(b.u_wire, 0);
+    gl.Uniform1i(b.u_sea, info.sea_surface != VGL_FALSE ? 1 : 0);
     gl.Uniform1f(b.u_contour_interval,
                  static_cast<GLfloat>(info.contour_interval > 0.0 ? info.contour_interval : 500.0));
 
@@ -727,6 +734,11 @@ void draw_items(const vgl_gl_backend& b,
             opacity[unit] = layer.opacity;
         }
         gl.Uniform1i(b.u_layer_count, static_cast<GLint>(drawn_layers));
+        gl.Uniform4fv(b.u_geoid, 1, item.geoid_heights);
+        gl.Uniform3f(b.u_centre,
+                     static_cast<GLfloat>(item.centre.x),
+                     static_cast<GLfloat>(item.centre.y),
+                     static_cast<GLfloat>(item.centre.z));
         if (info.debug_flags != 0)
         {
             gl.Uniform1f(b.u_level, static_cast<GLfloat>(item.tile.level));
@@ -775,6 +787,11 @@ void draw_items(const vgl_gl_backend& b,
             continue;
         }
         gl.UniformMatrix4fv(b.u_model_view, 1, GL_FALSE, item.model_view);
+        gl.Uniform4fv(b.u_geoid, 1, item.geoid_heights);
+        gl.Uniform3f(b.u_centre,
+                     static_cast<GLfloat>(item.centre.x),
+                     static_cast<GLfloat>(item.centre.y),
+                     static_cast<GLfloat>(item.centre.z));
         gl.BindVertexArray(mesh->vertex_array);
         gl.DrawElements(GL_TRIANGLES,
                         static_cast<GLsizei>(item.index_count),
@@ -917,7 +934,7 @@ extern "C" VGL_GL_API vgl_result vgl_gl_backend_draw(vgl_gl_backend* backend,
         VGL_GL_DEBUG_FLAG_WIREFRAME | VGL_GL_DEBUG_FLAG_LEVEL_COLORS |
         VGL_GL_DEBUG_FLAG_IMAGERY_SOURCE | VGL_GL_DEBUG_FLAG_HEIGHT_COLORS |
         VGL_GL_DEBUG_FLAG_CONTOURS;
-    if ((info.debug_flags & ~known_flags) != 0 || info.reserved != 0 ||
+    if ((info.debug_flags & ~known_flags) != 0 || info.reserved != 0 || info.reserved2 != 0 ||
         !std::isfinite(info.contour_interval) || info.contour_interval < 0.0)
     {
         log(b,

@@ -31,6 +31,7 @@ struct debug_settings
     bool freeze = false;             // F5: select tiles for a frozen camera.
     bool height_colors = false;      // F6: colours by height instead of imagery.
     bool contours = false;           // F7.
+    bool sea = false;                // F8: a sea surface over the ocean floor.
     bool contour_auto = true;        // The interval follows the altitude.
     float contour_interval = 500.0f; // Metres.
     bool sunlight = true;            // L.

@@ -92,7 +92,7 @@ in a window (`--es` for OpenGL ES, `--depth reversed` for reversed-Z), and `vgl-
 in C. `vgl-gl` navigates like Google Earth: drag to grab the globe, scroll or double-click to
 zoom to the cursor, drag with Shift or the middle button to orbit and tilt, with Ctrl to look
 around, and with the right button to zoom; arrows move, Shift and arrows orbit, Page Up and Page
-Down zoom, and N, U and R turn north up, look straight down, or both. 1 to 6 jump to places.
+Down zoom, and N, U and R turn north up, look straight down, or both. 1 to 7 jump to places.
 Its panel (F1) shows the runtime statistics and the
 debug views: wireframe (F2), colours by tile level (F3), the imagery source (F4), a frozen
 selection (F5) to inspect level of detail and culling from outside, the heightmap (F6) and

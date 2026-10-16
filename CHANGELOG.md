@@ -139,6 +139,18 @@ The pack format has its own version number, independent of the library version.
   `VGL_GL_DEBUG_FLAG_WIREFRAME` (OpenGL only), `VGL_GL_DEBUG_FLAG_LEVEL_COLORS` (a tint per
   tile level, with tile borders) and `VGL_GL_DEBUG_FLAG_IMAGERY_SOURCE` (imagery coarser than
   the tile, or missing). The polygon mode is saved and restored when the wireframe is drawn.
+- Sample detail (`samples/data/packs/glo30-sognefjord`): Copernicus GLO-30 over the Sognefjord,
+  Jostedalsbreen and the western Jotunheimen to level 11 (about 76 m), 10.9 MB, above GEBCO in
+  the samples, with its bake configuration. The OpenGL sample has a place there (7), and the
+  headless check queries Galdhøpiggen in it.
+- Mean sea level for consumers: draw items carry the geoid's heights at the tile's corners
+  (`vgl_draw_item::geoid_heights` and `has_geoid`, appended), sampled from the geoid pack and
+  filled in for meshes built before it loaded.
+- A sea surface in the OpenGL backend (`vgl_gl_draw_info::sea_surface`, F8 in the OpenGL
+  sample): terrain below mean sea level is raised to the geoid and shaded as water. Its colours
+  by height and contour lines are now above mean sea level, with smoother hypsometric tints,
+  anti-aliased contours that fade out where they crowd, and an automatic interval of about a
+  250th of the altitude.
 - Elevation views in the OpenGL backend: `VGL_GL_DEBUG_FLAG_HEIGHT_COLORS` (colours by height
   instead of imagery) and `VGL_GL_DEBUG_FLAG_CONTOURS`, with
   `vgl_gl_draw_info::contour_interval` (500 m by default, every fifth line heavier). The OpenGL

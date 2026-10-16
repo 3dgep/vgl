@@ -29,10 +29,14 @@ layout(location = 3) in vec2 a_normal;   // Octahedral encoding, along the ECEF 
 
 uniform mat4 u_model_view;
 uniform mat4 u_projection;
+uniform vec4 u_geoid;  // The geoid's heights at the corners: north-west, north-east, south-west, south-east.
+uniform vec3 u_centre; // The tile's centre, along the ECEF axes; for directions only.
+uniform int u_sea;     // 1 raises terrain below mean sea level to it.
 
 out vec3 v_position; // Camera space.
 out vec3 v_normal;   // Camera space.
-out float v_height;
+out vec3 v_up;       // The vertical, in camera space.
+out float v_height;  // Above mean sea level.
 out vec2 v_uv;
 
 #ifdef VGL_LOGARITHMIC_DEPTH
@@ -53,10 +57,19 @@ vec3 decode_octahedral(vec2 e)
 
 void main()
 {
-    vec4 p = u_model_view * vec4(a_position, 1.0);
+    // Mean sea level under the vertex, from the geoid at the tile's corners.
+    float geoid = mix(mix(u_geoid.x, u_geoid.y, a_uv.x), mix(u_geoid.z, u_geoid.w, a_uv.x), a_uv.y);
+    v_height = a_height - geoid;
+    vec3 up = normalize(u_centre + a_position);
+    vec3 position = a_position;
+    if (u_sea != 0 && v_height < 0.0)
+    {
+        position += up * -v_height; // Up to the sea surface.
+    }
+    vec4 p = u_model_view * vec4(position, 1.0);
     v_position = p.xyz;
     v_normal = mat3(u_model_view) * decode_octahedral(a_normal);
-    v_height = a_height;
+    v_up = mat3(u_model_view) * up;
     v_uv = a_uv;
     gl_Position = u_projection * p;
 #ifdef VGL_LOGARITHMIC_DEPTH
@@ -71,8 +84,10 @@ void main()
 inline constexpr const char* terrain_fragment_shader = R"glsl(
 in vec3 v_position;
 in vec3 v_normal;
-in float v_height;
+in vec3 v_up;
+in float v_height; // Above mean sea level.
 in vec2 v_uv;
+uniform int u_sea;
 
 uniform vec3 u_light; // Towards the light, in camera space; zero lights from the camera.
 
@@ -100,14 +115,18 @@ uniform float u_log_depth;
 in float v_log_depth;
 #endif
 
-// Colors by height, from the deep ocean floor to snow.
-const int stop_count = 8;
+// Colours by height, the conventional hypsometric tints: blues from the deep ocean floor to
+// the shelf, then lowland green, yellow, browns, grey rock and snow.
+const int stop_count = 13;
 const float stop_heights[stop_count] = float[](
-    -8000.0, -3000.0, -100.0, 0.0, 400.0, 1500.0, 3200.0, 5000.0);
+    -8000.0, -4000.0, -1500.0, -200.0, -1.0, 0.0, 300.0, 700.0, 1300.0, 2000.0, 3000.0, 4200.0,
+    5500.0);
 const vec3 stop_colors[stop_count] = vec3[](
-    vec3(0.04, 0.09, 0.26), vec3(0.11, 0.25, 0.53), vec3(0.36, 0.58, 0.80),
-    vec3(0.33, 0.52, 0.29), vec3(0.50, 0.62, 0.33), vec3(0.66, 0.58, 0.40),
-    vec3(0.52, 0.44, 0.36), vec3(0.96, 0.96, 0.98));
+    vec3(0.05, 0.10, 0.28), vec3(0.10, 0.27, 0.52), vec3(0.22, 0.47, 0.71),
+    vec3(0.50, 0.73, 0.87), vec3(0.73, 0.87, 0.93), vec3(0.36, 0.58, 0.34),
+    vec3(0.58, 0.71, 0.43), vec3(0.85, 0.80, 0.55), vec3(0.80, 0.64, 0.42),
+    vec3(0.64, 0.48, 0.34), vec3(0.60, 0.55, 0.52), vec3(0.80, 0.79, 0.79),
+    vec3(0.97, 0.97, 0.98));
 
 vec3 height_color(float h)
 {
@@ -182,15 +201,34 @@ void main()
     }
     if ((u_debug & 16) != 0)
     {
-        // The distance to the nearest contour in pixels, from the height's screen gradient,
-        // so that lines keep their width at every distance.
+        // Contours, minor and every fifth major. From the height's screen gradient: the distance
+        // to the nearest line in pixels, so that lines keep their width at every distance and
+        // are anti-aliased, and how closely lines crowd, so that they fade out before they turn
+        // into noise (from 16 pixels apart down to 6), the major ones later than the minor.
         float x = v_height / u_contour_interval;
-        float pixels = abs(fract(x - 0.5) - 0.5) / max(fwidth(x), 1e-6);
-        bool major = abs(mod(floor(x + 0.5), 5.0)) < 0.5;
-        float coverage = 1.0 - clamp(pixels - (major ? 1.0 : 0.5), 0.0, 1.0);
-        albedo = mix(albedo, major ? vec3(0.08, 0.05, 0.02) : vec3(0.2, 0.15, 0.1), coverage * 0.85);
+        float dx = max(fwidth(x), 1e-6);
+        float minor_pixels = abs(fract(x - 0.5) - 0.5) / dx;
+        float minor = (1.0 - smoothstep(0.3, 1.0, minor_pixels)) * (1.0 - smoothstep(0.06, 0.16, dx));
+        float y = x / 5.0;
+        float dy = dx / 5.0;
+        float major_pixels = abs(fract(y - 0.5) - 0.5) / dy;
+        float major = (1.0 - smoothstep(0.6, 1.4, major_pixels)) * (1.0 - smoothstep(0.06, 0.16, dy));
+        albedo = mix(albedo, vec3(0.22, 0.17, 0.12), minor * 0.55);
+        albedo = mix(albedo, vec3(0.08, 0.05, 0.03), major * 0.85);
     }
-    o_color = vec4(albedo * (0.3 + 0.7 * diffuse), 1.0);
+    vec3 lit = albedo * (0.3 + 0.7 * diffuse);
+    if (u_sea != 0 && v_height < 0.0)
+    {
+        // Water: the imagery's ocean, or a deep blue, under a level surface with a glint of
+        // the light.
+        vec3 water = u_layer_count > 0 && (u_debug & 8) == 0 ? mix(albedo, vec3(0.04, 0.16, 0.36), 0.35)
+                                                           : vec3(0.06, 0.2, 0.42);
+        vec3 n_sea = normalize(v_up);
+        float d = max(dot(n_sea, l), 0.0);
+        float glint = pow(max(dot(reflect(-l, n_sea), normalize(-v_position)), 0.0), 80.0);
+        lit = water * (0.35 + 0.65 * d) + vec3(0.5) * glint;
+    }
+    o_color = vec4(lit, 1.0);
     if (u_wire != 0)
     {
         o_color = vec4(0.3, 1.0, 0.95, 1.0); // Bright cyan: clear on dark and light ground.

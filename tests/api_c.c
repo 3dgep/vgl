@@ -46,13 +46,14 @@ static void check_types(void)
     CHECK(sizeof(vgl_mesh_data) == 88);
     CHECK(sizeof(vgl_texture_data) == 40);
     CHECK(sizeof(vgl_draw_layer) == 40);
-    CHECK(sizeof(vgl_draw_item) == 168);
+    CHECK(sizeof(vgl_draw_item) == 192);
+    CHECK(offsetof(vgl_draw_item, geoid_heights) == 168);
     CHECK(offsetof(vgl_draw_item, model_view) == 64);
     CHECK(sizeof(vgl_frame_begin_info) == 24);
     CHECK(sizeof(vgl_depth_convention) == 4);
     /* The OpenGL backend's structures (vgl/gl.h). */
     CHECK(sizeof(vgl_gl_backend_create_info) == 24);
-    CHECK(sizeof(vgl_gl_draw_info) == 80);
+    CHECK(sizeof(vgl_gl_draw_info) == 88);
     CHECK(offsetof(vgl_gl_draw_info, sun_direction) == 24);
 }
 

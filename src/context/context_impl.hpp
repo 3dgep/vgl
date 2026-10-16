@@ -197,6 +197,10 @@ struct gpu_resource
     dvec3 centre;
     double min_height = 0.0;
     double max_height = 0.0;
+    // The geoid's heights at the tile's corners (north-west, north-east, south-west,
+    // south-east), once a geoid pack has a tile there.
+    std::array<float, 4> geoid = {};
+    bool has_geoid = false;
     buffer<tile_vertex> vertices; // Until resident.
 
     // Index lists.
@@ -288,6 +292,10 @@ availability find_tile(vgl_context& ctx,
                        tile_state*& out,
                        vgl_result& error,
                        bool start = true) noexcept;
+
+// The geoid height at a position in degrees, from the deepest geoid tile loaded there; starts
+// the reads for finer ones. False without a ready geoid pack, or before it has a tile there.
+[[nodiscard]] bool sample_geoid(vgl_context& ctx, double lat, double lon, double& out) noexcept;
 
 // Selects tiles for the context's view and starts the reads they need.
 void select_tiles(vgl_context& ctx) noexcept;

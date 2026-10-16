@@ -525,6 +525,11 @@ bool write_draw_items(vgl_context& ctx, const dmat4& view, const dvec3& eye) noe
         item.centre = r->centre.to_c();
         item.min_height = r->min_height;
         item.max_height = r->max_height;
+        for (std::size_t k = 0; k < 4; ++k)
+        {
+            item.geoid_heights[k] = r->geoid[k];
+        }
+        item.has_geoid = r->has_geoid ? VGL_TRUE : VGL_FALSE;
         if (!write_layers(ctx, d.id, item))
         {
             return false;

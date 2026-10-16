@@ -182,10 +182,13 @@ int main(int argc, char** argv)
     const std::string terrain_uri = data + "/packs/gebco";
     const std::string geoid_uri = data + "/packs/egm2008";
     const std::string imagery_uri = data + "/packs/bluemarble";
+    const std::string detail_uri = data + "/packs/glo30-sognefjord";
     vgl::expected<vgl::pack> terrain = vgl::pack::create(*ctx, terrain_uri.c_str());
+    // Finer terrain over the Sognefjord, above the global GEBCO.
+    vgl::expected<vgl::pack> detail = vgl::pack::create(*ctx, detail_uri.c_str(), 1);
     vgl::expected<vgl::pack> geoid = vgl::pack::create(*ctx, geoid_uri.c_str());
     vgl::expected<vgl::pack> imagery = vgl::pack::create(*ctx, imagery_uri.c_str());
-    if (!terrain || !geoid || !imagery)
+    if (!terrain || !geoid || !imagery || !detail)
     {
         std::fprintf(stderr, "could not add the packs\n");
         return 1;
@@ -197,6 +200,7 @@ int main(int argc, char** argv)
         {"1000 km, Alps", 46.5, 9.0, 1.0e6, 90.0},
         {"100 km, Alps", 46.5, 9.0, 1.0e5, 60.0},
         {"10 km, Himalaya", 27.0, 86.9, 1.0e4, 20.0},
+        {"20 km, Sognefjord", 61.2, 7.0, 2.0e4, 45.0},
         {"orbit, Pacific", 0.0, -160.0, 2.0e7, 90.0},
     };
 
@@ -306,6 +310,8 @@ int main(int argc, char** argv)
         {"Challenger Deep", 11.35, 142.2, -11000.0, -4000.0},
         {"Mid-Atlantic, 30 N 40 W", 30.0, -40.0, -6000.0, -1000.0},
         {"Netherlands, 52 N 5 E", 52.0, 5.0, -100.0, 200.0},
+        // From the GLO-30 detail, 76 m between samples: close to the summit's 2469 m.
+        {"Galdhopiggen (GLO-30)", 61.6363, 8.3125, 2300.0, 2469.0},
     };
     std::printf("\n%-25s %12s %12s\n", "place", "ellipsoid m", "sea level m");
     for (const place& p : places)
@@ -342,6 +348,7 @@ int main(int argc, char** argv)
     terrain->reset();
     geoid->reset();
     imagery->reset();
+    detail->reset();
     ctx->reset();
     reader->reset();
     pool->reset();

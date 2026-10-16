@@ -199,6 +199,7 @@ void overlay::panel(const vgl_context_statistics& s, const panel_info& info, deb
         ImGui::Checkbox("Freeze selection (F5)", &d.freeze);
         ImGui::Checkbox("Heightmap (F6)", &d.height_colors);
         ImGui::Checkbox("Contour lines (F7)", &d.contours);
+        ImGui::Checkbox("Sea surface (F8)", &d.sea);
         if (d.contours)
         {
             ImGui::Checkbox("Interval from altitude", &d.contour_auto);
@@ -279,8 +280,9 @@ void overlay::panel(const vgl_context_statistics& s, const panel_info& info, deb
         row("Shift + arrows", "orbit and tilt");
         row("Page up, down", "zoom");
         row("N, U, R", "north up, top down, both");
-        row("1 to 6", "places");
+        row("1 to 7", "places");
         row("L", "sunlight");
+        row("F1 to F8", "panel and views");
         ImGui::EndTable();
     }
 
