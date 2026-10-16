@@ -477,8 +477,8 @@ double difference(const image& a, const image& b)
 bool idle(const vgl_context_statistics& s)
 {
     return s.packs_loading == 0 && s.reads_outstanding == 0 && s.tiles_decoding == 0 &&
-           s.meshes_building == 0 && s.meshes_waiting == 0 && s.resources_created == 0 &&
-           s.tiles_drawn == s.tiles_selected;
+           s.meshes_building == 0 && s.meshes_waiting == 0 && s.textures_waiting == 0 &&
+           s.resources_created == 0 && s.tiles_drawn == s.tiles_selected;
 }
 
 struct options

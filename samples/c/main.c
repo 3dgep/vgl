@@ -235,7 +235,8 @@ int main(int argc, char** argv)
             vgl_context_statistics_get(context, &statistics);
             quiet = statistics.packs_loading == 0 && statistics.reads_outstanding == 0 &&
                             statistics.tiles_decoding == 0 && statistics.meshes_building == 0 &&
-                            statistics.meshes_waiting == 0 && statistics.resources_created == 0 &&
+                            statistics.meshes_waiting == 0 && statistics.textures_waiting == 0 &&
+                            statistics.resources_created == 0 &&
                             statistics.tiles_drawn == statistics.tiles_selected
                         ? quiet + 1
                         : 0;

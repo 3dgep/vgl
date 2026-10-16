@@ -135,6 +135,9 @@ The pack format has its own version number, independent of the library version.
   offered within the upload and GPU budgets and decoded again after eviction or a reset. Draw
   items get one layer per imagery pack with the deepest resident texture, mapped into an
   ancestor's texture and inside its border. Imagery packs are credited when in view.
+- Statistics of imagery: `textures_decoding` and `textures_waiting` (wanted by selected tiles
+  and not yet created by the consumer), appended to `vgl_context_statistics`. The samples wait
+  for them before they check a view.
 - The OpenGL backend draws up to four imagery layers per tile, with mip-mapped, anisotropic
   sampling, and restores the texture units, samplers and unpack state it uses. The OpenGL,
   pure-C and headless samples draw Blue Marble; the OpenGL check adds a view of the Sahara that

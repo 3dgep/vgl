@@ -63,6 +63,19 @@ extern "C" VGL_API vgl_result vgl_context_statistics_get(const vgl_context* cont
             ++s.meshes_waiting;
         }
     }
+    // Textures that the last update wanted, decoding or decoded, until the consumer has them.
+    for (const vgl_pack* p : ctx.packs)
+    {
+        p->textures.for_each([&](std::uint64_t, const texture_state& t) {
+            s.textures_decoding += t.decoding ? 1 : 0;
+            const gpu_resource* r = t.current != 0 ? ctx.resources.find(t.current) : nullptr;
+            const bool resident = r != nullptr && r->current == gpu_resource::state::resident;
+            if (ctx.has_view && t.last_wanted + 1 == ctx.frame && !resident)
+            {
+                ++s.textures_waiting;
+            }
+        });
+    }
     s.tiles_drawn = static_cast<std::uint32_t>(ctx.drawn.size());
     s.resources_created = ctx.last_created;
     s.resources_destroyed = ctx.last_destroyed;

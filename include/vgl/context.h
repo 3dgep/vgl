@@ -409,6 +409,10 @@ typedef struct vgl_context_statistics
     double tile_load_time_mean; /* From the start of a tile's read to its decoding. */
     double update_time;         /* Of the last vgl_context_update. */
     double frame_time;          /* Of the last vgl_context_frame_begin. */
+
+    /* Imagery textures. */
+    uint32_t textures_decoding; /* Imagery tiles being decoded into textures. */
+    uint32_t textures_waiting;  /* Wanted by selected tiles, and not created by the consumer. */
 } vgl_context_statistics;
 
 /**

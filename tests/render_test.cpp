@@ -916,7 +916,22 @@ TEST_CASE(tiles_are_drawn_with_the_imagery_over_them)
     gpu.set_handles = true;
     const position centre = inside({3, 6, 2}, 0.5, 0.5);
     f.look(centre.lat, centre.lon, 50000.0);
+    // Updates without frames: textures are decoded for the selected tiles, and wait for the
+    // consumer to create them.
+    vgl_context_statistics s{};
+    s.struct_size = sizeof(s);
+    std::uint32_t waiting = 0;
+    for (int i = 0; i < 20; ++i)
+    {
+        REQUIRE(vgl_context_update(f.ctx, nullptr) == VGL_RESULT_SUCCESS);
+        REQUIRE(vgl_context_statistics_get(f.ctx, &s) == VGL_RESULT_SUCCESS);
+        CHECK_EQ(s.textures_decoding, 0u); // Without tasks, decoding happens in the update.
+        waiting = std::max(waiting, s.textures_waiting);
+    }
+    CHECK(waiting > 0);
     settle(f.ctx, f.io, gpu);
+    REQUIRE(vgl_context_statistics_get(f.ctx, &s) == VGL_RESULT_SUCCESS);
+    CHECK_EQ(s.textures_waiting, 0u);
 
     REQUIRE(!gpu.items.empty());
     for (const vgl_draw_item& item : gpu.items)
@@ -933,13 +948,26 @@ TEST_CASE(tiles_are_drawn_with_the_imagery_over_them)
         CHECK(img.format == VGL_TEXTURE_FORMAT_RGBA8);
     }
 
-    // Uploaded textures hold no CPU memory: what remains is the tiles, imagery encoded.
+    // Uploaded resources hold no CPU memory. What remains is the tiles, imagery encoded, and
+    // what the updates without frames prepared for tiles that finer ones replaced before it was
+    // drawn: a cache that the CPU budget evicts.
     std::uint64_t tiles = 0;
     for (vgl_pack* p : f.ctx->packs)
     {
         p->tiles.for_each([&](std::uint64_t, const tile_state& t) { tiles += t.cpu_bytes(); });
     }
-    CHECK_EQ(f.ctx->cpu_used, tiles);
+    std::uint64_t pending = 0;
+    f.ctx->resources.for_each([&](std::uint64_t, const gpu_resource& r) {
+        if (r.current == gpu_resource::state::resident)
+        {
+            CHECK_EQ(r.cpu_bytes(), 0u);
+        }
+        else
+        {
+            pending += r.cpu_bytes();
+        }
+    });
+    CHECK_EQ(f.ctx->cpu_used, tiles + pending);
     CHECK_EQ(f.ctx->gpu_used, gpu.bytes());
 }
 
