@@ -76,24 +76,25 @@ bool async_core::begin_task() noexcept
 
 bool async_core::end_task(async_item* result) noexcept
 {
+    // Notify while holding the lock: once it is released, shut_down may return and the core
+    // may be freed (a queued result hands its reference to the queue), so this thread must not
+    // touch the core after unlocking.
+    const std::lock_guard<std::mutex> lock(mutex_);
+    --running_;
     bool queued = false;
+    if (alive_)
     {
-        const std::lock_guard<std::mutex> lock(mutex_);
-        --running_;
-        if (alive_)
+        result->next = nullptr;
+        if (tail_ != nullptr)
         {
-            result->next = nullptr;
-            if (tail_ != nullptr)
-            {
-                tail_->next = result;
-            }
-            else
-            {
-                head_ = result;
-            }
-            tail_ = result;
-            queued = true;
+            tail_->next = result;
         }
+        else
+        {
+            head_ = result;
+        }
+        tail_ = result;
+        queued = true;
     }
     idle_.notify_all();
     return queued;

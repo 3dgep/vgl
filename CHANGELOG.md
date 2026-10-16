@@ -124,3 +124,9 @@ The pack format has its own version number, independent of the library version.
 - C API conventions, section 12: a context may be destroyed while I/O requests are
   outstanding. It cancels them, and the host completes them later, as before; the completions
   are discarded. Previously this was an error.
+
+### Fixed
+
+- A finishing decode or mesh task could notify a condition variable of the context's shared
+  state after `vgl_context_destroy` had freed it. ThreadSanitizer found it in the headless
+  sample; the task now notifies while it holds the lock.
