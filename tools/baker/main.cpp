@@ -7,6 +7,7 @@
 #include "baker.hpp"
 #include "inspect.hpp"
 #include "pack_file.hpp"
+#include "source.hpp"
 
 #include <vgl/version.h>
 
@@ -126,6 +127,7 @@ int run(const std::vector<std::string_view>& args)
     }
     if (command == "validate")
     {
+        vgl::bake::initialize_gdal(256); // Decodes imagery tiles.
         return vgl::bake::validate(target, std::cout).ok() ? 0 : 1;
     }
     if (command == "sample-tile" && args.size() == 5)

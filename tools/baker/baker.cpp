@@ -4,6 +4,7 @@
 #include "baker.hpp"
 
 #include "decoders/elevation_codec.hpp"
+#include "image_codec.hpp"
 #include "pack_file.hpp"
 #include "pack_writer.hpp"
 #include "source.hpp"
@@ -129,6 +130,23 @@ public:
         {
             sources_.emplace_back(s);
         }
+        if (imagery())
+        {
+            // Grey sources can join colour ones; the pack is grey only if all of them are.
+            for (const source& s : sources_)
+            {
+                if (!s.byte_data() || (s.bands() != 1 && s.bands() != 3))
+                {
+                    throw std::runtime_error(
+                        "source \"" + s.config().name +
+                        "\": imagery sources must have 1 (grey) or 3 (RGB) bands of 8-bit "
+                        "values; convert others with gdal_translate (for example -b 1 -b 2 -b 3 "
+                        "-ot Byte -scale)");
+                }
+                channels_ =
+                    std::max<std::uint32_t>(channels_, static_cast<std::uint32_t>(s.bands()));
+            }
+        }
         if (!config_.geoid.empty())
         {
             geoid_ = std::make_unique<geoid_model>(config_.geoid);
@@ -221,6 +239,11 @@ public:
     }
 
 private:
+    [[nodiscard]] bool imagery() const noexcept
+    {
+        return config_.layer == pack::layer_type::imagery;
+    }
+
     [[nodiscard]] std::filesystem::path record_path(const std::string& name) const
     {
         return config_.output / ".bake" / (name + ".txt");
@@ -406,6 +429,158 @@ private:
         return missing != count;
     }
 
+    // Samples an imagery tile: (P + 2b)^2 pixels (docs/pack-format.md, section 2.4), each from
+    // the first source with data there, as 0 to 255 per channel. valid marks the pixels with
+    // data. Returns false if no pixel of the tile itself (the border aside) has data.
+    bool compute_image(sampler& smp,
+                       const tile_id& t,
+                       std::vector<std::vector<double>>& channels,
+                       std::vector<bool>& valid)
+    {
+        const std::uint32_t p = config_.tile_size;
+        const std::uint32_t b = config_.border;
+        const std::uint32_t n = p + 2 * b;
+        const std::size_t count = static_cast<std::size_t>(n) * n;
+        const degree_region bounds = tile_bounds(t);
+        const double step = tile_span(t.level) / p;
+        // Pixel centres: pixel (i, j) covers [west + (i - b) step, west + (i - b + 1) step].
+        const double first_lon = bounds.west + (0.5 - b) * step;
+        const double first_lat = bounds.north - (0.5 - b) * step;
+
+        channels.assign(channels_, std::vector<double>(count, 0.0));
+        valid.assign(count, false);
+        std::size_t missing = count;
+        std::vector<std::vector<double>> values(channels_);
+        std::vector<double> column;
+        for (const source& s : sources_)
+        {
+            if (missing == 0)
+            {
+                break;
+            }
+            if (t.level > s.config().max_level || !s.covers(bounds))
+            {
+                continue;
+            }
+            const bool coarse = step >= 1.5 * s.coarsest_pixel_size();
+            const std::string resampling = coarse ? "average" : s.config().resampling;
+            for (std::uint32_t c = 0; c < channels_; ++c)
+            {
+                const int band = s.bands() == 1 ? 1 : static_cast<int>(c) + 1;
+                smp.sample_grid(s, first_lon, first_lat, step, n, n, resampling, values[c], band);
+                // A border column beyond the antimeridian repeats the other side of it.
+                if (b != 0 && (t.x == 0 || t.x == tile_columns(t.level) - 1))
+                {
+                    const bool west = t.x == 0;
+                    const std::uint32_t i = west ? 0 : n - 1;
+                    const double lon = first_lon + i * step + (west ? 360.0 : -360.0);
+                    smp.sample_grid(s, lon, first_lat, step, 1, n, resampling, column, band);
+                    for (std::uint32_t j = 0; j < n; ++j)
+                    {
+                        values[c][static_cast<std::size_t>(j) * n + i] = column[j];
+                    }
+                }
+            }
+            for (std::size_t k = 0; k < count; ++k)
+            {
+                if (valid[k] || std::any_of(values.begin(), values.end(), [&](const auto& v) {
+                        return std::isnan(v[k]);
+                    }))
+                {
+                    continue;
+                }
+                for (std::uint32_t c = 0; c < channels_; ++c)
+                {
+                    channels[c][k] = values[c][k];
+                }
+                valid[k] = true;
+                --missing;
+            }
+        }
+
+        // A border row beyond a pole has nothing to repeat; it repeats the row inside.
+        if (b != 0)
+        {
+            for (const bool north : {true, false})
+            {
+                if (t.y != (north ? 0 : tile_rows(t.level) - 1))
+                {
+                    continue;
+                }
+                const std::size_t to = north ? 0 : static_cast<std::size_t>(n - 1) * n;
+                const std::size_t from = north ? n : static_cast<std::size_t>(n - 2) * n;
+                for (std::uint32_t i = 0; i < n; ++i)
+                {
+                    for (auto& ch : channels)
+                    {
+                        ch[to + i] = ch[from + i];
+                    }
+                    valid[to + i] = valid[from + i];
+                }
+            }
+        }
+
+        for (std::uint32_t j = b; j < b + p; ++j)
+        {
+            for (std::uint32_t i = b; i < b + p; ++i)
+            {
+                if (valid[static_cast<std::size_t>(j) * n + i])
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // Encodes an imagery tile: JPEG where every pixel has data, PNG with alpha elsewhere, unless
+    // the configuration asks for one of them throughout.
+    void encode_image(const std::vector<std::vector<double>>& channels,
+                      const std::vector<bool>& valid,
+                      const std::array<tile_stats, 4>& children,
+                      std::vector<std::byte>& out) const
+    {
+        const std::uint32_t n = config_.tile_size + 2 * config_.border;
+        const bool complete = std::all_of(valid.begin(), valid.end(), [](bool v) { return v; });
+        const bool jpeg = config_.encoding == image_encoding::jpeg ||
+                          (config_.encoding == image_encoding::automatic && complete);
+        // Alpha comes with colour: PNG has no grey with alpha in this format.
+        const bool alpha = !jpeg && !complete;
+        image img;
+        img.width = n;
+        img.height = n;
+        img.channels = alpha ? 4 : channels_;
+        img.pixels.resize(static_cast<std::size_t>(n) * n * img.channels);
+        for (std::size_t k = 0; k < valid.size(); ++k)
+        {
+            for (std::uint32_t c = 0; c < img.channels; ++c)
+            {
+                double v = 255.0;
+                if (c < 3)
+                {
+                    v = valid[k] ? channels[channels_ == 1 ? 0 : c][k] : 0.0;
+                }
+                else if (!valid[k])
+                {
+                    v = 0.0;
+                }
+                img.pixels[k * img.channels + c] =
+                    static_cast<std::uint8_t>(std::clamp(std::round(v), 0.0, 255.0));
+            }
+        }
+        std::uint8_t child_mask = 0;
+        for (std::uint32_t c = 0; c < 4; ++c)
+        {
+            if (children[c].exists)
+            {
+                child_mask = static_cast<std::uint8_t>(child_mask | (1u << c));
+            }
+        }
+        out = encode_imagery_tile(jpeg ? pack::imagery_encoding::jpeg : pack::imagery_encoding::png,
+                                  child_mask,
+                                  jpeg ? encode_jpeg(img, config_.jpeg_quality) : encode_png(img));
+    }
+
     // Quantizes and encodes a tile. Returns its stats.
     tile_stats encode_tile(const tile_id& t,
                            const std::vector<double>& heights,
@@ -504,12 +679,27 @@ private:
         {
             return {};
         }
-        if (!compute_tile(smp, t, heights))
-        {
-            return {};
-        }
         std::vector<std::byte> bytes;
-        const tile_stats stats = encode_tile(t, heights, children, bytes);
+        tile_stats stats;
+        if (imagery())
+        {
+            std::vector<std::vector<double>> channels;
+            std::vector<bool> valid;
+            if (!compute_image(smp, t, channels, valid))
+            {
+                return {};
+            }
+            encode_image(channels, valid, children, bytes);
+            stats.exists = true;
+        }
+        else
+        {
+            if (!compute_tile(smp, t, heights))
+            {
+                return {};
+            }
+            stats = encode_tile(t, heights, children, bytes);
+        }
         tiles.emplace(tile_key(t), std::move(bytes));
         return stats;
     }
@@ -613,15 +803,20 @@ private:
         m.layer.min_level = static_cast<std::uint8_t>(config_.min_level);
         m.layer.max_level = static_cast<std::uint8_t>(max_level_);
         m.layer.shard_level = static_cast<std::uint8_t>(config_.shard_level);
-        m.layer.height_reference = pack::height_reference_ellipsoid;
+        m.layer.border = static_cast<std::uint8_t>(config_.border);
+        m.layer.height_reference = imagery() ? 0 : pack::height_reference_ellipsoid;
         m.layer.semi_major_axis = 6378137.0;
         m.layer.inverse_flattening = 298.257223563;
         m.layer.west = region_.west;
         m.layer.south = region_.south;
         m.layer.east = region_.east;
         m.layer.north = region_.north;
-        m.height_steps.assign(config_.height_steps.begin(),
-                              config_.height_steps.begin() + (max_level_ - config_.min_level + 1));
+        if (!imagery())
+        {
+            m.height_steps.assign(config_.height_steps.begin(),
+                                  config_.height_steps.begin() +
+                                      (max_level_ - config_.min_level + 1));
+        }
         m.has_base = !base.empty;
         m.base_file_size = base.file_size;
         m.base_digest = base.digest;
@@ -645,6 +840,7 @@ private:
     degree_region region_;
     std::vector<source> sources_;
     std::unique_ptr<geoid_model> geoid_;
+    std::uint32_t channels_ = 1; // Imagery: 1 grey or 3 RGB.
     std::vector<shard_record> records_;
     std::map<std::uint64_t, tile_stats> root_stats_;
 };
@@ -663,6 +859,10 @@ std::vector<double> compute_tile_heights(const bake_config& config,
                                          std::uint32_t x,
                                          std::uint32_t y)
 {
+    if (config.layer == pack::layer_type::imagery)
+    {
+        throw std::runtime_error("sample-tile computes heights; this configuration bakes imagery");
+    }
     initialize_gdal(512);
     const bake_options options;
     pipeline p(config, options);

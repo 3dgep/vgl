@@ -4,6 +4,7 @@
 #include "inspect.hpp"
 
 #include "decoders/elevation_codec.hpp"
+#include "image_codec.hpp"
 #include "pack_file.hpp"
 
 #include <algorithm>
@@ -64,6 +65,207 @@ bool same_sample(double a, double b)
     return (std::isnan(a) && std::isnan(b)) || a == b;
 }
 
+// A line of RGBA pixels: a row or column of an imagery tile.
+using pixel_line = std::vector<std::array<std::uint8_t, 4>>;
+
+// The pixel lines of an imagery tile that its neighbours repeat or are repeated by: the
+// outermost lines (the border, when there is one) and the tile's own edge lines inside them.
+struct image_edges
+{
+    std::array<pixel_line, 4> outer; // North, south, west, east.
+    std::array<pixel_line, 4> inner;
+    std::uint8_t child_mask = 0;
+};
+
+enum edge : std::uint8_t
+{
+    north_edge,
+    south_edge,
+    west_edge,
+    east_edge,
+};
+
+// The mean difference per channel between two lines, over the pixels with data in both, or 0
+// if none has.
+double
+line_difference(const pixel_line& a, const pixel_line& b, std::uint32_t begin, std::uint32_t end)
+{
+    double sum = 0.0;
+    std::uint32_t pixels = 0;
+    for (std::uint32_t k = begin; k < end; ++k)
+    {
+        if (a[k][3] == 0 || b[k][3] == 0)
+        {
+            continue;
+        }
+        for (std::size_t c = 0; c < 3; ++c)
+        {
+            sum += std::abs(static_cast<int>(a[k][c]) - static_cast<int>(b[k][c]));
+        }
+        ++pixels;
+    }
+    return pixels == 0 ? 0.0 : sum / (3.0 * pixels);
+}
+
+// Border pixels repeat their neighbours exactly before encoding; JPEG then changes both a
+// little, differently on either side.
+constexpr double max_mean_border_difference = 12.0;
+
+validation_report validate_imagery(const pack_file& p, std::ostream& out)
+{
+    const pack::layer_description& l = p.manifest().layer();
+    const std::uint32_t size = l.tile_size;
+    const std::uint32_t b = l.border;
+    const std::uint32_t n = size + 2 * b;
+
+    validation_report r;
+    std::uint64_t reported = 0;
+    const auto report = [&](const tile_id& t, const std::string& what) {
+        if (++reported <= 20)
+        {
+            out << "  tile " << t.level << '/' << t.x << '/' << t.y << ": " << what << '\n';
+        }
+    };
+
+    std::map<std::uint64_t, image_edges> tiles;
+    for (const pack_file::shard_info& shard : p.shards())
+    {
+        p.for_each_tile(shard, [&](const decoded_tile& t, std::span<const std::byte> bytes) {
+            image img;
+            try
+            {
+                img = decode_image(bytes.subspan(t.header.header_size));
+            }
+            catch (const std::exception& e)
+            {
+                ++r.image_errors;
+                report(t.id, e.what());
+                return;
+            }
+            if (img.width != n || img.height != n)
+            {
+                ++r.image_errors;
+                report(t.id,
+                       "the image is " + std::to_string(img.width) + " x " +
+                           std::to_string(img.height) + " pixels, not " + std::to_string(n) +
+                           " x " + std::to_string(n));
+                return;
+            }
+            const auto pixel = [&](std::uint32_t i, std::uint32_t j) {
+                std::array<std::uint8_t, 4> v{0, 0, 0, 255};
+                const std::size_t k = (static_cast<std::size_t>(j) * n + i) * img.channels;
+                for (std::uint32_t c = 0; c < 3; ++c)
+                {
+                    v[c] = img.pixels[k + (img.channels < 3 ? 0 : c)];
+                }
+                if (img.channels == 4)
+                {
+                    v[3] = img.pixels[k + 3];
+                }
+                return v;
+            };
+            image_edges e;
+            e.child_mask = t.header.child_mask;
+            for (auto& line : e.outer)
+            {
+                line.resize(n);
+            }
+            for (auto& line : e.inner)
+            {
+                line.resize(n);
+            }
+            for (std::uint32_t k = 0; k < n; ++k)
+            {
+                e.outer[north_edge][k] = pixel(k, 0);
+                e.outer[south_edge][k] = pixel(k, n - 1);
+                e.outer[west_edge][k] = pixel(0, k);
+                e.outer[east_edge][k] = pixel(n - 1, k);
+                e.inner[north_edge][k] = pixel(k, b);
+                e.inner[south_edge][k] = pixel(k, n - 1 - b);
+                e.inner[west_edge][k] = pixel(b, k);
+                e.inner[east_edge][k] = pixel(n - 1 - b, k);
+            }
+            tiles.emplace(vgl::internal::tile_key(t.id), std::move(e));
+        });
+    }
+    r.tiles = tiles.size() + r.image_errors;
+
+    double worst = 0.0;
+    for (const auto& [key, e] : tiles)
+    {
+        const tile_id t = vgl::internal::tile_from_key(key);
+
+        // With a border, each tile's border repeats its neighbour's edge, both ways.
+        if (b != 0)
+        {
+            const auto check =
+                [&](const image_edges& other, edge mine, edge theirs, const char* side) {
+                    const double d =
+                        std::max(line_difference(e.outer[mine], other.inner[theirs], b, b + size),
+                                 line_difference(e.inner[mine], other.outer[theirs], b, b + size));
+                    worst = std::max(worst, d);
+                    if (d > max_mean_border_difference)
+                    {
+                        ++r.border_mismatches;
+                        std::ostringstream os;
+                        os.precision(3);
+                        os << side << " border differs from the neighbour by " << d
+                           << " per channel on average";
+                        report(t, os.str());
+                    }
+                };
+            const auto east = tiles.find(vgl::internal::tile_key(vgl::internal::tile_east(t)));
+            if (east != tiles.end() && vgl::internal::tile_columns(t.level) > 1)
+            {
+                check(east->second, east_edge, west_edge, "eastern");
+            }
+            if (t.y + 1 < vgl::internal::tile_rows(t.level))
+            {
+                const auto south = tiles.find(vgl::internal::tile_key({t.level, t.x, t.y + 1}));
+                if (south != tiles.end())
+                {
+                    check(south->second, south_edge, north_edge, "southern");
+                }
+            }
+            // Beyond a pole, the border repeats the row inside.
+            for (const bool north : {true, false})
+            {
+                if (t.y != (north ? 0 : vgl::internal::tile_rows(t.level) - 1))
+                {
+                    continue;
+                }
+                const edge side = north ? north_edge : south_edge;
+                if (line_difference(e.outer[side], e.inner[side], 0, n) >
+                    max_mean_border_difference)
+                {
+                    ++r.pole_mismatches;
+                    report(t, "the border beyond the pole does not repeat the row inside it");
+                }
+            }
+        }
+
+        if (t.level < l.max_level)
+        {
+            for (std::uint32_t c = 0; c < 4; ++c)
+            {
+                const bool exists =
+                    tiles.contains(vgl::internal::tile_key(vgl::internal::tile_child(t, c)));
+                if (exists != (((e.child_mask >> c) & 1u) != 0))
+                {
+                    ++r.child_mask_mismatches;
+                    report(t, "child mask disagrees with the tiles in the pack");
+                }
+            }
+        }
+    }
+
+    out << r.tiles << " tiles read and decoded; " << r.image_errors << " image errors, "
+        << r.border_mismatches << " border mismatches (largest mean difference " << worst << "), "
+        << r.pole_mismatches << " pole mismatches, " << r.child_mask_mismatches
+        << " child mask mismatches\n";
+    return r;
+}
+
 } // namespace
 
 void inspect(const std::filesystem::path& pack_directory, std::ostream& out)
@@ -74,7 +276,9 @@ void inspect(const std::filesystem::path& pack_directory, std::ostream& out)
     out << "pack            " << pack_directory.string() << '\n'
         << "format          " << pack::major_version << '.' << m.minor_version() << '\n'
         << "layer           " << layer_name(l.type) << '\n'
-        << "tile size       " << l.tile_size << '\n'
+        << "tile size       " << l.tile_size
+        << (l.type == pack::layer_type::imagery ? ", border " + std::to_string(l.border) : "")
+        << '\n'
         << "levels          " << int{l.min_level} << " to " << int{l.max_level} << '\n'
         << "shard level     " << int{l.shard_level} << '\n'
         << "bounds          " << l.west << ", " << l.south << ", " << l.east << ", " << l.north
@@ -97,7 +301,12 @@ void inspect(const std::filesystem::path& pack_directory, std::ostream& out)
             level_stats& s = levels[t.id.level];
             ++s.tiles;
             s.bytes += bytes.size();
-            if ((t.header.flags & pack::elevation_flag_has_nodata) != 0)
+            // Imagery: a PNG tile, which the baker writes where data is missing.
+            const bool partial =
+                pack::has_heights(l.type)
+                    ? (t.header.flags & pack::elevation_flag_has_nodata) != 0
+                    : t.header.encoding == static_cast<std::uint8_t>(pack::imagery_encoding::png);
+            if (partial)
             {
                 ++s.partial;
             }
@@ -174,9 +383,9 @@ validation_report validate(const std::filesystem::path& pack_directory, std::ost
     const pack_file p(pack_directory);
     const pack::manifest& m = p.manifest();
     const pack::layer_description& l = m.layer();
-    if (!pack::has_heights(l.type))
+    if (l.type == pack::layer_type::imagery)
     {
-        throw std::runtime_error("validate supports elevation and geoid packs");
+        return validate_imagery(p, out);
     }
     const std::uint32_t n = l.tile_size;
 

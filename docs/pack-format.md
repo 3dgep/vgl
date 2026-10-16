@@ -437,7 +437,16 @@ These values are parameters recorded in each manifest, not constants of the form
 | Shard level | `shard_level` | `max_level` − 5 |
 | Height steps | `HEIGHT_STEPS` | 0.5 m to level 5, 0.25 m to level 9, then 0.125 m (section 6.2) |
 
-Imagery defaults (provisionally a `tile_size` of 256 and a `border` of 0 or 1) wait for the client's imagery (design document, section 16, question 4).
+For imagery, settled with the choice of Blue Marble and Sentinel-2 cloudless (design document, section 16, question 4):
+
+| Parameter | Field | Default |
+|---|---|---|
+| Imagery tile size | `tile_size` | 256 |
+| Border | `border` | 1 |
+| Encoding | per tile | JPEG (quality 85) for tiles with data everywhere, PNG with alpha for the others |
+| Deepest level, Blue Marble (15 arc-seconds, about 460 m) | `max_level` | 7 (about 610 m per pixel) |
+
+The border of one pixel costs 1.6 % more pixels at 256, and lets the runtime filter bilinearly across tile edges without seams at the tile's own resolution. Coarser mipmap levels of a tile still blend in a little of its neighbours' colour, which is not visible at the distances those levels are drawn at.
 
 ---
 

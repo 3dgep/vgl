@@ -380,7 +380,7 @@ Each tile also stores a four-bit child-existence mask and the minimum and maximu
 
 Coarser levels are built bottom-up by filtering. The default filter averages. A maximum-preserving filter is available as a bake option for applications such as aviation, where terrain should never appear lower than it really is.
 
-**Imagery.** Imagery tiles are 256 or 512 pixels square, stored as JPEG or WebP when opaque and PNG when alpha is needed. The baker can optionally pre-encode tiles to BC1 or BC7, which the runtime can then upload without decoding.
+**Imagery.** Imagery tiles are 256 or 512 pixels square, stored as JPEG or WebP when opaque and PNG when alpha is needed. The baker writes 256-pixel tiles with a one-pixel border from the neighbouring tiles by default, so that textures filter across tile edges without seams, as JPEG where a tile has data everywhere and as PNG with alpha elsewhere. The baker can optionally pre-encode tiles to BC1 or BC7, which the runtime can then upload without decoding.
 
 ### 8.5 Pack format
 

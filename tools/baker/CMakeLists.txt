@@ -20,12 +20,12 @@ endif()
 # GDAL reads the source formats (NFR-07: the only place GDAL is used). It is
 # found, never downloaded: on Linux from system packages, on Windows from
 # conda-forge (see tools/baker/README.md).
-find_package(GDAL 3.4 CONFIG QUIET)
+find_package(GDAL 3.7 CONFIG QUIET)
 if(NOT GDAL_FOUND)
-    find_package(GDAL 3.4 MODULE)
+    find_package(GDAL 3.7 MODULE)
 endif()
 if(NOT GDAL_FOUND)
-    message(FATAL_ERROR "vgl: the baker needs GDAL 3.4 or later. Install it (Ubuntu: libgdal-dev; "
+    message(FATAL_ERROR "vgl: the baker needs GDAL 3.7 or later. Install it (Ubuntu: libgdal-dev; "
                         "Windows: conda-forge libgdal-core, see tools/baker/README.md) and point "
                         "CMAKE_PREFIX_PATH at it, or turn VGL_BUILD_BAKER off.")
 endif()
@@ -55,6 +55,8 @@ add_library(vgl_bake OBJECT
     bake_config.hpp
     baker.cpp
     baker.hpp
+    image_codec.cpp
+    image_codec.hpp
     inspect.cpp
     inspect.hpp
     pack_file.cpp

@@ -23,16 +23,19 @@ struct validation_report
     std::uint64_t pole_mismatches = 0;        // Pole rows that are not uniform.
     std::uint64_t child_mask_mismatches = 0;  // Child mask bits that disagree with the pack.
     std::uint64_t child_bound_violations = 0; // Children outside their parent's recorded bounds.
+    std::uint64_t image_errors = 0;           // Imagery that does not decode to its size.
 
     [[nodiscard]] bool ok() const noexcept
     {
         return border_mismatches == 0 && pole_mismatches == 0 && child_mask_mismatches == 0 &&
-               child_bound_violations == 0;
+               child_bound_violations == 0 && image_errors == 0;
     }
 };
 
 // Reads and decodes every tile, which checks every CRC and structure, and checks the
-// properties the format requires of the data. Prints problems and a summary to out.
+// properties the format requires of the data: for heights, shared borders, poles, child masks
+// and child bounds; for imagery, image sizes, child masks, and that border pixels repeat their
+// neighbours' pixels (within the losses of JPEG). Prints problems and a summary to out.
 // Throws std::runtime_error if the pack cannot be read at all.
 validation_report validate(const std::filesystem::path& pack_directory, std::ostream& out);
 

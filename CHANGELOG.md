@@ -119,6 +119,14 @@ The pack format has its own version number, independent of the library version.
   OpenGL and OpenGL ES.
 - `vgl::common::pointer_map` (`src/common`), a map from resource identifiers to objects for
   the libraries built on the C API, with tests.
+- Imagery packs in the baker: `"layer": "imagery"` with `border`, `encoding` (`auto`, `jpeg`
+  or `png`) and `jpeg_quality`. Tiles are sampled at pixel centres from grey or RGB 8-bit
+  sources, one band at a time, with borders that repeat the neighbouring tiles' pixels (across
+  the antimeridian too), and written as JPEG, or as PNG with alpha where data is missing.
+  `vgl-bake validate` checks imagery packs: image sizes, borders and child masks. Tested on
+  synthetic global and regional images.
+- Sample imagery (`samples/data/packs/bluemarble`): NASA Blue Marble: Next Generation to level
+  3, 1.6 MB, with its bake configuration.
 
 ### Changed
 
@@ -144,6 +152,9 @@ The pack format has its own version number, independent of the library version.
   the backends. The samples share their camera math in `samples/common/sample_camera.hpp`.
 - C API conventions, sections 10.1 and 13: libraries working on behalf of a context use its
   allocator and its log.
+- The baker needs GDAL 3.7 or later, for warping one band of a multi-band source.
+- Pack format, section 9: the imagery defaults are settled: 256-pixel tiles with a border of 1,
+  JPEG with PNG for partial tiles, and level 7 as the deepest level of Blue Marble.
 - Render interface specification, section 8: the depth conventions are an enumeration, and for
   the logarithmic one the host passes the far distance when drawing, instead of the frame
   reporting a coefficient.

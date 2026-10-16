@@ -156,11 +156,52 @@ bake_config load_bake_config(const std::filesystem::path& file)
         {
             c.layer = pack::layer_type::geoid;
         }
+        else if (layer == "imagery")
+        {
+            c.layer = pack::layer_type::imagery;
+            c.tile_size = 256;
+            c.border = 1;
+        }
         else
         {
-            fail(file, R"("layer" must be "elevation" or "geoid", not ")" + layer + "\"");
+            fail(file,
+                 R"("layer" must be "elevation", "imagery" or "geoid", not ")" + layer + "\"");
         }
+        const bool imagery = c.layer == pack::layer_type::imagery;
         c.tile_size = j.value("tile_size", c.tile_size);
+        if (imagery)
+        {
+            c.border = j.value("border", c.border);
+            const std::string encoding = j.value("encoding", "auto");
+            if (encoding == "auto")
+            {
+                c.encoding = image_encoding::automatic;
+            }
+            else if (encoding == "jpeg")
+            {
+                c.encoding = image_encoding::jpeg;
+            }
+            else if (encoding == "png")
+            {
+                c.encoding = image_encoding::png;
+            }
+            else
+            {
+                fail(file,
+                     R"("encoding" must be "auto", "jpeg" or "png", not ")" + encoding + "\"");
+            }
+            c.jpeg_quality = j.value("jpeg_quality", c.jpeg_quality);
+        }
+        else
+        {
+            for (const char* key : {"border", "encoding", "jpeg_quality"})
+            {
+                if (j.contains(key))
+                {
+                    fail(file, std::string("\"") + key + "\" applies only to imagery");
+                }
+            }
+        }
         c.min_level = j.value("min_level", c.min_level);
         c.max_level = j.value("max_level", c.max_level);
         // By default, shards hold five levels below their root, which gave shards of 9 to
@@ -256,7 +297,34 @@ bake_config load_bake_config(const std::filesystem::path& file)
     }
 
     // Checks against the pack format (docs/pack-format.md, section 4.3).
-    if (!vgl::internal::elevation_tile_size_is_valid(c.tile_size))
+    const bool imagery = c.layer == pack::layer_type::imagery;
+    if (imagery)
+    {
+        const bool power_of_two = (c.tile_size & (c.tile_size - 1)) == 0;
+        if (!power_of_two || c.tile_size < 64 || c.tile_size > 2048)
+        {
+            fail(file, "\"tile_size\" of imagery must be a power of two from 64 to 2048");
+        }
+        if (c.border > 1)
+        {
+            fail(file, "\"border\" must be 0 or 1");
+        }
+        if (c.jpeg_quality < 1 || c.jpeg_quality > 100)
+        {
+            fail(file, "\"jpeg_quality\" must be from 1 to 100");
+        }
+        if (c.filter != level_filter::average || !c.height_steps.empty() || !c.geoid.empty())
+        {
+            fail(file, R"("filter", "height_steps" and "geoid" apply only to heights)");
+        }
+        if (std::any_of(c.sources.begin(), c.sources.end(), [](const source_config& s) {
+                return s.datum != vertical_datum::ellipsoid;
+            }))
+        {
+            fail(file, "\"datum\" applies only to heights");
+        }
+    }
+    else if (!vgl::internal::elevation_tile_size_is_valid(c.tile_size))
     {
         fail(file, "\"tile_size\" must be 2^k + 1 with 2 <= k <= 10, such as 65, 129 or 257");
     }
@@ -271,6 +339,10 @@ bake_config load_bake_config(const std::filesystem::path& file)
     if (c.sources.empty())
     {
         fail(file, "\"sources\" must list at least one source");
+    }
+    if (imagery)
+    {
+        return c;
     }
     if (c.height_steps.empty())
     {

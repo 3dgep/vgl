@@ -1,0 +1,27 @@
+{
+    // Sample imagery pack: NASA Blue Marble: Next Generation (July 2004, with topography and
+    // bathymetry) down to level 3, about 10 km per pixel, as one base shard. Small enough to
+    // keep in the repository, so that the samples and their tests run offline (design document,
+    // section 11). The source is the 5400 x 2700 pixel PNG, georeferenced as described in
+    // samples/data/README.md.
+    "output": "sample-packs/bluemarble",
+    "layer": "imagery",
+    "tile_size": 256,
+    "border": 1,
+    "min_level": 0,
+    "max_level": 3,
+    "shard_level": 4, // Above max_level: the whole pack is one base shard.
+    "jpeg_quality": 85,
+    "metadata": {
+        "name": "Blue Marble: Next Generation, July (sample, to level 3)",
+        "attribution": "NASA Earth Observatory, Blue Marble: Next Generation (Reto Stöckli)",
+        "source": "world.topo.bathy.200407.3x5400x2700.png, NASA Visible Earth"
+    },
+    "sources": [
+        {
+            "name": "Blue Marble: Next Generation",
+            "files": "sources/bluemarble/world.topo.bathy.200407.3x5400x2700.tif",
+            "resampling": "cubic"
+        }
+    ]
+}

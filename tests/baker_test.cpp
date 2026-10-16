@@ -7,6 +7,7 @@
 #include "bake_config.hpp"
 #include "baker.hpp"
 #include "decoders/elevation_codec.hpp"
+#include "image_codec.hpp"
 #include "inspect.hpp"
 #include "pack_file.hpp"
 #include "source.hpp"
@@ -19,6 +20,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <ogr_srs_api.h>
 #include <random>
 #include <sstream>
@@ -405,4 +407,250 @@ TEST_CASE(configuration_errors_name_the_problem)
               .find("geoid") != std::string::npos);
     CHECK(error_of(R"({"output": "x", "sources": [{"files": "missing-*.tif"}]})")
               .find("matches no files") != std::string::npos);
+}
+
+// ------------------------------------------------------------------------------------------
+// Imagery
+// ------------------------------------------------------------------------------------------
+
+namespace
+{
+
+// The synthetic imagery: smooth colours that vary with latitude and longitude in degrees.
+std::uint8_t colour(double latitude, double longitude, int band)
+{
+    constexpr double radians = 3.14159265358979323846 / 180.0;
+    double v = 0.0;
+    switch (band)
+    {
+    case 0:
+        v = 128.0 + 100.0 * std::sin(longitude * radians);
+        break;
+    case 1:
+        v = 128.0 + 100.0 * std::cos(2.0 * latitude * radians);
+        break;
+    default:
+        v = 128.0 + 0.6 * latitude + 0.2 * longitude;
+        break;
+    }
+    return static_cast<std::uint8_t>(std::clamp(std::round(v), 0.0, 255.0));
+}
+
+// Writes an 8-bit GeoTIFF with square pixels, whose pixel centres sample colour().
+void write_image(
+    const fs::path& path, double west, double north, double pixel, int width, int height, int bands)
+{
+    GDALDatasetH ds = GDALCreate(GDALGetDriverByName("GTiff"),
+                                 path.string().c_str(),
+                                 width,
+                                 height,
+                                 bands,
+                                 GDT_Byte,
+                                 nullptr);
+    double gt[6] = {west, pixel, 0.0, north, 0.0, -pixel};
+    GDALSetGeoTransform(ds, gt);
+    OGRSpatialReferenceH srs = OSRNewSpatialReference(nullptr);
+    OSRImportFromEPSG(srs, 4326);
+    GDALSetSpatialRef(ds, srs);
+    OSRDestroySpatialReference(srs);
+    std::vector<std::uint8_t> row(static_cast<std::size_t>(width));
+    for (int b = 0; b < bands; ++b)
+    {
+        GDALRasterBandH band = GDALGetRasterBand(ds, b + 1);
+        for (int j = 0; j < height; ++j)
+        {
+            for (int i = 0; i < width; ++i)
+            {
+                row[static_cast<std::size_t>(i)] =
+                    colour(north - (j + 0.5) * pixel, west + (i + 0.5) * pixel, b);
+            }
+            if (GDALRasterIO(
+                    band, GF_Write, 0, j, width, 1, row.data(), width, 1, GDT_Byte, 0, 0) !=
+                CE_None)
+            {
+                throw std::runtime_error("cannot write " + path.string());
+            }
+        }
+    }
+    GDALClose(ds);
+}
+
+// Every tile of a pack with its decoded image.
+std::map<std::uint64_t, std::pair<pack::tile_header, image>> imagery_tiles(const fs::path& pack)
+{
+    std::map<std::uint64_t, std::pair<pack::tile_header, image>> tiles;
+    const pack_file p(pack);
+    for (const pack_file::shard_info& shard : p.shards())
+    {
+        p.for_each_tile(shard, [&](const decoded_tile& t, std::span<const std::byte> bytes) {
+            tiles[vgl::internal::tile_key(t.id)] = {
+                t.header, decode_image(bytes.subspan(t.header.header_size))};
+        });
+    }
+    return tiles;
+}
+
+} // namespace
+
+TEST_CASE(baked_imagery_matches_the_source_with_borders)
+{
+    // A global RGB image of 0.25 degree pixels. With 64-pixel tiles, levels 0 to 2 filter it
+    // (0.7 degree pixels and coarser) and level 3 interpolates it (0.35 degrees).
+    const fixture f;
+    write_image(f.dir / "world.tif", -180.0, 90.0, 0.25, 1440, 720, 3);
+    const std::string config = R"(
+        "layer": "imagery", "tile_size": 64, "max_level": 3, "shard_level": 2,
+        "metadata": {"attribution": "Synthetic imagery"}, "sources": [{"files": "world.tif"}]
+    })";
+    write_text(f.dir / "imagery.json", R"({"output": "imagery",)" + config);
+    const bake_config c = load_bake_config(f.dir / "imagery.json");
+    CHECK_EQ(c.border, 1u);
+    bake(c, {});
+
+    const pack_file p(f.dir / "imagery");
+    const pack::layer_description& l = p.manifest().layer();
+    CHECK(l.type == pack::layer_type::imagery);
+    CHECK_EQ(l.tile_size, static_cast<std::uint16_t>(64));
+    CHECK_EQ(l.border, static_cast<std::uint8_t>(1));
+    CHECK_EQ(l.height_reference, static_cast<std::uint8_t>(0));
+
+    const auto tiles = imagery_tiles(f.dir / "imagery");
+    CHECK_EQ(tiles.size(), static_cast<std::size_t>(2 + 8 + 32 + 128));
+    double worst = 0.0;
+    for (const auto& [key, tile] : tiles)
+    {
+        const tile_id t = vgl::internal::tile_from_key(key);
+        const auto& [header, img] = tile;
+        // Complete tiles are JPEG, RGB, with the border: 66 x 66 pixels.
+        REQUIRE(header.encoding == static_cast<std::uint8_t>(pack::imagery_encoding::jpeg));
+        REQUIRE(img.width == 66u && img.height == 66u && img.channels == 3u);
+        CHECK_EQ(header.child_mask, static_cast<std::uint8_t>(t.level < 3 ? 0xF : 0));
+        // Inner pixels hold the colour at their centre, to within JPEG's losses.
+        if (t.level == 3)
+        {
+            const vgl::internal::degree_region b = vgl::internal::tile_bounds(t);
+            const double step = vgl::internal::tile_span(3) / 64.0;
+            for (std::uint32_t j = 8; j < 58; j += 7)
+            {
+                for (std::uint32_t i = 8; i < 58; i += 7)
+                {
+                    const double lat = b.north - (j - 1 + 0.5) * step;
+                    const double lon = b.west + (i - 1 + 0.5) * step;
+                    for (int ch = 0; ch < 3; ++ch)
+                    {
+                        const int got = img.pixels[(static_cast<std::size_t>(j) * 66 + i) * 3 +
+                                                   static_cast<std::size_t>(ch)];
+                        worst = std::max(
+                            worst, std::fabs(got - static_cast<double>(colour(lat, lon, ch))));
+                    }
+                }
+            }
+        }
+    }
+    std::printf("synthetic imagery: largest colour error %.0f of 255\n", worst);
+    CHECK(worst <= 12.0);
+
+    std::ostringstream report;
+    const validation_report r = validate(f.dir / "imagery", report);
+    CHECK(r.ok());
+    if (!r.ok())
+    {
+        std::fputs(report.str().c_str(), stderr);
+    }
+
+    // Imagery bakes are deterministic too.
+    write_text(f.dir / "again.json", R"({"output": "again",)" + config);
+    bake_options parallel;
+    parallel.jobs = 3;
+    bake(load_bake_config(f.dir / "again.json"), parallel);
+    CHECK(pack_files(f.dir / "imagery") == pack_files(f.dir / "again"));
+}
+
+TEST_CASE(partial_imagery_tiles_are_png_with_alpha)
+{
+    // A regional grey image: tiles on its edges have pixels without data.
+    const fixture f;
+    write_image(f.dir / "region.tif", 10.0, 55.0, 0.05, 300, 300, 1);
+    write_text(f.dir / "region.json", R"({
+        "output": "region", "layer": "imagery", "tile_size": 64, "min_level": 3,
+        "max_level": 5, "shard_level": 4, "sources": [{"files": "region.tif"}]
+    })");
+    bake(load_bake_config(f.dir / "region.json"), {});
+
+    std::size_t png = 0;
+    std::size_t jpeg = 0;
+    for (const auto& [key, tile] : imagery_tiles(f.dir / "region"))
+    {
+        const auto& [header, img] = tile;
+        if (header.encoding == static_cast<std::uint8_t>(pack::imagery_encoding::png))
+        {
+            ++png;
+            REQUIRE(img.channels == 4u);
+            // Some pixels have no data, and those are transparent black.
+            bool transparent = false;
+            for (std::size_t k = 0; k < img.pixels.size(); k += 4)
+            {
+                if (img.pixels[k + 3] == 0)
+                {
+                    transparent = true;
+                    CHECK(img.pixels[k] == 0 && img.pixels[k + 1] == 0 && img.pixels[k + 2] == 0);
+                }
+            }
+            CHECK(transparent);
+        }
+        else
+        {
+            ++jpeg;
+            CHECK_EQ(img.channels, 1u);
+        }
+    }
+    CHECK(png > 0);
+    CHECK(jpeg > 0);
+
+    std::ostringstream report;
+    const validation_report r = validate(f.dir / "region", report);
+    CHECK(r.ok());
+    if (!r.ok())
+    {
+        std::fputs(report.str().c_str(), stderr);
+    }
+}
+
+TEST_CASE(imagery_configuration_errors_name_the_problem)
+{
+    const fixture f;
+    write_image(f.dir / "rgba.tif", 10.0, 50.0, 0.05, 20, 20, 4);
+    const auto error_of = [&](const std::string& json, bool run) {
+        write_text(f.dir / "bad.json", json);
+        try
+        {
+            const bake_config c = load_bake_config(f.dir / "bad.json");
+            if (run)
+            {
+                bake(c, {});
+            }
+        }
+        catch (const std::runtime_error& e)
+        {
+            return std::string(e.what());
+        }
+        return std::string();
+    };
+    const std::string head = R"({"layer": "imagery", "output": ")";
+    const std::string terrain = R"("sources": [{"files": "terrain.tif"}]})";
+    CHECK(error_of(head + R"(x", "tile_size": 257, )" + terrain, false).find("power of two") !=
+          std::string::npos);
+    CHECK(error_of(head + R"(x", "border": 2, )" + terrain, false).find("border") !=
+          std::string::npos);
+    CHECK(error_of(head + R"(x", "encoding": "webp", )" + terrain, false).find("encoding") !=
+          std::string::npos);
+    CHECK(error_of(head + R"(x", "geoid": "geoid", )" + terrain, false)
+              .find("apply only to heights") != std::string::npos);
+    CHECK(error_of(R"({"output": "x", "border": 1, )" + terrain, false)
+              .find("applies only to imagery") != std::string::npos);
+    // The terrain is 32-bit floating point, and the RGBA image has four bands.
+    CHECK(error_of(head + R"(y", "max_level": 1, )" + terrain, true).find("8-bit") !=
+          std::string::npos);
+    CHECK(error_of(head + R"(z", "max_level": 1, "sources": [{"files": "rgba.tif"}]})", true)
+              .find("1 (grey) or 3 (RGB) bands") != std::string::npos);
 }

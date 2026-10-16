@@ -57,6 +57,8 @@ void initialize_gdal(std::size_t cache_megabytes)
 {
     GDALAllRegister();
     CPLSetConfigOption("GDAL_CACHEMAX", std::to_string(cache_megabytes).c_str());
+    // No side-car files next to sources or encoded tiles.
+    CPLSetConfigOption("GDAL_PAM_ENABLED", "NO");
     // Errors are reported through return values and CPLGetLastErrorMsg.
     CPLSetErrorHandler(CPLQuietErrorHandler);
 }
@@ -76,6 +78,11 @@ source::source(source_config config) : config_(std::move(config))
         const bool georeferenced = GDALGetGeoTransform(dataset, gt.data()) == CE_None;
         const bool geographic = is_geographic_wgs84(dataset);
         const int bands = GDALGetRasterCount(dataset);
+        for (int b = 1; b <= bands; ++b)
+        {
+            byte_data_ =
+                byte_data_ && GDALGetRasterDataType(GDALGetRasterBand(dataset, b)) == GDT_Byte;
+        }
         const int width = GDALGetRasterXSize(dataset);
         const int height = GDALGetRasterYSize(dataset);
         // Overview sizes, so that the overview for a level can be chosen explicitly.
@@ -107,6 +114,13 @@ source::source(source_config config) : config_(std::move(config))
             throw std::runtime_error("source \"" + config_.name + "\": " + path.string() +
                                      " has no raster band");
         }
+        if (bands_ != 0 && bands != bands_)
+        {
+            throw std::runtime_error("source \"" + config_.name + "\": " + path.string() + " has " +
+                                     std::to_string(bands) +
+                                     " bands, unlike the source's other files");
+        }
+        bands_ = bands;
         source_file f;
         f.path = path;
         f.bounds = {gt[0], gt[3] + gt[5] * height, gt[0] + gt[1] * width, gt[3]};
@@ -191,6 +205,7 @@ struct sampler::impl
                      int nx,
                      int ny,
                      bool maximum,
+                     int band_number,
                      std::vector<double>& values)
     {
         const std::size_t count = static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny);
@@ -202,7 +217,7 @@ struct sampler::impl
             // Averages read the coarsest overview with at least two pixels across a footprint,
             // so that every footprint holds pixel centres, whatever the half-open box does at
             // its edges. The maximum reads the full resolution.
-            GDALRasterBandH band = GDALGetRasterBand(open(f->path), 1);
+            GDALRasterBandH band = GDALGetRasterBand(open(f->path), band_number);
             int has_nodata = 0;
             const double nodata = GDALGetRasterNoDataValue(band, &has_nodata);
             double pw = f->pixel_width;
@@ -214,7 +229,7 @@ struct sampler::impl
                     if (2.0 * std::max(f->overview_pixel_width[o], f->overview_pixel_height[o]) <=
                         step)
                     {
-                        band = GDALGetOverview(GDALGetRasterBand(open(f->path), 1),
+                        band = GDALGetOverview(GDALGetRasterBand(open(f->path), band_number),
                                                static_cast<int>(o));
                         pw = f->overview_pixel_width[o];
                         ph = f->overview_pixel_height[o];
@@ -318,7 +333,8 @@ struct sampler::impl
                      int nx,
                      int ny,
                      const std::string& resampling,
-                     std::vector<double>& values)
+                     std::vector<double>& values,
+                     int band_number)
     {
         values.assign(static_cast<std::size_t>(nx) * static_cast<std::size_t>(ny), nan);
 
@@ -343,7 +359,15 @@ struct sampler::impl
         }
         if (resampling == "average" || resampling == "max")
         {
-            filter_grid(inputs, first_lon, first_lat, step, nx, ny, resampling == "max", values);
+            filter_grid(inputs,
+                        first_lon,
+                        first_lat,
+                        step,
+                        nx,
+                        ny,
+                        resampling == "max",
+                        band_number,
+                        values);
             return;
         }
 
@@ -369,25 +393,16 @@ struct sampler::impl
         {
             const source_file& f = *inputs[i];
             const std::string overview = "NONE";
+            const std::string source_band = std::to_string(band_number);
             const std::string xscale = "XSCALE=" + std::to_string(f.pixel_width / step);
             const std::string yscale = "YSCALE=" + std::to_string(f.pixel_height / step);
-            std::vector<const char*> arguments = {"-r",
-                                                  resampling.c_str(),
-                                                  "-et",
-                                                  "0",
-                                                  "-s_srs",
-                                                  "EPSG:4326",
-                                                  "-t_srs",
-                                                  "EPSG:4326",
-                                                  "-ovr",
-                                                  overview.c_str(),
-                                                  "-dstnodata",
-                                                  "nan",
-                                                  "-wo",
-                                                  xscale.c_str(),
-                                                  "-wo",
-                                                  yscale.c_str(),
-                                                  "-q"};
+            std::vector<const char*> arguments = {
+                "-r",       resampling.c_str(),  "-et",        "0",
+                "-s_srs",   "EPSG:4326",         "-t_srs",     "EPSG:4326",
+                "-ovr",     overview.c_str(),    "-dstnodata", "nan",
+                "-wo",      xscale.c_str(),      "-wo",        yscale.c_str(),
+                "-srcband", source_band.c_str(), "-dstband",   "1",
+                "-q"};
             if (i == 0)
             {
                 arguments.insert(arguments.end(), {"-wo", "INIT_DEST=NO_DATA"});
@@ -430,7 +445,8 @@ void sampler::sample(const source& s,
                      const vgl::internal::tile_id& t,
                      std::uint32_t size,
                      const std::string& resampling,
-                     std::vector<double>& values)
+                     std::vector<double>& values,
+                     int band)
 {
     const degree_region b = vgl::internal::tile_bounds(t);
     const double step = vgl::internal::tile_span(t.level) / (size - 1);
@@ -441,7 +457,8 @@ void sampler::sample(const source& s,
                        static_cast<int>(size),
                        static_cast<int>(size),
                        resampling,
-                       values);
+                       values,
+                       band);
 }
 
 void sampler::sample_grid(const source& s,
@@ -451,7 +468,8 @@ void sampler::sample_grid(const source& s,
                           std::uint32_t nx,
                           std::uint32_t ny,
                           const std::string& resampling,
-                          std::vector<double>& values)
+                          std::vector<double>& values,
+                          int band)
 {
     impl_->sample_grid(s,
                        first_longitude,
@@ -460,7 +478,8 @@ void sampler::sample_grid(const source& s,
                        static_cast<int>(nx),
                        static_cast<int>(ny),
                        resampling,
-                       values);
+                       values,
+                       band);
 }
 
 } // namespace vgl::bake

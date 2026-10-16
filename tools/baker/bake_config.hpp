@@ -34,6 +34,14 @@ enum class level_filter : std::uint8_t
     maximum, // Terrain never appears lower than it is, for aviation.
 };
 
+// How imagery tiles are encoded (docs/pack-format.md, section 6.3).
+enum class image_encoding : std::uint8_t
+{
+    automatic, // JPEG for tiles with data everywhere, PNG with alpha for the others.
+    jpeg,      // JPEG everywhere: tiles without data everywhere are filled with black.
+    png,       // PNG everywhere, with alpha only where a tile lacks data.
+};
+
 struct source_config
 {
     std::string name;
@@ -47,7 +55,10 @@ struct bake_config
 {
     std::filesystem::path output;
     pack::layer_type layer = pack::layer_type::elevation;
-    std::uint32_t tile_size = 129;
+    std::uint32_t tile_size = 129; // Imagery: 256.
+    std::uint32_t border = 0;      // Imagery: 1 (docs/pack-format.md, section 2.4).
+    image_encoding encoding = image_encoding::automatic;
+    int jpeg_quality = 85;
     std::uint32_t min_level = 0;
     std::uint32_t max_level = 12;
     std::uint32_t shard_level = 7; // Default: max_level - 5.
@@ -57,7 +68,7 @@ struct bake_config
     double east = 180.0;
     double north = 90.0;
     level_filter filter = level_filter::average;
-    std::vector<double> height_steps; // One per level from min_level; empty for the defaults.
+    std::vector<double> height_steps; // One per level from min_level; empty for imagery.
     int zstd_level = 19;
     std::filesystem::path geoid; // Geoid pack, needed for egm2008 sources.
     std::vector<std::pair<std::string, std::string>> metadata;
