@@ -53,10 +53,10 @@ bool covers(const pk::layer_description& l, const degree_region& r) noexcept
 // What the packs hold for one tile.
 struct tile_data
 {
-    vgl_pack* pack = nullptr; // Highest-priority pack whose tile is ready.
+    vgl_pack* pack = nullptr; // Highest-priority elevation pack whose tile is ready.
     tile_state* tile = nullptr;
     bool loading = false;      // A pack has the tile, but it is not ready yet.
-    std::uint8_t children = 0; // Children that some pack may have.
+    std::uint8_t children = 0; // Children that some elevation or imagery pack may have.
 };
 
 // What a tile is drawn from: its own data, or an ancestor's.
@@ -93,13 +93,18 @@ private:
     {
         tile_data d;
         const degree_region region = tile_bounds(t);
+        // Imagery takes part as well: where it is finer than the terrain, tiles refine to its
+        // level, drawn with the terrain of an ancestor, and its tiles load with the terrain's.
+        // Its own tile only matters while no terrain is ready: a tile with terrain refines
+        // without waiting for its imagery, which an ancestor's texture stands in for.
         for (vgl_pack* p : ctx_.packs)
         {
-            if (p->state != VGL_PACK_STATE_READY ||
-                p->manifest.layer().type != pk::layer_type::elevation)
+            const pk::layer_type type = p->manifest.layer().type;
+            if (p->state != VGL_PACK_STATE_READY || type == pk::layer_type::geoid)
             {
                 continue;
             }
+            const bool imagery = type == pk::layer_type::imagery;
             const pk::layer_description& l = p->manifest.layer();
             if (t.level > l.max_level || !covers(l, region))
             {
@@ -118,14 +123,14 @@ private:
             case availability::absent:
                 break;
             case availability::wanted:
-                d.loading = d.loading || d.tile == nullptr;
+                d.loading = d.loading || imagery || d.tile == nullptr;
                 static_cast<void>(local_.push_back({p->id, t, 0.0}));
                 break;
             case availability::pending:
-                d.loading = d.loading || d.tile == nullptr;
+                d.loading = d.loading || imagery || d.tile == nullptr;
                 break;
             case availability::ready:
-                if (d.tile == nullptr)
+                if (!imagery && d.tile == nullptr)
                 {
                     d.pack = p;
                     d.tile = tile;

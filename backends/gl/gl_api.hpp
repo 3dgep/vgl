@@ -78,6 +78,36 @@ inline constexpr GLenum GL_COPY_WRITE_BUFFER_BINDING = 0x8F37;
 inline constexpr GLenum GL_PRIMITIVE_RESTART = 0x8F9D;
 inline constexpr GLenum GL_PRIMITIVE_RESTART_FIXED_INDEX = 0x8D69;
 
+// Textures and samplers.
+inline constexpr GLenum GL_TEXTURE_2D = 0x0DE1;
+inline constexpr GLenum GL_UNSIGNED_BYTE = 0x1401;
+inline constexpr GLenum GL_RGBA = 0x1908;
+inline constexpr GLenum GL_LINEAR = 0x2601;
+inline constexpr GLenum GL_LINEAR_MIPMAP_LINEAR = 0x2703;
+inline constexpr GLenum GL_TEXTURE_MAG_FILTER = 0x2800;
+inline constexpr GLenum GL_TEXTURE_MIN_FILTER = 0x2801;
+inline constexpr GLenum GL_TEXTURE_WRAP_S = 0x2802;
+inline constexpr GLenum GL_TEXTURE_WRAP_T = 0x2803;
+inline constexpr GLenum GL_CLAMP_TO_EDGE = 0x812F;
+inline constexpr GLenum GL_TEXTURE_BASE_LEVEL = 0x813C;
+inline constexpr GLenum GL_TEXTURE_MAX_LEVEL = 0x813D;
+inline constexpr GLenum GL_RGBA8 = 0x8058;
+inline constexpr GLenum GL_SRGB8_ALPHA8 = 0x8C43;
+inline constexpr GLenum GL_TEXTURE0 = 0x84C0;
+inline constexpr GLenum GL_ACTIVE_TEXTURE = 0x84E0;
+inline constexpr GLenum GL_TEXTURE_BINDING_2D = 0x8069;
+inline constexpr GLenum GL_SAMPLER_BINDING = 0x8919;
+inline constexpr GLenum GL_TEXTURE_MAX_ANISOTROPY = 0x84FE;     // EXT_texture_filter_anisotropic
+inline constexpr GLenum GL_MAX_TEXTURE_MAX_ANISOTROPY = 0x84FF; // and OpenGL 4.6.
+
+// Pixel unpacking, which the host may have changed.
+inline constexpr GLenum GL_UNPACK_ROW_LENGTH = 0x0CF2;
+inline constexpr GLenum GL_UNPACK_SKIP_ROWS = 0x0CF3;
+inline constexpr GLenum GL_UNPACK_SKIP_PIXELS = 0x0CF4;
+inline constexpr GLenum GL_UNPACK_ALIGNMENT = 0x0CF5;
+inline constexpr GLenum GL_PIXEL_UNPACK_BUFFER = 0x88EC;
+inline constexpr GLenum GL_PIXEL_UNPACK_BUFFER_BINDING = 0x88EF;
+
 // Clip control: OpenGL 4.5, GL_ARB_clip_control and GL_EXT_clip_control share these values.
 inline constexpr GLenum GL_LOWER_LEFT = 0x8CA1;
 inline constexpr GLenum GL_CLIP_ORIGIN = 0x935C;
@@ -137,7 +167,32 @@ inline constexpr GLenum GL_ZERO_TO_ONE = 0x935F;
        GLboolean normalized,                                                                       \
        GLsizei stride,                                                                             \
        const void* pointer))                                                                       \
-    X(void, DrawElements, (GLenum mode, GLsizei count, GLenum type, const void* indices))
+    X(void, DrawElements, (GLenum mode, GLsizei count, GLenum type, const void* indices))          \
+    X(void, GetFloatv, (GLenum pname, GLfloat * data))                                             \
+    X(void, Uniform1i, (GLint location, GLint v0))                                                 \
+    X(void, Uniform4fv, (GLint location, GLsizei count, const GLfloat* value))                     \
+    X(void, GenTextures, (GLsizei n, GLuint * textures))                                           \
+    X(void, DeleteTextures, (GLsizei n, const GLuint* textures))                                   \
+    X(void, BindTexture, (GLenum target, GLuint texture))                                          \
+    X(void, ActiveTexture, (GLenum texture))                                                       \
+    X(void, TexParameteri, (GLenum target, GLenum pname, GLint param))                             \
+    X(void,                                                                                        \
+      TexImage2D,                                                                                  \
+      (GLenum target,                                                                              \
+       GLint level,                                                                                \
+       GLint internalformat,                                                                       \
+       GLsizei width,                                                                              \
+       GLsizei height,                                                                             \
+       GLint border,                                                                               \
+       GLenum format,                                                                              \
+       GLenum type,                                                                                \
+       const void* pixels))                                                                        \
+    X(void, PixelStorei, (GLenum pname, GLint param))                                              \
+    X(void, GenSamplers, (GLsizei count, GLuint * samplers))                                       \
+    X(void, DeleteSamplers, (GLsizei count, const GLuint* samplers))                               \
+    X(void, BindSampler, (GLuint unit, GLuint sampler))                                            \
+    X(void, SamplerParameteri, (GLuint sampler, GLenum pname, GLint param))                        \
+    X(void, SamplerParameterf, (GLuint sampler, GLenum pname, GLfloat param))
 
 // The parameter list cannot be parenthesized again: it is part of the declarator.
 // NOLINTNEXTLINE(bugprone-macro-parentheses)
@@ -162,6 +217,7 @@ struct device
     int minor = 0;
     bool primitive_restart = false;             // GL_PRIMITIVE_RESTART exists (OpenGL).
     bool primitive_restart_fixed_index = false; // GL_PRIMITIVE_RESTART_FIXED_INDEX exists.
+    float max_anisotropy = 1.0f;                // Above 1 with anisotropic filtering.
 };
 
 // Loads the functions and identifies the device. On failure, writes the name of what is

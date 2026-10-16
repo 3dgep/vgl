@@ -96,6 +96,7 @@ int main(int argc, char** argv)
     int i;
     char terrain_uri[1024];
     char geoid_uri[1024];
+    char imagery_uri[1024];
     GLFWwindow* window;
     clear_color_fn gl_clear_color;
     clear_fn gl_clear;
@@ -111,6 +112,7 @@ int main(int argc, char** argv)
     vgl_pack_create_info pack_info = {.struct_size = sizeof(pack_info)};
     vgl_pack* terrain = NULL;
     vgl_pack* geoid = NULL;
+    vgl_pack* imagery = NULL;
     vgl_gl_backend_create_info backend_info = {.struct_size = sizeof(backend_info)};
     vgl_gl_backend* backend = NULL;
     vgl_gl_draw_info draw_info = {.struct_size = sizeof(draw_info)};
@@ -175,13 +177,16 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    /* 2. The packs: terrain, and the geoid for heights above mean sea level. */
+    /* 2. The packs: terrain, imagery, and the geoid for heights above mean sea level. */
     snprintf(terrain_uri, sizeof(terrain_uri), "%s/packs/gebco", data);
     snprintf(geoid_uri, sizeof(geoid_uri), "%s/packs/egm2008", data);
+    snprintf(imagery_uri, sizeof(imagery_uri), "%s/packs/bluemarble", data);
     pack_info.uri = terrain_uri;
     vgl_pack_create(context, &pack_info, &terrain);
     pack_info.uri = geoid_uri;
     vgl_pack_create(context, &pack_info, &geoid);
+    pack_info.uri = imagery_uri;
+    vgl_pack_create(context, &pack_info, &imagery);
 
     /* The OpenGL backend, on the current OpenGL context. */
     backend_info.get_proc_address = load;
@@ -270,6 +275,7 @@ int main(int argc, char** argv)
     vgl_gl_backend_destroy(backend);
     vgl_pack_destroy(terrain);
     vgl_pack_destroy(geoid);
+    vgl_pack_destroy(imagery);
     vgl_context_destroy(context);
     vgl_file_reader_destroy(reader);
     vgl_thread_pool_destroy(pool);

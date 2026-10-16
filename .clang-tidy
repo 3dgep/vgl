@@ -34,7 +34,7 @@ Checks: >
 #
 # The C API (include/vgl/*.h) is plain C and uses C idioms such as typedef'd
 # structs and #define constants, so modernize checks are not applied to it.
-HeaderFilterRegex: '(src|include/vgl/.*\.hpp|backends|tools|tests)/.*'
+HeaderFilterRegex: '/(src|include/vgl/.*\.hpp|backends|tools|tests)/.*'
 WarningsAsErrors: ''
 FormatStyle: file
 CheckOptions:

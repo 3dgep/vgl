@@ -9,7 +9,7 @@
 //
 //   vgl-headless [--data <directory>] [--check]
 //
-// The directory holds packs/gebco and packs/egm2008 (samples/data).
+// The directory holds packs/gebco, packs/egm2008 and packs/bluemarble (samples/data).
 
 #include "sample_camera.hpp"
 
@@ -85,11 +85,27 @@ public:
         {
             add(d.resource, std::uint64_t{d.vertex_count} * d.vertex_size);
         }
+        for (const vgl_texture_data& d : f.textures())
+        {
+            std::uint64_t size = 0;
+            for (std::uint32_t level = 0; level < d.mip_count; ++level)
+            {
+                size += d.mip_sizes[level];
+            }
+            add(d.resource, size);
+        }
         drawn_ = f.draw_list().size();
+        layered_ = 0;
+        for (const vgl_draw_item& item : f.draw_list())
+        {
+            layered_ += item.layer_count != 0 ? 1 : 0;
+        }
     }
 
     [[nodiscard]] std::uint64_t bytes() const { return bytes_; }
     [[nodiscard]] std::size_t drawn() const { return drawn_; }
+    // Drawn tiles with imagery.
+    [[nodiscard]] std::size_t layered() const { return layered_; }
 
 private:
     void add(std::uint64_t id, std::uint64_t size)
@@ -101,6 +117,7 @@ private:
     std::unordered_map<std::uint64_t, std::uint64_t> sizes_;
     std::uint64_t bytes_ = 0;
     std::size_t drawn_ = 0;
+    std::size_t layered_ = 0;
 };
 
 double mib(std::uint64_t bytes)
@@ -164,9 +181,11 @@ int main(int argc, char** argv)
     }
     const std::string terrain_uri = data + "/packs/gebco";
     const std::string geoid_uri = data + "/packs/egm2008";
+    const std::string imagery_uri = data + "/packs/bluemarble";
     vgl::expected<vgl::pack> terrain = vgl::pack::create(*ctx, terrain_uri.c_str());
     vgl::expected<vgl::pack> geoid = vgl::pack::create(*ctx, geoid_uri.c_str());
-    if (!terrain || !geoid)
+    vgl::expected<vgl::pack> imagery = vgl::pack::create(*ctx, imagery_uri.c_str());
+    if (!terrain || !geoid || !imagery)
     {
         std::fprintf(stderr, "could not add the packs\n");
         return 1;
@@ -249,6 +268,7 @@ int main(int argc, char** argv)
         expect(s.packs_failed == 0, "no pack fails");
         expect(s.tiles_selected > 0, "tiles are selected");
         expect(s.tiles_drawn == s.tiles_selected, "every selected tile is drawn");
+        expect(gpu.layered() == gpu.drawn(), "every drawn tile has imagery");
         expect(s.gpu_used == gpu.bytes(), "the consumer holds what the core counts");
         expect(s.gpu_used <= s.gpu_budget, "the GPU budget holds");
         expect(s.cpu_used <= s.cpu_budget, "the CPU budget holds");
@@ -258,6 +278,10 @@ int main(int argc, char** argv)
                            lines.end(),
                            [](const char* line) { return std::strstr(line, "GEBCO") != nullptr; }),
                "GEBCO is credited");
+        expect(std::any_of(lines.begin(),
+                           lines.end(),
+                           [](const char* line) { return std::strstr(line, "NASA") != nullptr; }),
+               "Blue Marble is credited");
     }
 
     // The credits a host would display with the last view.
@@ -317,6 +341,7 @@ int main(int argc, char** argv)
     // Leave in order: packs and context, then the reader, then the pool.
     terrain->reset();
     geoid->reset();
+    imagery->reset();
     ctx->reset();
     reader->reset();
     pool->reset();

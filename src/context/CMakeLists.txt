@@ -7,6 +7,7 @@
 target_sources(vgl_objects PRIVATE
     attribution.cpp
     build_meshes.cpp
+    build_textures.cpp
     context.cpp
     context_impl.hpp
     frame.cpp

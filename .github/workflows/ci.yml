@@ -236,4 +236,6 @@ jobs:
       - name: Run clang-tidy
         run: |
           test -f build/linux-clang-static/compile_commands.json
-          run-clang-tidy-18 -p build/linux-clang-static -quiet "$PWD/(src|backends|tools)/"
+          # stb_image.c only configures and compiles the third-party stb_image.h.
+          run-clang-tidy-18 -p build/linux-clang-static -quiet \
+            "$PWD/(src|backends|tools)/(?!decoders/stb_image\.c)"

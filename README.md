@@ -9,8 +9,8 @@ through backends for OpenGL / OpenGL ES, Direct3D 11 and Ogre, on Windows, Linux
 API, so the library embeds as easily in a C code base as in a C++ one.
 
 > **Status:** early development, at milestone M2 (MVP runtime). The runtime loads baked packs,
-> selects and meshes tiles, and the OpenGL / OpenGL ES backend draws the terrain, without
-> imagery so far. The API will change without notice before version 1.0.
+> selects and meshes tiles, and the OpenGL / OpenGL ES backend draws the terrain with imagery.
+> The API will change without notice before version 1.0.
 
 ## Goals
 

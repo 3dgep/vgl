@@ -333,8 +333,7 @@ void retire_resource(vgl_context& ctx, std::uint64_t id) noexcept
         return; // The open frame's lists point at its data; vgl_frame_end frees it.
     }
     ctx.cpu_used -= r->cpu_bytes();
-    r->vertices = buffer<tile_vertex>();
-    r->indices = buffer<std::byte>();
+    r->free_cpu_copy();
     if (r->current == gpu_resource::state::pending)
     {
         static_cast<void>(ctx.resources.erase(id)); // The consumer never received it.

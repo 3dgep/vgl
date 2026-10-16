@@ -10,6 +10,7 @@
 #ifndef VGL_CONTEXT_CONTEXT_IMPL_HPP
 #define VGL_CONTEXT_CONTEXT_IMPL_HPP
 
+#include "decoders/image_decoder.hpp"
 #include "decoders/zstd_decompressor.hpp"
 #include "foundation/allocator.hpp"
 #include "foundation/async.hpp"
@@ -65,7 +66,8 @@ struct tile_state
     state current = state::loading;
     vgl_result failure = VGL_RESULT_SUCCESS; // Why it failed.
     pack::tile_header header;
-    buffer<std::int16_t> q; // Quantized samples once ready.
+    buffer<std::int16_t> q;    // Heights: the quantized samples once ready.
+    buffer<std::byte> encoded; // Imagery: the tile as read, header included, once ready.
     std::uint64_t last_used = 0;
     std::chrono::steady_clock::time_point requested; // When its read started.
     // Range of the decoded heights, without nodata. min_height > max_height if every sample
@@ -76,6 +78,12 @@ struct tile_state
     [[nodiscard]] double height(std::size_t k) const noexcept
     {
         return header.offset + header.scale * q.data()[k];
+    }
+
+    // Bytes of CPU memory the tile holds.
+    [[nodiscard]] std::uint64_t cpu_bytes() const noexcept
+    {
+        return q.size() * sizeof(std::int16_t) + encoded.size();
     }
 };
 
@@ -126,14 +134,43 @@ struct mesh_job : async_item
     void run() noexcept;
 };
 
-// A resource of the render interface (docs/render-interface.md, section 4): a tile mesh or a
-// shared index list. It keeps its CPU copy until the consumer has created it.
+// Decoding of one imagery tile into a texture with its mip levels, on a task thread or in
+// vgl_context_update. It holds a copy of the encoded tile, so that the tile may be evicted
+// meanwhile.
+struct texture_job : async_item
+{
+    texture_job() noexcept : async_item(kind::texture) {}
+
+    async_core* core = nullptr;
+    std::uint32_t pack_id = 0;
+    std::uint64_t tile_key = 0;
+    std::uint32_t side = 0; // Pixels per side, the border included.
+    buffer<std::byte> file; // The encoded image.
+    mip_chain image;
+    vgl_result result = VGL_RESULT_SUCCESS;
+
+    // Decodes file into image, then frees the file.
+    void run() noexcept;
+};
+
+// The texture of one imagery tile of a pack, by tile key in the pack.
+struct texture_state
+{
+    std::uint64_t current = 0;     // Resource, or 0.
+    bool decoding = false;         // A texture job is running for it.
+    std::uint64_t last_wanted = 0; // Update in which a selected tile last wanted it.
+};
+
+// A resource of the render interface (docs/render-interface.md, section 4): a tile mesh, a
+// shared index list or an imagery texture. It keeps its CPU copy until the consumer has
+// created it.
 struct gpu_resource
 {
     enum class kind : std::uint8_t
     {
         mesh,
         index_list,
+        texture,
     };
 
     enum class state : std::uint8_t
@@ -150,8 +187,9 @@ struct gpu_resource
     std::uint64_t bytes = 0;  // Size on the GPU.
     std::uint64_t handle = 0; // As set by the consumer.
     std::uint64_t last_drawn = 0;
+    std::uint64_t last_wanted = 0; // Textures: frame in which a selected tile wanted it.
 
-    // Meshes.
+    // Meshes and textures.
     tile_id tile;
     tile_id source;
     std::uint32_t pack_id = 0;
@@ -166,10 +204,24 @@ struct gpu_resource
     std::uint32_t index_count = 0;
     std::uint32_t index_size = 0;
 
+    // Textures: the image and its mip levels until resident, with the pointers and sizes that
+    // the frame's texture list points at.
+    mip_chain image;
+    std::array<const void*, max_mip_levels> mip_data = {};
+    std::array<std::size_t, max_mip_levels> mip_sizes = {};
+
     // Bytes of CPU memory the resource holds.
     [[nodiscard]] std::uint64_t cpu_bytes() const noexcept
     {
-        return vertices.size() * sizeof(tile_vertex) + indices.size();
+        return vertices.size() * sizeof(tile_vertex) + indices.size() + image.pixels.size();
+    }
+
+    // Frees the CPU copy, once the consumer has the resource or will never get it.
+    void free_cpu_copy() noexcept
+    {
+        vertices = buffer<tile_vertex>();
+        indices = buffer<std::byte>();
+        image.pixels = buffer<std::uint8_t>();
     }
 };
 
@@ -264,11 +316,36 @@ void retire_resource(vgl_context& ctx, std::uint64_t id) noexcept;
 // least recently used first, until the CPU budget is met.
 void evict_pending_meshes(vgl_context& ctx) noexcept;
 
+// Starts decoding the textures that selected tiles need, while time remains before deadline;
+// at least one. Imagery tiles are kept encoded, and decoded when a texture is wanted.
+void build_textures(vgl_context& ctx, std::chrono::steady_clock::time_point deadline) noexcept;
+
+// Installs a decoded texture, and frees the job.
+void handle_texture_built(vgl_context& ctx, texture_job* job) noexcept;
+
+// Frees a texture job without installing it.
+void free_texture_job(const allocator& a, texture_job* job) noexcept;
+
+// Gives up the textures of a pack.
+void drop_pack_textures(vgl_context& ctx, vgl_pack& p) noexcept;
+
+// Like evict_pending_meshes, for textures that no selected tile wanted in this update.
+void evict_pending_textures(vgl_context& ctx) noexcept;
+
+// The resident texture that draws tile t from imagery pack p: its own, or the deepest
+// ancestor's. Returns 0 if there is none, and sets level to the imagery tile's level.
+[[nodiscard]] std::uint64_t texture_for(const vgl_context& ctx,
+                                        const vgl_pack& p,
+                                        const tile_id& t,
+                                        std::uint32_t& level) noexcept;
+
 } // namespace vgl::internal
 
 struct vgl_pack
 {
-    explicit vgl_pack(const vgl::internal::allocator& a) noexcept : shards(a), tiles(a) {}
+    explicit vgl_pack(const vgl::internal::allocator& a) noexcept : shards(a), tiles(a), textures(a)
+    {
+    }
 
     vgl_context* context = nullptr;
     std::uint32_t id = 0;
@@ -280,6 +357,11 @@ struct vgl_pack
     vgl::internal::pack::manifest manifest;
     vgl::internal::u64_map<vgl::internal::shard_state> shards;
     vgl::internal::u64_map<vgl::internal::tile_state> tiles;
+    vgl::internal::u64_map<vgl::internal::texture_state> textures; // Imagery, by tile key.
+    // When its data was last in view, for attribution: the update in which selected tiles last
+    // wanted its imagery, and the frame that last drew it.
+    std::uint64_t imagery_wanted = 0;
+    std::uint64_t imagery_drawn = 0;
     // The pack's attribution lines, each null-terminated, one after another.
     vgl::internal::buffer<char> credits;
     std::uint32_t credit_count = 0;
@@ -298,9 +380,9 @@ struct vgl_context
     explicit vgl_context(const vgl::internal::allocator& a) noexcept
         : memory(a), decompressor(a), outstanding(a), packs(a), pending(a), selected(a), wanted(a),
           boxes(a), meshes(a), resources(a), index_lists(a), drawn(a), frame_destroys(a),
-          frame_index_lists(a), frame_meshes(a), frame_draw(a), frame_layers(a), frame_offered(a),
-          frame_selected(a), frame_drawn(a), frame_tiles(a), frame_ready(a), frame_counts(a),
-          frame_owner(a), frame_candidates(a)
+          frame_index_lists(a), frame_meshes(a), frame_textures(a), frame_draw(a), frame_layers(a),
+          frame_offered(a), frame_selected(a), frame_drawn(a), frame_tiles(a), frame_ready(a),
+          frame_counts(a), frame_owner(a), frame_candidates(a)
     {
     }
 
@@ -335,7 +417,9 @@ struct vgl_context
     // The render interface (docs/render-interface.md).
     std::uint64_t gpu_budget = 0;
     std::uint64_t gpu_used = 0; // Resources offered or resident.
-    std::uint32_t texture_formats = 1u << VGL_TEXTURE_FORMAT_RGBA8;
+    // The formats the consumer samples, most preferred first (vgl_context_texture_formats_set).
+    std::array<vgl_texture_format, 8> texture_formats = {VGL_TEXTURE_FORMAT_RGBA8};
+    std::uint32_t texture_format_count = 1;
     std::uint64_t next_resource_id = 1;
     vgl::internal::u64_map<vgl::internal::gpu_resource> resources; // By id.
     vgl::internal::u64_map<std::uint64_t> index_lists;             // Resource by grid size.
@@ -360,6 +444,7 @@ struct vgl_context
     vgl::internal::vector<std::uint64_t> frame_destroys;
     vgl::internal::vector<vgl_index_list_data> frame_index_lists;
     vgl::internal::vector<vgl_mesh_data> frame_meshes;
+    vgl::internal::vector<vgl_texture_data> frame_textures;
     vgl::internal::vector<std::byte> frame_draw; // Draw items, frame_draw_stride bytes apart.
     std::uint32_t frame_draw_count = 0;
     std::uint32_t frame_draw_stride = 0;

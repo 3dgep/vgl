@@ -403,6 +403,32 @@ void handle_tile(vgl_context& ctx, vgl_pack& p, tile_state& t, vgl_io_request& r
         return;
     }
 
+    const pk::layer_description& layer = p.manifest.layer();
+    if (layer.type == pk::layer_type::imagery)
+    {
+        // Imagery stays encoded until a texture is wanted (build_textures.cpp). stb_image
+        // decodes JPEG and PNG; other encodings need a decoder vgl does not have yet.
+        const auto encoding = static_cast<pk::imagery_encoding>(t.header.encoding);
+        if (encoding != pk::imagery_encoding::jpeg && encoding != pk::imagery_encoding::png)
+        {
+            fail_tile(ctx,
+                      p,
+                      t,
+                      key,
+                      VGL_RESULT_NOT_SUPPORTED,
+                      "its encoding has no decoder; bake the pack with JPEG or PNG tiles");
+            return;
+        }
+        t.encoded = std::move(r.data);
+        t.current = tile_state::state::ready;
+        t.last_used = ctx.frame;
+        ctx.cpu_used += t.cpu_bytes();
+        ++ctx.tiles_loaded_total;
+        ctx.load_seconds_total +=
+            std::chrono::duration<double>(std::chrono::steady_clock::now() - t.requested).count();
+        return;
+    }
+
     auto* job = ctx.memory.create<decode_job>();
     const pk::layer_description& l = p.manifest.layer();
     const std::size_t count = static_cast<std::size_t>(l.tile_size) * l.tile_size;
@@ -520,11 +546,17 @@ void process_completions(vgl_context& ctx) noexcept
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
             handle_decoded(ctx, static_cast<decode_job*>(item));
         }
-        else
+        else if (item->item_kind == async_item::kind::mesh)
         {
             // item_kind gives the type.
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
             handle_mesh_built(ctx, static_cast<mesh_job*>(item));
+        }
+        else
+        {
+            // item_kind gives the type.
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
+            handle_texture_built(ctx, static_cast<texture_job*>(item));
         }
         item = next;
     }
@@ -534,8 +566,9 @@ void process_completions(vgl_context& ctx) noexcept
 // this frame, since the last update, are kept.
 void evict(vgl_context& ctx) noexcept
 {
-    // Meshes waiting for upload first: they are rebuilt from tiles, not reread.
+    // Meshes and textures waiting for upload first: they are rebuilt from tiles, not reread.
     evict_pending_meshes(ctx);
+    evict_pending_textures(ctx);
     if (ctx.cpu_used <= ctx.cpu_budget)
     {
         return;
@@ -566,7 +599,7 @@ void evict(vgl_context& ctx) noexcept
             break;
         }
         tile_state* t = c.pack->tiles.find(c.key);
-        ctx.cpu_used -= t->q.size() * sizeof(std::int16_t);
+        ctx.cpu_used -= t->cpu_bytes();
         static_cast<void>(c.pack->tiles.erase(c.key));
     }
 }
@@ -931,10 +964,11 @@ extern "C" VGL_API vgl_result vgl_pack_destroy(vgl_pack* pack)
     p->tiles.for_each([&](std::uint64_t, tile_state& t) {
         if (t.current == tile_state::state::ready)
         {
-            ctx.cpu_used -= t.q.size() * sizeof(std::int16_t);
+            ctx.cpu_used -= t.cpu_bytes();
         }
     });
     drop_pack_meshes(ctx, p->id);
+    drop_pack_textures(ctx, *p);
     for (std::size_t i = 0; i < ctx.packs.size(); ++i)
     {
         if (ctx.packs[i] == p)
@@ -991,11 +1025,17 @@ extern "C" VGL_API vgl_result vgl_context_destroy(vgl_context* context)
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
             free_job(ctx->memory, static_cast<decode_job*>(item));
         }
-        else
+        else if (item->item_kind == async_item::kind::mesh)
         {
             // item_kind gives the type.
             // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
             free_mesh_job(ctx->memory, static_cast<mesh_job*>(item));
+        }
+        else
+        {
+            // item_kind gives the type.
+            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-static-cast-downcast)
+            free_texture_job(ctx->memory, static_cast<texture_job*>(item));
         }
         item = next;
     }
@@ -1112,6 +1152,7 @@ extern "C" VGL_API vgl_result vgl_context_update(vgl_context* context, const vgl
             start + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                         std::chrono::duration<double>(budget));
         build_meshes(*ctx, deadline);
+        build_textures(*ctx, deadline);
     }
 
     // The frame ends here: what queries and selection used since the last update is kept.

@@ -48,7 +48,7 @@ add_subdirectory(context)
 add_library(vgl)
 add_library(vgl::vgl ALIAS vgl)
 
-target_sources(vgl PRIVATE $<TARGET_OBJECTS:vgl_objects>)
+target_sources(vgl PRIVATE $<TARGET_OBJECTS:vgl_objects> $<TARGET_OBJECTS:vgl_stb_objects>)
 
 # Zstandard: compiled in when downloaded, otherwise linked. The runtime needs
 # only the decompressor.

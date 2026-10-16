@@ -127,6 +127,18 @@ The pack format has its own version number, independent of the library version.
   synthetic global and regional images.
 - Sample imagery (`samples/data/packs/bluemarble`): NASA Blue Marble: Next Generation to level
   3, 1.6 MB, with its bake configuration.
+- Imagery in the runtime: imagery packs load with the terrain and take part in selection,
+  refining beyond the terrain's depth where they are finer. Their tiles are cached encoded and
+  decoded on the task interface with stb_image 2.30 (found, or downloaded at a pinned commit),
+  whose allocations go to the context's allocator, into RGBA8 textures with alpha-weighted mip
+  levels. Textures are resources of the render interface, shared by every tile drawn with them,
+  offered within the upload and GPU budgets and decoded again after eviction or a reset. Draw
+  items get one layer per imagery pack with the deepest resident texture, mapped into an
+  ancestor's texture and inside its border. Imagery packs are credited when in view.
+- The OpenGL backend draws up to four imagery layers per tile, with mip-mapped, anisotropic
+  sampling, and restores the texture units, samplers and unpack state it uses. The OpenGL,
+  pure-C and headless samples draw Blue Marble; the OpenGL check adds a view of the Sahara that
+  only imagery colours sand.
 
 ### Changed
 
@@ -155,6 +167,8 @@ The pack format has its own version number, independent of the library version.
 - The baker needs GDAL 3.7 or later, for warping one band of a multi-band source.
 - Pack format, section 9: the imagery defaults are settled: 256-pixel tiles with a border of 1,
   JPEG with PNG for partial tiles, and level 7 as the deepest level of Blue Marble.
+- Render interface specification, sections 4, 5 and 7: how textures are made, shared, chosen
+  for layers and evicted, and that the consumer's texture formats keep their order.
 - Render interface specification, section 8: the depth conventions are an enumeration, and for
   the logarithmic one the host passes the far distance when drawing, instead of the frame
   reporting a coefficient.

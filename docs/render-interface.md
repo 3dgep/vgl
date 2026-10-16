@@ -1,6 +1,6 @@
 # Render interface specification
 
-**Status: accepted on 15 October 2026; the core side is implemented (`vgl/render.h`), and so is the OpenGL / OpenGL ES backend (`vgl/gl.h`), without imagery so far.** This document specifies the render interface, as the [C API conventions](c-api.md) and the [pack format](pack-format.md) specify theirs. The core, the built-in backends and third-party consumers follow it, and a change to the interface updates this document. Section 12 records the decisions and the alternatives that were considered.
+**Status: accepted on 15 October 2026; the core side is implemented (`vgl/render.h`), and so is the OpenGL / OpenGL ES backend (`vgl/gl.h`), with imagery.** This document specifies the render interface, as the [C API conventions](c-api.md) and the [pack format](pack-format.md) specify theirs. The core, the built-in backends and third-party consumers follow it, and a change to the interface updates this document. Section 12 records the decisions and the alternatives that were considered.
 
 This document specifies the contract between the vgl core and whatever draws the globe: the built-in OpenGL / OpenGL ES, Direct3D 11 and Ogre backends, third-party backends, and hosts that render the tiles themselves (FR-10).
 
@@ -136,7 +136,7 @@ There are three kinds of resource:
 |---|---|---|
 | Mesh | A tile's vertices (section 6) | No: one per tile and data source |
 | Index list | The triangle list of one grid size | Yes: by every mesh of that grid size |
-| Texture | One imagery tile, in a negotiated format (section 7) | No |
+| Texture | One imagery tile, in a negotiated format (section 7) | Yes: by every tile drawn with that imagery tile, its own or an ancestor's |
 
 Each resource has a 64-bit identifier, unique within the context and never reused. The consumer maps identifiers to its own objects, or sets a handle (section 3) that the core echoes in later draw items.
 
@@ -192,7 +192,7 @@ typedef struct vgl_texture_data
 ### 4.3 Upload budget and the GPU budget
 
 - **Upload budget.** A frame offers resources to create up to `upload_budget` bytes, coarsest tiles first, so a large view change spreads its uploads over several frames instead of one long one.
-- **GPU budget.** `vgl_context_create_info` has a `gpu_budget` (0 selects 512 MiB). The core adds up the sizes of the resources it has asked the consumer to create. While the total exceeds the budget, it destroys meshes not drawn in the current frame, least recently drawn first. Meshes of selected tiles are exempt even when they are not drawn yet: they are waiting for the rest of their region, and evicting them would keep it from ever arriving. Index lists are small, and stay until a reset. The consumer never decides what to evict; it only applies the destroy list.
+- **GPU budget.** `vgl_context_create_info` has a `gpu_budget` (0 selects 512 MiB). The core adds up the sizes of the resources it has asked the consumer to create. While the total exceeds the budget, it destroys meshes and textures not drawn in the current frame, least recently drawn first. Meshes of selected tiles, and the textures selected tiles want, are exempt even when they are not drawn yet: they are waiting for the rest of their region, and evicting them would keep it from ever arriving. Index lists are small, and stay until a reset. The consumer never decides what to evict; it only applies the destroy list.
 - **No holes.** A region keeps what it drew last frame until all the resources that replace it are resident, the same rule selection follows for loading (design document, section 7.3).
 
 ### 4.4 CPU copies and device loss
@@ -252,7 +252,7 @@ typedef struct vgl_draw_item
 
 - **Transforms.** The core composes `view × translate(centre)` in double precision and rounds the result to `float`, so consumers get jitter-free matrices without doing any double-precision work. The projection stays with the consumer, since only the consumer knows its depth convention (section 8). An engine that composes transforms itself uses `centre`.
 - **Order.** Items are sorted by distance from the camera, nearest first, which helps early depth rejection. Consumers may reorder them.
-- **Layers.** The material model is the design's narrow one: a terrain tile with imagery layers blended bottom to top. An item's layers are `layer_count` entries of the frame's layer list (`vgl_frame_draw_layers_get`), from `first_layer`; an index rather than a pointer keeps the item free of padding. A tile with no imagery has no layers; backends then shade by height and normal.
+- **Layers.** The material model is the design's narrow one: a terrain tile with imagery layers blended bottom to top. An item's layers are `layer_count` entries of the frame's layer list (`vgl_frame_draw_layers_get`), from `first_layer`; an index rather than a pointer keeps the item free of padding. Each imagery pack gives a layer, from the lowest priority at the bottom to the highest at the top, with the deepest resident texture over the tile: its own imagery tile, or an ancestor's while its own is loading or where the pack has nothing finer. `uv_scale_offset` maps the mesh's texture coordinates into that texture: into the part of the ancestor the tile covers, and inside the texture's border (section 7). Layers blend by the texture's alpha times `opacity`. A tile with no imagery has no layers; backends then shade by height and normal. The OpenGL backend blends the top four layers of an item.
 - **Growth.** The draw list is an array, so consumers step through it by `sizeof(vgl_draw_item)` of the header they were compiled against. To keep that safe, `vgl_frame_begin_info` has a field in which the consumer states that size, and the core writes items of that size. Fields are only ever appended.
 
 ## 6. Vertex and index formats
@@ -291,11 +291,11 @@ vgl_result vgl_context_texture_formats_set(vgl_context* context,
                                            uint32_t format_count);
 ```
 
-For each imagery tile, the core picks the first of the consumer's formats it can produce: the pack's own pre-encoded format if the consumer lists it (the baker can pre-encode BC1 or BC7, design document section 8.4), and otherwise RGBA8, decoded from JPEG, WebP or PNG. Only RGBA8 needs to work in the MVP; the compressed formats are later work that needs no interface change.
+For each imagery tile, the core picks the first of the consumer's formats it can produce, in the order the consumer listed them: the pack's own pre-encoded format if the consumer lists it (the baker can pre-encode BC1 or BC7, design document section 8.4), and otherwise RGBA8 or RGBA8_SRGB, decoded from JPEG or PNG. The two hold the same bytes, sRGB-encoded as imagery is; RGBA8_SRGB asks the consumer to sample them as sRGB. The compressed formats are later work that needs no interface change.
 
-Texture data carries the format, the size, the mip level count and a pointer per mip level. Mip levels are generated by the core on a task thread, because OpenGL ES 3.0 cannot generate mipmaps for every format and because generating them on the render thread would cost frame time.
+Texture data carries the format, the size, the mip level count and a pointer per mip level, largest first, rows from the north, four bytes per pixel without padding. A texture is the imagery tile with its border (pack format, section 2.4): 258 × 258 pixels for the default 256-pixel tiles, so not a power of two, which OpenGL ES 3.0 and Direct3D 11 sample with mipmaps. The mip chain goes down to one pixel. Each level is a 2 × 2 box filter of the one above, with colour weighted by alpha, so that pixels without data do not darken their neighbours. Consumers clamp texture coordinates to the edge: the border holds the neighbouring tiles' pixels, so filtering across a tile edge needs no wrap.
 
-Imagery itself is still an open question for the client (design document, section 16, question 4), so textures are specified here only far enough to keep the interface stable.
+**Where the work happens.** The core keeps imagery tiles encoded, as read: a few kilobytes each, against about 350 KB decoded with mipmaps. When a selected tile wants a texture, a task decodes the tile with stb_image and builds the mip levels, which is also where they are generated, because OpenGL ES 3.0 cannot generate mipmaps for every format and because generating them on the render thread would cost frame time. The frame then offers the texture, within the upload budget and coarsest first like meshes, and frees the pixels once it is created. A texture destroyed under the GPU budget, or lost with the device, is decoded again from the cached tile when it is next wanted.
 
 ## 8. Depth conventions
 
@@ -391,3 +391,10 @@ Implementing the OpenGL backend added what a consumer built on the public API ne
 - The depth conventions became an enumeration in `vgl/render.h`, with the logarithmic one as the default (section 8).
 - For the logarithmic convention, the host passes the far distance when it draws, instead of the frame reporting a coefficient: the host then knows it without asking, and it can change from frame to frame.
 - Destroying a built-in backend resets the context's resources (`vgl_context_resources_reset`), so that a consumer created later receives every resource again.
+
+Imagery filled in what sections 5 and 7 had left open, again without touching the decisions:
+
+- Textures are shared: one per imagery tile and pack, drawn by every tile that uses it, rather than one per drawn tile (section 4.1).
+- The core keeps imagery encoded and decodes it into a texture when one is wanted, so that a texture evicted from the GPU or lost with the device costs a decode, not a read (section 7).
+- Textures that selected tiles want are exempt from GPU eviction, as their meshes are (section 4.3).
+- The consumer's formats are kept in the order it listed them, so that it can prefer RGBA8_SRGB to RGBA8 or the other way round (section 7).

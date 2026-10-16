@@ -24,7 +24,7 @@ inline constexpr const char* logarithmic_define = "#define VGL_LOGARITHMIC_DEPTH
 inline constexpr const char* terrain_vertex_shader = R"glsl(
 layout(location = 0) in vec3 a_position; // Relative to the tile's centre, along the ECEF axes.
 layout(location = 1) in float a_height;  // Above the ellipsoid, in metres.
-layout(location = 2) in vec2 a_uv;       // Over the tile; for imagery, which comes later.
+layout(location = 2) in vec2 a_uv;       // Over the tile: u east, v south.
 layout(location = 3) in vec2 a_normal;   // Octahedral encoding, along the ECEF axes.
 
 uniform mat4 u_model_view;
@@ -33,6 +33,7 @@ uniform mat4 u_projection;
 out vec3 v_position; // Camera space.
 out vec3 v_normal;   // Camera space.
 out float v_height;
+out vec2 v_uv;
 
 #ifdef VGL_LOGARITHMIC_DEPTH
 uniform float u_log_depth; // 2 / log2(far + 1)
@@ -56,6 +57,7 @@ void main()
     v_position = p.xyz;
     v_normal = mat3(u_model_view) * decode_octahedral(a_normal);
     v_height = a_height;
+    v_uv = a_uv;
     gl_Position = u_projection * p;
 #ifdef VGL_LOGARITHMIC_DEPTH
     // The distance along the view axis, so orthographic projections work too. The clip-space
@@ -70,8 +72,19 @@ inline constexpr const char* terrain_fragment_shader = R"glsl(
 in vec3 v_position;
 in vec3 v_normal;
 in float v_height;
+in vec2 v_uv;
 
 uniform vec3 u_light; // Towards the light, in camera space; zero lights from the camera.
+
+// Up to four imagery layers, bottom first (docs/render-interface.md, section 5). Separate
+// samplers rather than an array: GLSL ES 3.00 indexes sampler arrays by constants only.
+uniform int u_layer_count;
+uniform vec4 u_layer_uv[4];  // Scale and offset of the texture coordinates.
+uniform vec4 u_layer_opacity;
+uniform sampler2D u_layer0;
+uniform sampler2D u_layer1;
+uniform sampler2D u_layer2;
+uniform sampler2D u_layer3;
 
 layout(location = 0) out vec4 o_color;
 
@@ -101,12 +114,37 @@ vec3 height_color(float h)
     return c;
 }
 
+// Blends a layer over the colour below it, by its alpha and opacity.
+vec3 blend(vec3 below, sampler2D layer, vec4 uv, float opacity)
+{
+    vec4 texel = texture(layer, v_uv * uv.xy + uv.zw);
+    return mix(below, texel.rgb, texel.a * opacity);
+}
+
 void main()
 {
     vec3 n = normalize(v_normal);
     vec3 l = dot(u_light, u_light) > 0.0 ? u_light : normalize(-v_position);
     float diffuse = max(dot(n, l), 0.0);
-    o_color = vec4(height_color(v_height) * (0.3 + 0.7 * diffuse), 1.0);
+    // The height colours show where no imagery covers the terrain.
+    vec3 albedo = height_color(v_height);
+    if (u_layer_count > 0)
+    {
+        albedo = blend(albedo, u_layer0, u_layer_uv[0], u_layer_opacity.x);
+    }
+    if (u_layer_count > 1)
+    {
+        albedo = blend(albedo, u_layer1, u_layer_uv[1], u_layer_opacity.y);
+    }
+    if (u_layer_count > 2)
+    {
+        albedo = blend(albedo, u_layer2, u_layer_uv[2], u_layer_opacity.z);
+    }
+    if (u_layer_count > 3)
+    {
+        albedo = blend(albedo, u_layer3, u_layer_uv[3], u_layer_opacity.w);
+    }
+    o_color = vec4(albedo * (0.3 + 0.7 * diffuse), 1.0);
 #ifdef VGL_LOGARITHMIC_DEPTH
     gl_FragDepth = log2(v_log_depth) * u_log_depth * 0.5;
 #endif

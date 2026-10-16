@@ -12,6 +12,11 @@
 # the decompressor into the runtime (vgl_zstd_decompress_objects) and the
 # compressor only into the baker (vgl_zstd_compress_objects).
 #
+# stb_image (runtime): decodes JPEG and PNG imagery tiles. It is one header,
+# used from an installed copy (such as Debian's libstb-dev or vcpkg's stb) or
+# downloaded at a pinned commit. Its implementation is compiled into vgl as the
+# object library vgl_stb_objects, in C and without vgl's warning flags.
+#
 # GDAL (baker only) is never downloaded: building it is out of scope here.
 
 include(FetchContent)
@@ -89,12 +94,46 @@ else()
     message(STATUS "vgl: using downloaded Zstandard ${VGL_ZSTD_VERSION}, compiled into vgl")
 endif()
 
-# vgl_link_zstd_objects(<target> [COMPRESS])
+# stb_image: an installed header, or the pinned download.
+set(VGL_STB_COMMIT 013ac3beddff3dbffafd5177e7972067cd2b5083) # stb_image 2.30
+set(VGL_STB_URL "https://raw.githubusercontent.com/nothings/stb/${VGL_STB_COMMIT}/stb_image.h")
+set(VGL_STB_SHA256 594c2fe35d49488b4382dbfaec8f98366defca819d916ac95becf3e75f4200b3)
+
+find_path(VGL_STB_INCLUDE_DIR stb_image.h PATH_SUFFIXES stb)
+if(VGL_STB_INCLUDE_DIR)
+    message(STATUS "vgl: using installed stb_image (${VGL_STB_INCLUDE_DIR})")
+elseif(VGL_FETCH_DEPENDENCIES)
+    FetchContent_Declare(vgl_stb_source
+        URL "${VGL_STB_URL}"
+        URL_HASH SHA256=${VGL_STB_SHA256}
+        DOWNLOAD_NO_EXTRACT TRUE
+        DOWNLOAD_NAME stb_image.h
+        SOURCE_SUBDIR do-not-build)
+    FetchContent_MakeAvailable(vgl_stb_source)
+    set(VGL_STB_INCLUDE_DIR "${vgl_stb_source_SOURCE_DIR}" CACHE PATH "Directory of stb_image.h" FORCE)
+    message(STATUS "vgl: using downloaded stb_image 2.30, compiled into vgl")
+else()
+    message(FATAL_ERROR "vgl: stb_image.h was not found and VGL_FETCH_DEPENDENCIES is off. "
+                        "Install it (libstb-dev or vcpkg's stb) or turn VGL_FETCH_DEPENDENCIES on.")
+endif()
+
+# The implementation, in C. Its allocations go to vgl's allocator through
+# vgl_stbi_allocate and friends (src/decoders/image_decoder.cpp).
+add_library(vgl_stb_objects OBJECT "${PROJECT_SOURCE_DIR}/src/decoders/stb_image.c")
+target_include_directories(vgl_stb_objects SYSTEM PRIVATE "${VGL_STB_INCLUDE_DIR}")
+set_target_properties(vgl_stb_objects PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    C_VISIBILITY_PRESET hidden
+    FOLDER third_party)
+
+# vgl_link_bundled_objects(<target> [COMPRESS])
 #
 # For executables that link vgl_objects directly (tests, the baker): adds the
-# bundled Zstandard objects, which vgl_objects cannot carry itself.
-function(vgl_link_zstd_objects target)
+# objects compiled into vgl from third-party sources, which vgl_objects cannot
+# carry itself: stb_image, and a downloaded Zstandard.
+function(vgl_link_bundled_objects target)
     target_link_libraries(${target} PRIVATE vgl_zstd)
+    target_sources(${target} PRIVATE $<TARGET_OBJECTS:vgl_stb_objects>)
     if(VGL_ZSTD_BUNDLED)
         target_sources(${target} PRIVATE $<TARGET_OBJECTS:vgl_zstd_decompress_objects>)
         if("COMPRESS" IN_LIST ARGN)

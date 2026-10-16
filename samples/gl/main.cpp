@@ -9,7 +9,7 @@
 //          [--check] [--save <directory>]
 //
 // Controls: drag with the left button to move, with the right button to turn and tilt, scroll
-// to climb or descend; 1 to 5 jump to places; L switches between sunlight and a headlight.
+// to climb or descend; 1 to 6 jump to places; L switches between sunlight and a headlight.
 //
 // With --check, the sample runs hidden: it flies to a few views with each depth convention
 // the device supports, and checks what it draws, that the conventions agree, that OpenGL
@@ -333,12 +333,13 @@ struct place
     double most_coverage;
 };
 
-const std::array<place, 5> places{{
+const std::array<place, 6> places{{
     {"orbit, Atlantic", {30.0, -30.0, 2.0e7, 0.0, 90.0}, 0.06, 0.12},
     {"Europe", {48.0, 10.0, 5.0e6, 0.0, 90.0}, 0.45, 0.70},
     {"Alps", {44.5, 9.0, 3.0e5, 0.0, 35.0}, 0.65, 0.82},
     {"Himalaya", {26.0, 86.9, 6.0e4, 0.0, 20.0}, 0.58, 0.77},
     {"Mid-Atlantic Ridge", {20.0, -50.0, 1.5e6, 90.0, 40.0}, 0.38, 0.55},
+    {"Sahara", {23.0, 12.0, 1.0e6, 0.0, 90.0}, 0.99, 1.0},
 }};
 
 // ---------------------------------------------------------------------------------------------
@@ -567,12 +568,22 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
             expect(gl.GetError() == 0, "OpenGL reports no error: " + where);
             expect(covered >= p.least_coverage && covered <= p.most_coverage,
                    "the globe covers its share of the view: " + where);
-            // Every view looks at the globe in the middle, and past it in the top corners.
+            // Every view looks at the globe in the middle, and past it in the top corners,
+            // except straight down from close by.
             const std::size_t w = width;
             const std::size_t h = height;
+            const bool sky = p.most_coverage < 1.0;
             expect(covered_pixel(pixels, h / 2 * w + w / 2) &&
-                       !covered_pixel(pixels, (h - 1) * w) && !covered_pixel(pixels, h * w - 1),
+                       (!sky ||
+                        (!covered_pixel(pixels, (h - 1) * w) && !covered_pixel(pixels, h * w - 1))),
                    "the globe is below and the sky above: " + where);
+            // Imagery is drawn: the desert is tan, where the colours by height would be green.
+            if (std::strcmp(p.name, "Sahara") == 0)
+            {
+                const std::uint8_t* middle = &pixels[(h / 2 * w + w / 2) * 4];
+                expect(middle[0] > middle[1] && middle[1] > middle[2],
+                       "the Sahara is sand-coloured: " + where);
+            }
             if (!o.save.empty())
             {
                 std::string name = o.save + "/" + depth_name(s.depth) + "-" + p.name + ".ppm";
@@ -954,9 +965,11 @@ int main(int argc, char** argv)
     }
     const std::string terrain_uri = o.data + "/packs/gebco";
     const std::string geoid_uri = o.data + "/packs/egm2008";
+    const std::string imagery_uri = o.data + "/packs/bluemarble";
     vgl::expected<vgl::pack> terrain = vgl::pack::create(*ctx, terrain_uri.c_str());
     vgl::expected<vgl::pack> geoid = vgl::pack::create(*ctx, geoid_uri.c_str());
-    if (!terrain || !geoid)
+    vgl::expected<vgl::pack> imagery = vgl::pack::create(*ctx, imagery_uri.c_str());
+    if (!terrain || !geoid || !imagery)
     {
         std::fprintf(stderr, "could not add the packs\n");
         return 1;
@@ -968,6 +981,7 @@ int main(int argc, char** argv)
     // the pool, and last the window with its OpenGL context.
     terrain->reset();
     geoid->reset();
+    imagery->reset();
     ctx->reset();
     reader->reset();
     pool->reset();

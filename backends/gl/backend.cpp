@@ -2,8 +2,8 @@
 // Copyright (c) 2026 Jeremiah van Oosten
 //
 // The OpenGL backend (vgl/gl.h): a consumer of the render interface (docs/render-interface.md)
-// that turns each frame's resource lists into buffers and vertex arrays, and its draw list into
-// one draw call per tile.
+// that turns each frame's resource lists into buffers, vertex arrays and textures, and its draw
+// list into one draw call per tile, with up to four imagery layers.
 
 #include "common/host_memory.hpp"
 #include "common/pointer_map.hpp"
@@ -29,7 +29,11 @@ enum class resource_kind : std::uint8_t
 {
     index_list,
     mesh,
+    texture,
 };
+
+// Imagery layers a draw blends; a tile with more draws the top ones.
+constexpr std::uint32_t max_layers = 4;
 
 // The OpenGL objects of one render resource. Its address is the handle the context echoes in
 // draw items (vgl_frame_resource_handle_set).
@@ -38,6 +42,7 @@ struct gl_resource
     resource_kind kind = resource_kind::index_list;
     GLuint buffer = 0;       // Indices or vertices.
     GLuint vertex_array = 0; // Meshes: the vertex layout and the index list's buffer.
+    GLuint texture = 0;      // Textures.
 };
 
 // The host's state that drawing changes (NFR-08; vgl/gl.h lists it).
@@ -58,6 +63,14 @@ struct saved_state
     GLboolean primitive_restart_fixed_index = GL_FALSE;
     GLint clip_origin = 0;
     GLint clip_depth_mode = 0;
+    GLint active_texture = 0;
+    std::array<GLint, max_layers> textures = {}; // Units 0 to 3.
+    std::array<GLint, max_layers> samplers = {};
+    GLint unpack_buffer = 0;
+    GLint unpack_alignment = 0;
+    GLint unpack_row_length = 0;
+    GLint unpack_skip_rows = 0;
+    GLint unpack_skip_pixels = 0;
 };
 
 constexpr std::size_t message_size = 1024;
@@ -79,10 +92,15 @@ struct vgl_gl_backend
     functions gl;
     device dev;
     GLuint program = 0;
+    GLuint sampler = 0;
     GLint u_model_view = -1;
     GLint u_projection = -1;
     GLint u_light = -1;
     GLint u_log_depth = -1;
+    GLint u_layer_count = -1;
+    GLint u_layer_uv = -1;
+    GLint u_layer_opacity = -1;
+    std::array<GLint, max_layers> u_layers = {-1, -1, -1, -1};
 
     vgl::common::pointer_map<gl_resource> resources;
 };
@@ -182,6 +200,28 @@ vgl_result build_program(vgl_gl_backend& b, const char* function)
     b.u_projection = gl.GetUniformLocation(program, "u_projection");
     b.u_light = gl.GetUniformLocation(program, "u_light");
     b.u_log_depth = gl.GetUniformLocation(program, "u_log_depth");
+    b.u_layer_count = gl.GetUniformLocation(program, "u_layer_count");
+    b.u_layer_uv = gl.GetUniformLocation(program, "u_layer_uv");
+    b.u_layer_opacity = gl.GetUniformLocation(program, "u_layer_opacity");
+    const std::array<const char*, max_layers> names = {
+        "u_layer0", "u_layer1", "u_layer2", "u_layer3"};
+    for (std::uint32_t k = 0; k < max_layers; ++k)
+    {
+        b.u_layers[k] = gl.GetUniformLocation(program, names[k]);
+    }
+
+    // Trilinear filtering, anisotropic where the device has it, and edges clamped: tiles carry
+    // their neighbours' pixels in their border instead.
+    gl.GenSamplers(1, &b.sampler);
+    gl.SamplerParameteri(b.sampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    gl.SamplerParameteri(b.sampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    gl.SamplerParameteri(b.sampler, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl.SamplerParameteri(b.sampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    if (b.dev.max_anisotropy > 1.0f)
+    {
+        gl.SamplerParameterf(
+            b.sampler, GL_TEXTURE_MAX_ANISOTROPY, std::min(8.0f, b.dev.max_anisotropy));
+    }
     return VGL_RESULT_SUCCESS;
 }
 
@@ -228,7 +268,14 @@ void forget_resources(vgl_gl_backend& b, bool delete_objects)
             {
                 b.gl.DeleteVertexArrays(1, &r->vertex_array);
             }
-            b.gl.DeleteBuffers(1, &r->buffer);
+            if (r->texture != 0)
+            {
+                b.gl.DeleteTextures(1, &r->texture);
+            }
+            if (r->buffer != 0)
+            {
+                b.gl.DeleteBuffers(1, &r->buffer);
+            }
         }
         b.mem.destroy(r);
     });
@@ -241,8 +288,10 @@ void stop(vgl_gl_backend& b, bool delete_objects)
     if (delete_objects && b.ready)
     {
         b.gl.DeleteProgram(b.program);
+        b.gl.DeleteSamplers(1, &b.sampler);
     }
     b.program = 0;
+    b.sampler = 0;
     b.ready = false;
 }
 
@@ -274,6 +323,18 @@ saved_state save_state(const vgl_gl_backend& b)
         gl.GetIntegerv(GL_CLIP_ORIGIN, &s.clip_origin);
         gl.GetIntegerv(GL_CLIP_DEPTH_MODE, &s.clip_depth_mode);
     }
+    gl.GetIntegerv(GL_ACTIVE_TEXTURE, &s.active_texture);
+    for (std::uint32_t k = 0; k < max_layers; ++k)
+    {
+        gl.ActiveTexture(GL_TEXTURE0 + k);
+        gl.GetIntegerv(GL_TEXTURE_BINDING_2D, &s.textures[k]);
+        gl.GetIntegerv(GL_SAMPLER_BINDING, &s.samplers[k]);
+    }
+    gl.GetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &s.unpack_buffer);
+    gl.GetIntegerv(GL_UNPACK_ALIGNMENT, &s.unpack_alignment);
+    gl.GetIntegerv(GL_UNPACK_ROW_LENGTH, &s.unpack_row_length);
+    gl.GetIntegerv(GL_UNPACK_SKIP_ROWS, &s.unpack_skip_rows);
+    gl.GetIntegerv(GL_UNPACK_SKIP_PIXELS, &s.unpack_skip_pixels);
     return s;
 }
 
@@ -316,6 +377,18 @@ void restore_state(const vgl_gl_backend& b, const saved_state& s)
     {
         gl.ClipControl(static_cast<GLenum>(s.clip_origin), static_cast<GLenum>(s.clip_depth_mode));
     }
+    for (std::uint32_t k = 0; k < max_layers; ++k)
+    {
+        gl.ActiveTexture(GL_TEXTURE0 + k);
+        gl.BindTexture(GL_TEXTURE_2D, static_cast<GLuint>(s.textures[k]));
+        gl.BindSampler(k, static_cast<GLuint>(s.samplers[k]));
+    }
+    gl.ActiveTexture(static_cast<GLenum>(s.active_texture));
+    gl.BindBuffer(GL_PIXEL_UNPACK_BUFFER, static_cast<GLuint>(s.unpack_buffer));
+    gl.PixelStorei(GL_UNPACK_ALIGNMENT, s.unpack_alignment);
+    gl.PixelStorei(GL_UNPACK_ROW_LENGTH, s.unpack_row_length);
+    gl.PixelStorei(GL_UNPACK_SKIP_ROWS, s.unpack_skip_rows);
+    gl.PixelStorei(GL_UNPACK_SKIP_PIXELS, s.unpack_skip_pixels);
 }
 
 const void* buffer_offset(std::uintptr_t offset)
@@ -390,6 +463,49 @@ void create_mesh(vgl_gl_backend& b, vgl_frame* frame, const vgl_mesh_data& d)
         vgl_frame_resource_handle_set(frame, d.resource, reinterpret_cast<std::uintptr_t>(r)));
 }
 
+void create_texture(vgl_gl_backend& b, vgl_frame* frame, const vgl_texture_data& d)
+{
+    const functions& gl = b.gl;
+    if (d.format != VGL_TEXTURE_FORMAT_RGBA8 && d.format != VGL_TEXTURE_FORMAT_RGBA8_SRGB)
+    {
+        static_cast<void>(vgl_frame_resource_failed(frame, d.resource, VGL_RESULT_NOT_SUPPORTED));
+        return;
+    }
+    auto* r = b.mem.create<gl_resource>();
+    if (r == nullptr || !b.resources.insert(d.resource, r))
+    {
+        b.mem.destroy(r);
+        static_cast<void>(vgl_frame_resource_failed(frame, d.resource, VGL_RESULT_OUT_OF_MEMORY));
+        return;
+    }
+    r->kind = resource_kind::texture;
+    gl.GenTextures(1, &r->texture);
+    gl.ActiveTexture(GL_TEXTURE0);
+    gl.BindTexture(GL_TEXTURE_2D, r->texture);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(d.mip_count) - 1);
+    const auto internal_format =
+        static_cast<GLint>(d.format == VGL_TEXTURE_FORMAT_RGBA8_SRGB ? GL_SRGB8_ALPHA8 : GL_RGBA8);
+    auto w = static_cast<GLsizei>(d.width);
+    auto h = static_cast<GLsizei>(d.height);
+    for (std::uint32_t level = 0; level < d.mip_count; ++level)
+    {
+        gl.TexImage2D(GL_TEXTURE_2D,
+                      static_cast<GLint>(level),
+                      internal_format,
+                      w,
+                      h,
+                      0,
+                      GL_RGBA,
+                      GL_UNSIGNED_BYTE,
+                      d.mip_data[level]);
+        w = std::max<GLsizei>(1, w / 2);
+        h = std::max<GLsizei>(1, h / 2);
+    }
+    static_cast<void>(
+        vgl_frame_resource_handle_set(frame, d.resource, reinterpret_cast<std::uintptr_t>(r)));
+}
+
 void destroy_resource(vgl_gl_backend& b, std::uint64_t id)
 {
     gl_resource* r = b.resources.find(id);
@@ -401,7 +517,14 @@ void destroy_resource(vgl_gl_backend& b, std::uint64_t id)
     {
         b.gl.DeleteVertexArrays(1, &r->vertex_array);
     }
-    b.gl.DeleteBuffers(1, &r->buffer);
+    if (r->texture != 0)
+    {
+        b.gl.DeleteTextures(1, &r->texture);
+    }
+    if (r->buffer != 0)
+    {
+        b.gl.DeleteBuffers(1, &r->buffer);
+    }
     b.resources.erase(id);
     b.mem.destroy(r);
 }
@@ -431,13 +554,20 @@ void apply_resources(vgl_gl_backend& b, vgl_frame* frame)
         create_mesh(b, frame, meshes[i]);
     }
 
-    // Imagery is not drawn yet, and the context offers no textures without imagery packs.
     const vgl_texture_data* textures = nullptr;
     static_cast<void>(vgl_frame_textures_get(frame, &textures, &count));
+    if (count != 0)
+    {
+        // Rows are tightly packed in client memory, which the host's unpack state may not say.
+        b.gl.BindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+        b.gl.PixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        b.gl.PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+        b.gl.PixelStorei(GL_UNPACK_SKIP_ROWS, 0);
+        b.gl.PixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+    }
     for (std::uint32_t i = 0; i < count; ++i)
     {
-        static_cast<void>(
-            vgl_frame_resource_failed(frame, textures[i].resource, VGL_RESULT_NOT_SUPPORTED));
+        create_texture(b, frame, textures[i]);
     }
 }
 
@@ -451,7 +581,7 @@ std::array<GLfloat, 16> to_float(const vgl_dmat4& m)
     return f;
 }
 
-// The record a handle names: its address, as create_mesh set it.
+// The record a handle names: its address, as create_mesh and create_texture set it.
 const gl_resource* from_handle(std::uint64_t handle)
 {
     const auto address = static_cast<std::uintptr_t>(handle);
@@ -521,12 +651,62 @@ void draw_items(const vgl_gl_backend& b,
         gl.ClipControl(static_cast<GLenum>(origin), GL_ZERO_TO_ONE);
     }
 
+    // Layer k samples texture unit k.
+    for (std::uint32_t k = 0; k < max_layers; ++k)
+    {
+        gl.Uniform1i(b.u_layers[k], static_cast<GLint>(k));
+        gl.BindSampler(k, b.sampler);
+    }
+    std::array<GLuint, max_layers> bound = {};
+    for (std::uint32_t k = 0; k < max_layers; ++k)
+    {
+        gl.ActiveTexture(GL_TEXTURE0 + k);
+        gl.BindTexture(GL_TEXTURE_2D, 0);
+    }
+
+    const vgl_draw_layer* layers = nullptr;
+    std::uint32_t layer_total = 0;
+    static_cast<void>(vgl_frame_draw_layers_get(frame, &layers, &layer_total));
     const vgl_draw_item* items = nullptr;
     std::uint32_t count = 0;
     static_cast<void>(vgl_frame_draw_list_get(frame, &items, &count));
     for (std::uint32_t i = 0; i < count; ++i)
     {
         const vgl_draw_item& item = items[i];
+        // The top layers, if there are more than a draw can blend.
+        const std::uint32_t used = std::min(item.layer_count, max_layers);
+        const std::uint32_t first = item.first_layer + item.layer_count - used;
+        std::array<GLfloat, std::size_t{4} * max_layers> uv = {};
+        std::array<GLfloat, max_layers> opacity = {};
+        std::uint32_t drawn_layers = 0;
+        for (std::uint32_t k = 0; k < used && first + k < layer_total; ++k)
+        {
+            const vgl_draw_layer& layer = layers[first + k];
+            const gl_resource* texture = layer.texture_handle != 0
+                                             ? from_handle(layer.texture_handle)
+                                             : b.resources.find(layer.texture);
+            if (texture == nullptr)
+            {
+                continue;
+            }
+            const std::uint32_t unit = drawn_layers++;
+            if (bound[unit] != texture->texture)
+            {
+                gl.ActiveTexture(GL_TEXTURE0 + unit);
+                gl.BindTexture(GL_TEXTURE_2D, texture->texture);
+                bound[unit] = texture->texture;
+            }
+            std::copy(std::begin(layer.uv_scale_offset),
+                      std::end(layer.uv_scale_offset),
+                      uv.begin() + static_cast<std::ptrdiff_t>(std::size_t{4} * unit));
+            opacity[unit] = layer.opacity;
+        }
+        gl.Uniform1i(b.u_layer_count, static_cast<GLint>(drawn_layers));
+        if (drawn_layers != 0)
+        {
+            gl.Uniform4fv(b.u_layer_uv, static_cast<GLsizei>(drawn_layers), uv.data());
+            gl.Uniform4fv(b.u_layer_opacity, 1, opacity.data());
+        }
         const gl_resource* mesh =
             item.mesh_handle != 0 ? from_handle(item.mesh_handle) : b.resources.find(item.mesh);
         if (mesh == nullptr)

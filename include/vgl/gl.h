@@ -26,10 +26,12 @@
  *     vgl_gl_backend_destroy(backend);  // Before the context and the OpenGL context.
  *
  * State (NFR-08). The backend saves the following state when it draws, and restores it before
- * returning: the current program, the vertex array binding, the GL_ARRAY_BUFFER and
- * GL_COPY_WRITE_BUFFER bindings, GL_DEPTH_TEST, the depth function and write mask,
- * GL_CULL_FACE, the cull face mode, the front face, GL_BLEND, primitive restart (where it
- * exists) and, for the reversed-Z convention, the clip control depth mode. It draws with the
+ * returning: the current program, the vertex array binding, the GL_ARRAY_BUFFER,
+ * GL_COPY_WRITE_BUFFER and GL_PIXEL_UNPACK_BUFFER bindings, the active texture unit, the 2D
+ * texture and sampler bindings of units 0 to 3, the unpack alignment, row length and skips,
+ * GL_DEPTH_TEST, the depth function and write mask, GL_CULL_FACE, the cull face mode, the front
+ * face, GL_BLEND, primitive restart (where it exists) and, for the reversed-Z convention, the
+ * clip control depth mode. It draws with the
  * host's framebuffer, viewport, scissor, depth range, color and stencil state unchanged, so a
  * stencil test or color mask the host leaves enabled applies to the globe as well.
  */
@@ -165,7 +167,8 @@ typedef struct vgl_gl_draw_info
 
 /**
  * Draws the globe into the current framebuffer: takes a frame from the context, applies its
- * resources (deleting and creating OpenGL objects) and draws its tiles, shaded by height and
+ * resources (deleting and creating OpenGL objects) and draws its tiles: up to four imagery
+ * layers per tile, blended over colours by height where imagery is missing, and lit by the
  * normal. It does not clear the framebuffer or present. Without a view, it draws nothing.
  *
  * Call it once per frame after vgl_context_update, inside the host's render pass. The host

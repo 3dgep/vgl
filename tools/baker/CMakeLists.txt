@@ -69,7 +69,7 @@ vgl_target_options(vgl_bake)
 
 add_executable(vgl-bake main.cpp)
 target_link_libraries(vgl-bake PRIVATE vgl_bake vgl_pack_writer vgl_objects)
-vgl_link_zstd_objects(vgl-bake COMPRESS)
+vgl_link_bundled_objects(vgl-bake COMPRESS)
 vgl_target_options(vgl-bake)
 
 if(VGL_INSTALL)

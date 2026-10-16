@@ -37,16 +37,30 @@ struct fake_gpu
         std::uint32_t index_count = 0;
         std::uint32_t index_size = 0;
         std::uint32_t vertex_count = 0;
+        bool texture = false;
+    };
+
+    // A texture's largest level, kept to check what layers sample.
+    struct image
+    {
+        std::uint32_t width = 0;
+        std::uint32_t height = 0;
+        std::uint32_t mip_count = 0;
+        vgl_texture_format format = VGL_TEXTURE_FORMAT_RGBA8;
+        std::vector<std::uint8_t> pixels;
     };
 
     std::map<std::uint64_t, resource> resident;
-    std::set<std::uint64_t> ever; // Every id ever created, to check that none is reused.
-    std::set<std::uint64_t> fail; // Ids to report as failed, once.
+    std::map<std::uint64_t, image> images; // Of the resident textures.
+    std::set<std::uint64_t> ever;          // Every id ever created, to check that none is reused.
+    std::set<std::uint64_t> fail;          // Ids to report as failed, once.
     bool set_handles = false;
 
     // Per frame.
     std::vector<vgl_draw_item> items;
+    std::vector<vgl_draw_layer> layers;
     std::size_t meshes_created = 0;
+    std::size_t textures_created = 0;
     std::size_t index_lists_created = 0;
     std::size_t destroyed = 0;
 
@@ -65,7 +79,9 @@ struct fake_gpu
     void apply(vgl_frame* f, const vgl_frame_begin_info* info)
     {
         items.clear();
+        layers.clear();
         meshes_created = 0;
+        textures_created = 0;
         index_lists_created = 0;
         destroyed = 0;
 
@@ -75,6 +91,7 @@ struct fake_gpu
         for (std::uint32_t k = 0; k < count; ++k)
         {
             CHECK(resident.erase(destroys[k]) == 1);
+            images.erase(destroys[k]);
             ++destroyed;
         }
 
@@ -141,6 +158,51 @@ struct fake_gpu
             }
         }
 
+        const vgl_texture_data* textures = nullptr;
+        REQUIRE(vgl_frame_textures_get(f, &textures, &count) == VGL_RESULT_SUCCESS);
+        for (std::uint32_t k = 0; k < count; ++k)
+        {
+            const vgl_texture_data& d = textures[k];
+            CHECK(ever.insert(d.resource).second);
+            if (fail.erase(d.resource) != 0)
+            {
+                CHECK_EQ(vgl_frame_resource_failed(f, d.resource, VGL_RESULT_OUT_OF_MEMORY),
+                         VGL_RESULT_SUCCESS);
+                ever.erase(d.resource);
+                continue;
+            }
+            // A full chain of mip levels, each half the size of the one before.
+            REQUIRE(d.mip_count == mip_level_count(d.width, d.height));
+            std::uint64_t bytes = 0;
+            std::uint32_t w = d.width;
+            std::uint32_t h = d.height;
+            for (std::uint32_t level = 0; level < d.mip_count; ++level)
+            {
+                REQUIRE(d.mip_data[level] != nullptr);
+                CHECK_EQ(d.mip_sizes[level], std::size_t{w} * h * 4);
+                bytes += d.mip_sizes[level];
+                w = std::max(1u, w / 2);
+                h = std::max(1u, h / 2);
+            }
+            const auto* level0 = static_cast<const std::uint8_t*>(d.mip_data[0]);
+            images[d.resource] = {d.width,
+                                  d.height,
+                                  d.mip_count,
+                                  d.format,
+                                  std::vector<std::uint8_t>(level0, level0 + d.mip_sizes[0])};
+            resident[d.resource] = {false, bytes, 0, 0, 0, true};
+            ++textures_created;
+            if (set_handles)
+            {
+                CHECK_EQ(vgl_frame_resource_handle_set(f, d.resource, handle_of(d.resource)),
+                         VGL_RESULT_SUCCESS);
+            }
+        }
+
+        const vgl_draw_layer* layer_list = nullptr;
+        REQUIRE(vgl_frame_draw_layers_get(f, &layer_list, &count) == VGL_RESULT_SUCCESS);
+        layers.assign(layer_list, layer_list + count);
+
         const vgl_draw_item* draw = nullptr;
         REQUIRE(vgl_frame_draw_list_get(f, &draw, &count) == VGL_RESULT_SUCCESS);
         const std::size_t stride = info != nullptr && info->draw_item_size != 0
@@ -160,6 +222,17 @@ struct fake_gpu
             REQUIRE(list != resident.end());
             CHECK_EQ(item.index_count, list->second.index_count);
             CHECK_EQ(item.index_size, list->second.index_size);
+            // Layers name resident textures.
+            REQUIRE(std::size_t{item.first_layer} + item.layer_count <= layers.size());
+            for (std::uint32_t l = 0; l < item.layer_count; ++l)
+            {
+                const vgl_draw_layer& layer = layers[item.first_layer + l];
+                const auto texture = resident.find(layer.texture);
+                REQUIRE(texture != resident.end());
+                CHECK(texture->second.texture);
+                CHECK_EQ(layer.texture_handle, set_handles ? handle_of(layer.texture) : 0u);
+                CHECK_EQ(layer.opacity, 1.0f);
+            }
         }
     }
 
@@ -238,7 +311,8 @@ void settle(vgl_context* ctx,
         REQUIRE(vgl_context_update(ctx, nullptr) == VGL_RESULT_SUCCESS);
         gpu.frame(ctx, info);
         CHECK(disjoint(gpu.items));
-        const bool idle = io.uris.size() == reads && gpu.meshes_created == 0 && gpu.destroyed == 0;
+        const bool idle = io.uris.size() == reads && gpu.meshes_created == 0 &&
+                          gpu.textures_created == 0 && gpu.destroyed == 0;
         quiet = idle ? quiet + 1 : 0;
     }
 }
@@ -246,13 +320,18 @@ void settle(vgl_context* ctx,
 struct fixture
 {
     test_pack pack = make_pack();
+    test_pack imagery_pack = make_imagery_pack();
     memory_io io;
     vgl_context* ctx = nullptr;
     vgl_pack* p = nullptr;
+    vgl_pack* imagery = nullptr;
 
-    explicit fixture(std::uint64_t gpu_budget = 0, std::uint64_t cpu_budget = 0)
+    explicit fixture(std::uint64_t gpu_budget = 0,
+                     std::uint64_t cpu_budget = 0,
+                     bool with_imagery = false)
     {
         io.packs["mem://a"] = &pack;
+        io.packs["mem://imagery"] = &imagery_pack;
         vgl_context_create_info info{};
         info.struct_size = sizeof(info);
         info.io = &io.table;
@@ -264,6 +343,11 @@ struct fixture
             create.struct_size = sizeof(create);
             create.uri = "mem://a";
             static_cast<void>(vgl_pack_create(ctx, &create, &p));
+            if (with_imagery)
+            {
+                create.uri = "mem://imagery";
+                static_cast<void>(vgl_pack_create(ctx, &create, &imagery));
+            }
         }
     }
 
@@ -272,6 +356,7 @@ struct fixture
 
     ~fixture()
     {
+        static_cast<void>(vgl_pack_destroy(imagery));
         static_cast<void>(vgl_pack_destroy(p));
         static_cast<void>(vgl_context_destroy(ctx));
     }
@@ -352,9 +437,7 @@ TEST_CASE(selected_tiles_are_created_and_drawn)
     std::uint64_t tiles = 0;
     for (vgl_pack* p : f.ctx->packs)
     {
-        p->tiles.for_each([&](std::uint64_t, const tile_state& t) {
-            tiles += t.q.size() * sizeof(std::int16_t);
-        });
+        p->tiles.for_each([&](std::uint64_t, const tile_state& t) { tiles += t.cpu_bytes(); });
     }
     CHECK_EQ(f.ctx->cpu_used, tiles);
     CHECK_EQ(f.ctx->gpu_used, gpu.bytes());
@@ -768,4 +851,199 @@ TEST_CASE(attribution_names_the_packs_in_view)
     CHECK_EQ(vgl_pack_destroy(p_twin), VGL_RESULT_SUCCESS);
     CHECK_EQ(vgl_pack_destroy(p_low), VGL_RESULT_SUCCESS);
     CHECK_EQ(vgl_context_destroy(ctx), VGL_RESULT_SUCCESS);
+}
+
+// --- Imagery ------------------------------------------------------------------------------
+
+namespace
+{
+
+// The imagery tile a test pixel came from, among the ancestors-or-self of t, by its colour.
+bool imagery_tile_of(const tile_id& t, std::uint8_t code, tile_id& out)
+{
+    for (std::uint32_t level = t.level + 1; level-- > 0;)
+    {
+        const tile_id a = tile_ancestor(t, level);
+        if (imagery_pixel(a, 0, 0)[2] == code)
+        {
+            out = a;
+            return true;
+        }
+    }
+    return false;
+}
+
+// Checks that a draw item's layer samples the imagery at the right place: at mesh texture
+// coordinates (u, v), the texel is the one of the imagery tile over the same position.
+void check_layer(const fake_gpu& gpu, const vgl_draw_item& item, const vgl_draw_layer& layer)
+{
+    const fake_gpu::image& img = gpu.images.at(layer.texture);
+    REQUIRE(img.width == imagery_side && img.height == imagery_side);
+    const tile_id t = id_of(item.tile);
+    for (const auto& [u, v] : {std::pair{0.3, 0.6}, std::pair{0.85, 0.1}, std::pair{0.05, 0.95}})
+    {
+        const double tu = u * layer.uv_scale_offset[0] + layer.uv_scale_offset[2];
+        const double tv = v * layer.uv_scale_offset[1] + layer.uv_scale_offset[3];
+        const auto i = static_cast<std::uint32_t>(tu * img.width);
+        const auto j = static_cast<std::uint32_t>(tv * img.height);
+        REQUIRE(i < img.width && j < img.height);
+        const std::uint8_t* px = &img.pixels[(std::size_t{j} * img.width + i) * 4];
+        tile_id source;
+        REQUIRE(imagery_tile_of(t, px[2], source));
+        // The texel is the imagery tile's pixel over the position, inside its border.
+        const degree_region b = tile_bounds(t);
+        const degree_region s = tile_bounds(source);
+        const double lon = b.west + u * (b.east - b.west);
+        const double lat = b.north - v * (b.north - b.south);
+        const auto ei =
+            static_cast<std::uint32_t>((lon - s.west) / (s.east - s.west) * imagery_tile_size) +
+            imagery_border;
+        const auto ej =
+            static_cast<std::uint32_t>((s.north - lat) / (s.north - s.south) * imagery_tile_size) +
+            imagery_border;
+        CHECK_EQ(px[0], static_cast<std::uint8_t>(ei * 3));
+        CHECK_EQ(px[1], static_cast<std::uint8_t>(ej * 3));
+    }
+}
+
+} // namespace
+
+TEST_CASE(tiles_are_drawn_with_the_imagery_over_them)
+{
+    fixture f(0, 0, true);
+    REQUIRE(f.ctx != nullptr && f.imagery != nullptr);
+    fake_gpu gpu;
+    gpu.set_handles = true;
+    const position centre = inside({3, 6, 2}, 0.5, 0.5);
+    f.look(centre.lat, centre.lon, 50000.0);
+    settle(f.ctx, f.io, gpu);
+
+    REQUIRE(!gpu.items.empty());
+    for (const vgl_draw_item& item : gpu.items)
+    {
+        // One imagery pack, so one layer, from the tile's own imagery once settled.
+        REQUIRE(item.layer_count == 1u);
+        const vgl_draw_layer& layer = gpu.layers[item.first_layer];
+        check_layer(gpu, item, layer);
+        const fake_gpu::image& img = gpu.images.at(layer.texture);
+        tile_id source;
+        REQUIRE(imagery_tile_of(id_of(item.tile), img.pixels[2], source));
+        CHECK(source == id_of(item.tile));
+        CHECK_EQ(img.mip_count, 7u); // 66, 33, 16, 8, 4, 2, 1.
+        CHECK(img.format == VGL_TEXTURE_FORMAT_RGBA8);
+    }
+
+    // Uploaded textures hold no CPU memory: what remains is the tiles, imagery encoded.
+    std::uint64_t tiles = 0;
+    for (vgl_pack* p : f.ctx->packs)
+    {
+        p->tiles.for_each([&](std::uint64_t, const tile_state& t) { tiles += t.cpu_bytes(); });
+    }
+    CHECK_EQ(f.ctx->cpu_used, tiles);
+    CHECK_EQ(f.ctx->gpu_used, gpu.bytes());
+}
+
+TEST_CASE(tiles_without_their_own_imagery_use_an_ancestors)
+{
+    // Both packs have level-2 tiles only at (2, 3, 1) and (2, 4, 1). Their neighbour (2, 2, 1)
+    // is drawn from the level-1 terrain, and with the level-1 texture.
+    fixture f(0, 0, true);
+    REQUIRE(f.ctx != nullptr);
+    fake_gpu gpu;
+    const position at = inside({2, 2, 1}, 0.9, 0.5);
+    f.look(at.lat, at.lon, 200000.0);
+    settle(f.ctx, f.io, gpu);
+    bool ancestor = false;
+    for (const vgl_draw_item& item : gpu.items)
+    {
+        REQUIRE(item.layer_count == 1u);
+        const vgl_draw_layer& layer = gpu.layers[item.first_layer];
+        check_layer(gpu, item, layer);
+        tile_id source;
+        REQUIRE(imagery_tile_of(id_of(item.tile), gpu.images.at(layer.texture).pixels[2], source));
+        ancestor = ancestor || source.level < item.tile.level;
+    }
+    CHECK(ancestor);
+}
+
+TEST_CASE(texture_formats_follow_the_consumers_preference)
+{
+    fixture f(0, 0, true);
+    REQUIRE(f.ctx != nullptr);
+    const vgl_texture_format formats[] = {
+        VGL_TEXTURE_FORMAT_BC7, VGL_TEXTURE_FORMAT_RGBA8_SRGB, VGL_TEXTURE_FORMAT_RGBA8};
+    REQUIRE(vgl_context_texture_formats_set(f.ctx, formats, 3) == VGL_RESULT_SUCCESS);
+    fake_gpu gpu;
+    f.look(0.0, -30.0, 2e7);
+    settle(f.ctx, f.io, gpu);
+    REQUIRE(!gpu.images.empty());
+    for (const auto& [id, img] : gpu.images)
+    {
+        CHECK(img.format == VGL_TEXTURE_FORMAT_RGBA8_SRGB);
+    }
+}
+
+TEST_CASE(textures_are_created_again_after_a_reset_or_eviction)
+{
+    fixture f(1, 0, true); // Nothing stays beyond what is drawn and wanted.
+    REQUIRE(f.ctx != nullptr);
+    fake_gpu gpu;
+    f.look(0.0, -30.0, 2e7);
+    settle(f.ctx, f.io, gpu);
+    const position p = inside({3, 6, 2}, 0.5, 0.5);
+    f.look(p.lat, p.lon, 50000.0);
+    settle(f.ctx, f.io, gpu);
+    // Only the textures of the frame stay.
+    std::set<std::uint64_t> used;
+    for (const vgl_draw_item& item : gpu.items)
+    {
+        REQUIRE(item.layer_count == 1u);
+        used.insert(gpu.layers[item.first_layer].texture);
+    }
+    CHECK_EQ(gpu.images.size(), used.size());
+
+    // Back to where the evicted textures were: they are decoded and created again.
+    f.look(0.0, -30.0, 2e7);
+    settle(f.ctx, f.io, gpu);
+    for (const vgl_draw_item& item : gpu.items)
+    {
+        REQUIRE(item.layer_count == 1u);
+        check_layer(gpu, item, gpu.layers[item.first_layer]);
+    }
+
+    // The device is lost.
+    gpu.resident.clear();
+    gpu.images.clear();
+    REQUIRE(vgl_context_resources_reset(f.ctx) == VGL_RESULT_SUCCESS);
+    settle(f.ctx, f.io, gpu);
+    REQUIRE(!gpu.items.empty());
+    for (const vgl_draw_item& item : gpu.items)
+    {
+        REQUIRE(item.layer_count == 1u);
+        check_layer(gpu, item, gpu.layers[item.first_layer]);
+    }
+}
+
+TEST_CASE(imagery_is_credited_and_can_be_removed)
+{
+    fixture f(0, 0, true);
+    REQUIRE(f.ctx != nullptr);
+    fake_gpu gpu;
+    const position p = inside({3, 6, 2}, 0.5, 0.5);
+    f.look(p.lat, p.lon, 50000.0);
+    settle(f.ctx, f.io, gpu);
+    std::vector<std::string> lines = credits(f.ctx);
+    CHECK(std::find(lines.begin(), lines.end(), "Test imagery") != lines.end());
+
+    // Without its pack, tiles are drawn without layers, and its textures are destroyed.
+    REQUIRE(vgl_pack_destroy(f.imagery) == VGL_RESULT_SUCCESS);
+    f.imagery = nullptr;
+    settle(f.ctx, f.io, gpu);
+    for (const vgl_draw_item& item : gpu.items)
+    {
+        CHECK_EQ(item.layer_count, 0u);
+    }
+    CHECK(gpu.images.empty());
+    lines = credits(f.ctx);
+    CHECK(std::find(lines.begin(), lines.end(), "Test imagery") == lines.end());
 }

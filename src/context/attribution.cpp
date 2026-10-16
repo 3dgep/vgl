@@ -17,6 +17,12 @@ namespace
 
 bool in_view(const vgl_context& ctx, const vgl_pack& p) noexcept
 {
+    if (p.manifest.layer().type == vgl::internal::pack::layer_type::imagery)
+    {
+        // Selected tiles wanted its imagery in the last update, or the last frame drew it.
+        return (ctx.has_view && p.imagery_wanted != 0 && p.imagery_wanted + 1 == ctx.frame) ||
+               (p.imagery_drawn != 0 && p.imagery_drawn == ctx.render_frame);
+    }
     if (ctx.has_view)
     {
         for (const selected_tile& s : ctx.selected)

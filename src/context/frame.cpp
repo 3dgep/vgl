@@ -7,11 +7,12 @@
 // 1. Tiles whose next mesh is resident switch to it, retiring the old one.
 // 2. The draw set: the selected tiles whose meshes are resident, except where a tile drawn in
 //    the last frame still covers a region whose replacements are not all resident yet.
-// 3. Creates: meshes of selected tiles waiting for upload, coarsest first, within the upload
-//    budget, with the index lists they need.
-// 4. Destroys: retired resources, and resources not drawn now, least recently drawn first,
-//    while the GPU budget is exceeded.
-// 5. Draw items, nearest first, with model-view matrices composed in double precision.
+// 3. Creates: meshes of selected tiles waiting for upload, with the index lists they need,
+//    and the textures selected tiles want, coarsest first, within the upload budget.
+// 4. Destroys: retired resources, and resources neither drawn nor wanted now, least recently
+//    drawn first, while the GPU budget is exceeded.
+// 5. Draw items, nearest first, with model-view matrices composed in double precision, and
+//    for each item one imagery layer per imagery pack: the deepest resident texture.
 
 #include "context/context_impl.hpp"
 #include "foundation/math.hpp"
@@ -175,6 +176,12 @@ bool decide_draw_set(vgl_context& ctx) noexcept
     return true;
 }
 
+bool is_imagery(const vgl_pack& p) noexcept
+{
+    return p.state == VGL_PACK_STATE_READY && p.manifest.layer().type == pack::layer_type::imagery;
+}
+
+// Marks what this frame draws: meshes, their index lists, and the textures of their layers.
 void mark_drawn(vgl_context& ctx) noexcept
 {
     for (const drawn_tile& d : ctx.frame_tiles)
@@ -182,7 +189,45 @@ void mark_drawn(vgl_context& ctx) noexcept
         gpu_resource* r = ctx.resources.find(d.mesh);
         r->last_drawn = ctx.render_frame;
         index_list_of(ctx, *r)->last_drawn = ctx.render_frame;
+        for (const vgl_pack* p : ctx.packs)
+        {
+            std::uint32_t level = 0;
+            const std::uint64_t texture = is_imagery(*p) ? texture_for(ctx, *p, d.id, level) : 0;
+            if (texture != 0)
+            {
+                ctx.resources.find(texture)->last_drawn = ctx.render_frame;
+            }
+        }
     }
+}
+
+// Marks the textures that selected tiles wanted in the last update: they are uploaded, and
+// kept from eviction while they wait to be drawn.
+void mark_wanted(vgl_context& ctx) noexcept
+{
+    for (vgl_pack* p : ctx.packs)
+    {
+        p->textures.for_each([&](std::uint64_t, const texture_state& s) {
+            if (s.current != 0 && s.last_wanted + 1 == ctx.frame)
+            {
+                ctx.resources.find(s.current)->last_wanted = ctx.render_frame;
+            }
+        });
+    }
+}
+
+// The texture format to offer: the consumer's most preferred of those the core produces.
+vgl_texture_format texture_format(const vgl_context& ctx) noexcept
+{
+    for (std::uint32_t i = 0; i < ctx.texture_format_count; ++i)
+    {
+        const vgl_texture_format f = ctx.texture_formats[i];
+        if (f == VGL_TEXTURE_FORMAT_RGBA8 || f == VGL_TEXTURE_FORMAT_RGBA8_SRGB)
+        {
+            return f;
+        }
+    }
+    return VGL_TEXTURE_FORMAT_RGBA8;
 }
 
 bool offer(vgl_context& ctx, std::uint64_t id, gpu_resource& r) noexcept
@@ -199,6 +244,22 @@ bool offer(vgl_context& ctx, std::uint64_t id, gpu_resource& r) noexcept
         d.index_count = r.index_count;
         d.index_size = r.index_size;
         if (!ctx.frame_index_lists.push_back(d))
+        {
+            ctx.frame_offered.pop_back();
+            return false;
+        }
+    }
+    else if (r.resource_kind == gpu_resource::kind::texture)
+    {
+        vgl_texture_data d{};
+        d.resource = id;
+        d.format = texture_format(ctx);
+        d.width = r.image.width;
+        d.height = r.image.height;
+        d.mip_count = r.image.levels;
+        d.mip_data = r.mip_data.data();
+        d.mip_sizes = r.mip_sizes.data();
+        if (!ctx.frame_textures.push_back(d))
         {
             ctx.frame_offered.pop_back();
             return false;
@@ -243,6 +304,13 @@ void choose_uploads(vgl_context& ctx, std::uint64_t budget) noexcept
             break;
         }
     }
+    ctx.resources.for_each([&](std::uint64_t id, const gpu_resource& r) {
+        if (r.resource_kind == gpu_resource::kind::texture &&
+            is_live(&r, gpu_resource::state::pending) && r.last_wanted == ctx.render_frame)
+        {
+            static_cast<void>(candidates.push_back(id));
+        }
+    });
     // Coarsest first, then oldest.
     std::sort(candidates.begin(), candidates.end(), [&](std::uint64_t a, std::uint64_t b) {
         const std::uint32_t la = ctx.resources.find(a)->tile.level;
@@ -254,6 +322,20 @@ void choose_uploads(vgl_context& ctx, std::uint64_t budget) noexcept
     for (const std::uint64_t id : candidates)
     {
         gpu_resource* mesh = ctx.resources.find(id);
+        if (mesh->resource_kind == gpu_resource::kind::texture)
+        {
+            if (any && used + mesh->bytes > budget)
+            {
+                break;
+            }
+            if (!offer(ctx, id, *mesh))
+            {
+                break;
+            }
+            used += mesh->bytes;
+            any = true;
+            continue;
+        }
         const std::uint64_t* list_id = ctx.index_lists.find(mesh->grid);
         gpu_resource* list = list_id != nullptr ? ctx.resources.find(*list_id) : nullptr;
         if (list == nullptr)
@@ -289,9 +371,14 @@ void choose_destroys(vgl_context& ctx) noexcept
         ctx.resources.for_each([&](std::uint64_t id, const gpu_resource& r) {
             // Meshes of selected tiles stay even when not drawn yet: they are waiting for the
             // rest of a region to arrive, and evicting them would keep it from ever arriving.
-            if (r.resource_kind == gpu_resource::kind::mesh &&
-                is_live(&r, gpu_resource::state::resident) && r.last_drawn < ctx.render_frame &&
-                ctx.frame_selected.find(tile_key(r.tile)) == nullptr)
+            // Textures that selected tiles want stay for the same reason.
+            const bool idle =
+                is_live(&r, gpu_resource::state::resident) && r.last_drawn < ctx.render_frame;
+            const bool evictable = (r.resource_kind == gpu_resource::kind::mesh &&
+                                    ctx.frame_selected.find(tile_key(r.tile)) == nullptr) ||
+                                   (r.resource_kind == gpu_resource::kind::texture &&
+                                    r.last_wanted < ctx.render_frame);
+            if (idle && evictable)
             {
                 static_cast<void>(candidates.push_back(id));
             }
@@ -312,6 +399,19 @@ void choose_destroys(vgl_context& ctx) noexcept
             gpu_resource* r = ctx.resources.find(id);
             used -= r->bytes;
             const std::uint64_t key = tile_key(r->tile);
+            if (r->resource_kind == gpu_resource::kind::texture)
+            {
+                // Decoded again from the cached tile when wanted.
+                for (vgl_pack* p : ctx.packs)
+                {
+                    if (p->id == r->pack_id)
+                    {
+                        static_cast<void>(p->textures.erase(key));
+                    }
+                }
+                retire_resource(ctx, id);
+                continue;
+            }
             retire_resource(ctx, id);
             if (mesh_state* m = ctx.meshes.find(key); m != nullptr)
             {
@@ -336,6 +436,50 @@ void choose_destroys(vgl_context& ctx) noexcept
         ctx.gpu_used -= ctx.resources.find(id)->bytes;
         static_cast<void>(ctx.resources.erase(id));
     }
+}
+
+// The imagery layers of a draw item, bottom first: one per imagery pack, from the lowest
+// priority up, each with the deepest resident texture for the tile (render interface,
+// section 5). A tile drawn with an ancestor's texture maps its texture coordinates into the
+// part of the ancestor it covers, inside the ancestor's border.
+bool write_layers(vgl_context& ctx, const tile_id& t, vgl_draw_item& item) noexcept
+{
+    item.first_layer = static_cast<std::uint32_t>(ctx.frame_layers.size());
+    item.layer_count = 0;
+    for (std::size_t i = ctx.packs.size(); i-- > 0;)
+    {
+        vgl_pack& p = *ctx.packs[i];
+        std::uint32_t level = 0;
+        const std::uint64_t texture = is_imagery(p) ? texture_for(ctx, p, t, level) : 0;
+        if (texture == 0)
+        {
+            continue;
+        }
+        const pack::layer_description& l = p.manifest.layer();
+        const double inner = l.tile_size;
+        const double side = inner + 2.0 * l.border;
+        const std::uint32_t d = t.level - level;
+        const double scale = std::ldexp(1.0, -static_cast<int>(d));
+        // Where the tile lies in the imagery tile, as a fraction of it.
+        const std::uint32_t within = (1u << d) - 1u;
+        const double u = (t.x & within) * scale;
+        const double v = (t.y & within) * scale;
+        vgl_draw_layer layer{};
+        layer.texture = texture;
+        layer.texture_handle = ctx.resources.find(texture)->handle;
+        layer.uv_scale_offset[0] = static_cast<float>(scale * inner / side);
+        layer.uv_scale_offset[1] = static_cast<float>(scale * inner / side);
+        layer.uv_scale_offset[2] = static_cast<float>((l.border + u * inner) / side);
+        layer.uv_scale_offset[3] = static_cast<float>((l.border + v * inner) / side);
+        layer.opacity = 1.0f;
+        if (!ctx.frame_layers.push_back(layer))
+        {
+            return false;
+        }
+        ++item.layer_count;
+        p.imagery_drawn = ctx.render_frame;
+    }
+    return true;
 }
 
 // Step 5.
@@ -381,6 +525,10 @@ bool write_draw_items(vgl_context& ctx, const dmat4& view, const dvec3& eye) noe
         item.centre = r->centre.to_c();
         item.min_height = r->min_height;
         item.max_height = r->max_height;
+        if (!write_layers(ctx, d.id, item))
+        {
+            return false;
+        }
 
         // A consumer compiled against an older header gets the fields it knows; one compiled
         // against a newer header gets zeros in the rest.
@@ -474,6 +622,7 @@ extern "C" VGL_API vgl_result vgl_context_frame_begin(vgl_context* context,
     ctx->frame_destroys.clear();
     ctx->frame_index_lists.clear();
     ctx->frame_meshes.clear();
+    ctx->frame_textures.clear();
     ctx->frame_layers.clear();
     ctx->frame_offered.clear();
     ctx->frame_draw_count = 0;
@@ -494,6 +643,7 @@ extern "C" VGL_API vgl_result vgl_context_frame_begin(vgl_context* context,
         }
     }
     mark_drawn(*ctx);
+    mark_wanted(*ctx);
     choose_uploads(*ctx, upload_budget);
     choose_destroys(*ctx);
     if (!write_draw_items(*ctx, view, eye))
@@ -508,6 +658,8 @@ extern "C" VGL_API vgl_result vgl_context_frame_begin(vgl_context* context,
         ctx->frame_offered.clear();
         ctx->frame_index_lists.clear();
         ctx->frame_meshes.clear();
+        ctx->frame_textures.clear();
+        ctx->frame_layers.clear();
         return VGL_RESULT_OUT_OF_MEMORY;
     }
     ctx->frame_open = true;
@@ -574,9 +726,9 @@ extern "C" VGL_API vgl_result vgl_frame_textures_get(const vgl_frame* frame,
     {
         return VGL_RESULT_INVALID_ARGUMENT;
     }
-    // Imagery comes later; no textures yet.
-    *out_textures = nullptr;
-    *out_count = 0;
+    const vgl_context& ctx = *frame->context;
+    *out_textures = ctx.frame_textures.data();
+    *out_count = static_cast<std::uint32_t>(ctx.frame_textures.size());
     return VGL_RESULT_SUCCESS;
 }
 
@@ -676,8 +828,7 @@ extern "C" VGL_API vgl_result vgl_frame_end(vgl_frame* frame)
         }
         r->current = gpu_resource::state::resident;
         ctx.cpu_used -= r->cpu_bytes();
-        r->vertices = buffer<tile_vertex>();
-        r->indices = buffer<std::byte>();
+        r->free_cpu_copy();
     }
     // What was drawn now is what stays drawn while its replacements arrive.
     ctx.drawn.clear();
@@ -720,6 +871,22 @@ extern "C" VGL_API vgl_result vgl_context_resources_reset(vgl_context* context)
     {
         static_cast<void>(ctx.meshes.erase(key));
     }
+    // Textures are decoded again when next wanted; a decode under way installs its result.
+    for (vgl_pack* p : ctx.packs)
+    {
+        idle.clear();
+        p->textures.for_each([&](std::uint64_t key, texture_state& s) {
+            s.current = 0;
+            if (!s.decoding)
+            {
+                static_cast<void>(idle.push_back(key));
+            }
+        });
+        for (const std::uint64_t key : idle)
+        {
+            static_cast<void>(p->textures.erase(key));
+        }
+    }
     return VGL_RESULT_SUCCESS;
 }
 
@@ -731,15 +898,36 @@ extern "C" VGL_API vgl_result vgl_context_texture_formats_set(vgl_context* conte
     {
         return VGL_RESULT_INVALID_ARGUMENT;
     }
-    std::uint32_t mask = 1u << VGL_TEXTURE_FORMAT_RGBA8;
     for (std::uint32_t i = 0; i < format_count; ++i)
     {
         if (formats[i] < VGL_TEXTURE_FORMAT_RGBA8 || formats[i] > VGL_TEXTURE_FORMAT_ASTC_4X4)
         {
             return VGL_RESULT_INVALID_ARGUMENT;
         }
-        mask |= 1u << formats[i];
     }
-    context->texture_formats = mask;
+    // The preference order, without repeats; RGBA8 is always possible, so it ends the list.
+    vgl_context& ctx = *context;
+    const auto listed = [&](vgl_texture_format f) {
+        for (std::uint32_t k = 0; k < ctx.texture_format_count; ++k)
+        {
+            if (ctx.texture_formats[k] == f)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    ctx.texture_format_count = 0;
+    for (std::uint32_t i = 0; i < format_count; ++i)
+    {
+        if (!listed(formats[i]) && ctx.texture_format_count + 1 < ctx.texture_formats.size())
+        {
+            ctx.texture_formats[ctx.texture_format_count++] = formats[i];
+        }
+    }
+    if (!listed(VGL_TEXTURE_FORMAT_RGBA8))
+    {
+        ctx.texture_formats[ctx.texture_format_count++] = VGL_TEXTURE_FORMAT_RGBA8;
+    }
     return VGL_RESULT_SUCCESS;
 }
