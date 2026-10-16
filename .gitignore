@@ -14,7 +14,10 @@ CMakeUserPresets.json
 *.user
 *.suo
 
-# Baked data and test bakes (large; never committed)
+# Baked data and test bakes (large; never committed, except the small sample packs below)
 *.vglm
 *.vgls
+# Except the sample packs, which the samples and their tests use (samples/data/README.md).
+!samples/data/packs/**/*.vglm
+!samples/data/packs/**/*.vgls
 /data/

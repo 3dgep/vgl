@@ -9,4 +9,5 @@ target_sources(vgl_objects PRIVATE
     context.cpp
     context_impl.hpp
     frame.cpp
-    select_tiles.cpp)
+    select_tiles.cpp
+    statistics.cpp)

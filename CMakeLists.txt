@@ -48,12 +48,16 @@ if(VGL_BUILD_BAKER OR VGL_BUILD_TESTS)
     add_subdirectory(tools/baker)
 endif()
 
+# Before the samples, which also add tests (the headless sample checks itself).
+if(VGL_BUILD_TESTS)
+    enable_testing()
+endif()
+
 if(VGL_BUILD_SAMPLES)
     add_subdirectory(samples)
 endif()
 
 if(VGL_BUILD_TESTS)
-    enable_testing()
     add_subdirectory(tests)
 endif()
 

@@ -5,3 +5,5 @@
 *.jpg binary
 *.tif binary
 *.tiff binary
+*.vglm binary
+*.vgls binary

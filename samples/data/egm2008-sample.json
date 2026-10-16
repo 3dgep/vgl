@@ -1,0 +1,24 @@
+{
+    // Sample geoid pack: EGM2008 (NGA) down to level 2, about 0.7 degrees between samples, as
+    // one base shard, so that the samples can report heights above mean sea level. Bake it
+    // from the directory that holds the sources, as for tools/baker/examples/egm2008-geoid.json.
+    "output": "sample-packs/egm2008",
+    "layer": "geoid",
+    "tile_size": 129,
+    "min_level": 0,
+    "max_level": 2,
+    "shard_level": 3, // Above max_level: the whole pack is one base shard.
+    "metadata": {
+        "name": "EGM2008 geoid (sample, to level 2)",
+        "attribution": "EGM2008 geoid model, National Geospatial-Intelligence Agency (NGA)",
+        "source": "EGM2008 2.5' grid (NGA)"
+    },
+    "sources": [
+        {
+            "name": "EGM2008 2.5'",
+            "files": "sources/geoid/us_nga_egm08_25.tif",
+            "datum": "ellipsoid",
+            "resampling": "cubic"
+        }
+    ]
+}

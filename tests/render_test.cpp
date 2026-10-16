@@ -619,3 +619,51 @@ TEST_CASE(frames_survive_allocation_failures)
         }
     }
 }
+
+TEST_CASE(statistics_describe_the_context)
+{
+    fixture f;
+    REQUIRE(f.ctx != nullptr);
+    fake_gpu gpu;
+    const position p = inside({3, 6, 2}, 0.5, 0.5);
+    f.look(p.lat, p.lon, 50000.0);
+    settle(f.ctx, f.io, gpu);
+
+    vgl_context_statistics s{};
+    s.struct_size = sizeof(s);
+    REQUIRE(vgl_context_statistics_get(f.ctx, &s) == VGL_RESULT_SUCCESS);
+    CHECK_EQ(s.struct_size, static_cast<std::uint32_t>(sizeof(s)));
+    CHECK_EQ(s.cpu_used, f.ctx->cpu_used);
+    CHECK_EQ(s.gpu_used, gpu.bytes());
+    CHECK_EQ(s.gpu_budget, 512ull * 1024 * 1024);
+    CHECK_EQ(s.packs_loading, 0u);
+    CHECK_EQ(s.packs_failed, 0u);
+    CHECK_EQ(s.reads_outstanding, 0u);
+    CHECK_EQ(s.tiles_decoding, 0u);
+    CHECK(s.tiles_decoded > 0);
+    CHECK_EQ(s.meshes_building, 0u);
+    CHECK_EQ(s.meshes_waiting, 0u);
+    CHECK_EQ(s.resources_resident, static_cast<std::uint32_t>(gpu.resident.size()));
+    CHECK_EQ(s.tiles_selected, static_cast<std::uint32_t>(f.ctx->selected.size()));
+    CHECK_EQ(s.tiles_drawn, static_cast<std::uint32_t>(gpu.items.size()));
+    CHECK_EQ(s.resources_created, 0u); // Settled: the last frame created nothing.
+    CHECK_EQ(s.reads_total, static_cast<std::uint64_t>(f.io.uris.size()));
+    CHECK(s.bytes_read_total > 0);
+    CHECK(s.tiles_loaded_total >= s.tiles_decoded);
+    CHECK(s.tile_load_time_mean >= 0.0);
+    CHECK(s.update_time > 0.0);
+    CHECK(s.frame_time > 0.0);
+
+    // An older caller's structure gets only the fields that fit.
+    vgl_context_statistics old{};
+    old.struct_size = 16;
+    old.cpu_budget = 12345;
+    REQUIRE(vgl_context_statistics_get(f.ctx, &old) == VGL_RESULT_SUCCESS);
+    CHECK_EQ(old.cpu_used, s.cpu_used);
+    CHECK_EQ(old.cpu_budget, 12345u);
+
+    old.struct_size = 4;
+    CHECK_EQ(vgl_context_statistics_get(f.ctx, &old), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_context_statistics_get(nullptr, &s), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_context_statistics_get(f.ctx, nullptr), VGL_RESULT_INVALID_ARGUMENT);
+}

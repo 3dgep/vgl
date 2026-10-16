@@ -1,0 +1,26 @@
+{
+    // Sample elevation pack: the GEBCO 2026 grid (public domain) down to level 3, about 20 km
+    // between samples, as one base shard. Small enough to keep in the repository, so that the
+    // samples and their tests run offline (design document, section 11). Bake it from the
+    // directory that holds the sources and the full geoid pack, as for
+    // tools/baker/examples/gebco-global.json.
+    "output": "sample-packs/gebco",
+    "layer": "elevation",
+    "tile_size": 129,
+    "min_level": 0,
+    "max_level": 3,
+    "shard_level": 4, // Above max_level: the whole pack is one base shard.
+    "geoid": "packs/egm2008-geoid",
+    "metadata": {
+        "name": "GEBCO 2026 (sample, to level 3)",
+        "attribution": "GEBCO Compilation Group (2026) GEBCO 2026 Grid",
+        "source": "GEBCO 2026 Grid, ice surface elevation (mean sea level)"
+    },
+    "sources": [
+        {
+            "name": "GEBCO 2026",
+            "files": "sources/gebco-cog/gebco_2026_*.tif",
+            "datum": "egm2008"
+        }
+    ]
+}

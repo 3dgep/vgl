@@ -411,6 +411,8 @@ void handle_tile(vgl_context& ctx, vgl_pack& p, tile_state& t, vgl_io_request& r
 void handle_request(vgl_context& ctx, vgl_io_request* r) noexcept
 {
     static_cast<void>(ctx.outstanding.erase(r->id));
+    ++ctx.reads_total;
+    ctx.bytes_read_total += r->data.size();
     vgl_pack* p = find_pack(ctx, r->target.pack_id);
     if (p != nullptr)
     {
@@ -455,6 +457,10 @@ void handle_decoded(vgl_context& ctx, decode_job* job) noexcept
             t->current = tile_state::state::ready;
             t->last_used = ctx.frame;
             ctx.cpu_used += t->q.size() * sizeof(std::int16_t);
+            ++ctx.tiles_loaded_total;
+            ctx.load_seconds_total +=
+                std::chrono::duration<double>(std::chrono::steady_clock::now() - t->requested)
+                    .count();
         }
         else
         {
@@ -645,6 +651,7 @@ availability find_tile(vgl_context& ctx,
             error = VGL_RESULT_OUT_OF_MEMORY;
             return availability::pending;
         }
+        tile->requested = std::chrono::steady_clock::now();
         const pk::byte_range r = s->directory.tile_range(e);
         const io_target target{io_target::kind::tile, p.id, shard_key, key};
         if (start_read(ctx, target, p.uri.data(), s->path.data(), r.offset, r.size) !=
@@ -1054,6 +1061,8 @@ extern "C" VGL_API vgl_result vgl_context_update(vgl_context* context, const vgl
     // The frame ends here: what queries and selection used since the last update is kept.
     evict(*ctx);
     ++ctx->frame;
+    ctx->update_seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
     return VGL_RESULT_SUCCESS;
 }
 

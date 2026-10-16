@@ -276,6 +276,72 @@ VGL_API vgl_result vgl_context_height_query(vgl_context* context,
                                             vgl_height_reference reference,
                                             double* out_height);
 
+/* ---------------------------------------------------------------------------------------- */
+/* Statistics                                                                               */
+/* ---------------------------------------------------------------------------------------- */
+
+/*
+ * What a context holds and does (design document, section 7.4). Set struct_size; the library
+ * writes the fields that fit within it.
+ */
+typedef struct vgl_context_statistics
+{
+    uint32_t struct_size;
+    uint32_t reserved;
+
+    /* Memory, in bytes. */
+    uint64_t cpu_used;
+    uint64_t cpu_budget;
+    uint64_t gpu_used; /* Resources offered to or created by the consumer. */
+    uint64_t gpu_budget;
+
+    /* Packs. */
+    uint32_t packs_loading;
+    uint32_t packs_failed;
+
+    /* Work under way and cached. */
+    uint32_t reads_outstanding;
+    uint32_t tiles_decoding; /* Read, and waiting for or in decoding. */
+    uint32_t tiles_decoded;  /* In the CPU cache. */
+    uint32_t meshes_building;
+    uint32_t meshes_waiting; /* Built for selected tiles, and waiting to be created. */
+    uint32_t resources_resident;
+
+    /* The view. */
+    uint32_t tiles_selected;
+
+    /* The last frame. */
+    uint32_t tiles_drawn;
+    uint32_t resources_created;
+    uint32_t resources_destroyed;
+    uint64_t bytes_created;
+
+    /* Totals since the context was created. */
+    uint64_t reads_total;
+    uint64_t bytes_read_total;
+    uint64_t tiles_loaded_total;
+
+    /* Times, in seconds. */
+    double tile_load_time_mean; /* From the start of a tile's read to its decoding. */
+    double update_time;         /* Of the last vgl_context_update. */
+    double frame_time;          /* Of the last vgl_context_frame_begin. */
+} vgl_context_statistics;
+
+/**
+ * Gets the statistics of a context.
+ *
+ * @param context         The context.
+ * @param out_statistics  Receives the statistics. Set its struct_size first; at least 8.
+ *
+ * @retval VGL_RESULT_SUCCESS           The statistics were written.
+ * @retval VGL_RESULT_INVALID_ARGUMENT  A pointer is null, or struct_size is below 8.
+ *
+ * @par Thread safety
+ * Context-synchronized.
+ */
+VGL_API vgl_result vgl_context_statistics_get(const vgl_context* context,
+                                              vgl_context_statistics* out_statistics);
+
 #ifdef __cplusplus
 }
 #endif

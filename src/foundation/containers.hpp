@@ -261,6 +261,19 @@ public:
         }
     }
 
+    // Calls f(key, value) for every entry, read-only.
+    template <typename F>
+    void for_each(const F& f) const noexcept
+    {
+        for (std::size_t i = 0; i < capacity_; ++i)
+        {
+            if (states_[i] == full)
+            {
+                f(keys_[i], static_cast<const V&>(*value(i)));
+            }
+        }
+    }
+
     void clear() noexcept
     {
         for (std::size_t i = 0; i < capacity_; ++i)

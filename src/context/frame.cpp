@@ -18,6 +18,7 @@
 #include "tiling/tile.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstring>
@@ -467,6 +468,7 @@ extern "C" VGL_API vgl_result vgl_context_frame_begin(vgl_context* context,
     }
     const std::uint64_t upload_budget =
         settings.upload_budget == 0 ? default_upload_budget : settings.upload_budget;
+    const auto start = std::chrono::steady_clock::now();
 
     ++ctx->render_frame;
     ctx->frame_destroys.clear();
@@ -510,6 +512,15 @@ extern "C" VGL_API vgl_result vgl_context_frame_begin(vgl_context* context,
     }
     ctx->frame_open = true;
     *out_frame = &ctx->frame_handle;
+    ctx->last_created = static_cast<std::uint32_t>(ctx->frame_offered.size());
+    ctx->last_destroyed = static_cast<std::uint32_t>(ctx->frame_destroys.size());
+    ctx->last_bytes_created = 0;
+    for (const std::uint64_t id : ctx->frame_offered)
+    {
+        ctx->last_bytes_created += ctx->resources.find(id)->bytes;
+    }
+    ctx->frame_seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
     return VGL_RESULT_SUCCESS;
 }
 

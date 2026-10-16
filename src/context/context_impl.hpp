@@ -67,6 +67,7 @@ struct tile_state
     pack::tile_header header;
     buffer<std::int16_t> q; // Quantized samples once ready.
     std::uint64_t last_used = 0;
+    std::chrono::steady_clock::time_point requested; // When its read started.
     // Range of the decoded heights, without nodata. min_height > max_height if every sample
     // is nodata.
     double min_height = 0.0;
@@ -336,6 +337,17 @@ struct vgl_context
     vgl::internal::u64_map<std::uint64_t> index_lists;             // Resource by grid size.
     vgl::internal::vector<vgl::internal::drawn_tile> drawn;        // In the last frame.
     std::uint64_t render_frame = 0;
+
+    // Statistics (vgl_context_statistics).
+    std::uint64_t reads_total = 0;
+    std::uint64_t bytes_read_total = 0;
+    std::uint64_t tiles_loaded_total = 0;
+    double load_seconds_total = 0.0;
+    double update_seconds = 0.0;
+    double frame_seconds = 0.0;
+    std::uint32_t last_created = 0;
+    std::uint32_t last_destroyed = 0;
+    std::uint64_t last_bytes_created = 0;
     bool frame_open = false;
     vgl_frame frame_handle; // The open frame's handle.
 

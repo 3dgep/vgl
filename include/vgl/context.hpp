@@ -101,6 +101,14 @@ public:
             handle_, formats.data(), static_cast<std::uint32_t>(formats.size())));
     }
 
+    // What the context holds and does. The context must be valid.
+    [[nodiscard]] vgl_context_statistics statistics_get() const noexcept
+    {
+        auto s = init<vgl_context_statistics>();
+        static_cast<void>(vgl_context_statistics_get(handle_, &s));
+        return s;
+    }
+
     // Forgets every render resource, after the consumer lost them (vgl/render.h).
     [[nodiscard]] result resources_reset() noexcept
     {

@@ -85,6 +85,14 @@ The pack format has its own version number, independent of the library version.
 - Render interface specification (`docs/render-interface.md`), accepted:
   per-frame resource events and draw lists that backends and hosts pull, upload and GPU
   budgets, transforms, vertex and texture formats, depth conventions and threading.
+- Statistics: `vgl_context_statistics_get` reports memory against the budgets, work under
+  way, the view and the last frame, totals of reads and loaded tiles, the mean tile load time,
+  and the times of the last update and frame. C++: `vgl::context::statistics_get`.
+- Headless sample (`samples/headless`): a scripted camera from orbit down to 10 km, loading,
+  selection and frames without a GPU, statistics per view, and heights at known places. With
+  `--check` it verifies its results, and it runs as the `headless` test.
+- Sample data (`samples/data`): GEBCO to level 3 and EGM2008 to level 2, about 4 MB, with
+  their bake configurations and attribution.
 - Context tests with synchronous, deferred and threaded hosts, allocation accounting, failure
   injection for every allocation, corrupt packs and the CPU budget; and tests of the defaults
   module on packs written to disk.

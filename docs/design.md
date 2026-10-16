@@ -440,7 +440,7 @@ Because shards are plain range-readable files, the first version of the client's
 | Pure C | The OpenGL sample written in C against the C API. This mirrors the client's integration; if it is awkward to write, the API needs to change. |
 | Headless | Runs tile selection and loading with a scripted camera and prints statistics, without a GPU. Doubles as a test and benchmark. |
 
-All samples use a small dataset baked from public-domain sources, so they work offline and also exercise the baker.
+All samples use a small dataset baked from public-domain sources, so they work offline and also exercise the baker. It lives in the repository, in `samples/data`: GEBCO to level 3 and the EGM2008 geoid to level 2, about 4 MB, with the bake configurations that produce them. The headless sample checks its own results with `--check`, and runs as a test in CI.
 
 ---
 
