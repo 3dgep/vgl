@@ -273,6 +273,8 @@ Meshes use the layout the mesh builder already produces (design document, sectio
 
 The stride is 24 bytes. Every one of these formats exists in OpenGL ES 3.0 and Direct3D 11, and in recent classic Ogre releases as `VET_FLOAT3`, `VET_FLOAT1`, `VET_USHORT2_NORM` and `VET_SHORT2_NORM`; to be confirmed for the client's release (design document, section 16, question 1).
 
+A mesh is a square grid of *g* × *g* vertices, in rows from the north, with texture coordinates *i* / (*g* − 1) and *j* / (*g* − 1), followed by the 4 (*g* − 1) vertices of its skirts, which hang from the tile's edges with the texture coordinates of the edge vertices above them. Its vertex count, *g*² + 4 (*g* − 1), therefore gives *g*, which consumers that need the grid recover from it: the OpenGL backend's wireframe draws the cells' edges at multiples of 1 / (*g* − 1).
+
 Index lists are 16-bit when the mesh has at most 65,536 vertices (grids up to 254 × 254 with their skirts, which covers the 129-sample tiles of the test bake), and 32-bit above that; the index list's data says which. Triangles are counter-clockwise seen from outside the ellipsoid, in right-handed ECEF. A consumer whose camera space is left-handed, as is common with Direct3D, sees them clockwise and sets its culling mode to match; the backend knows its convention, so the data does not need to say.
 
 ## 7. Textures and format negotiation

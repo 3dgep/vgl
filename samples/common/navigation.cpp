@@ -19,6 +19,7 @@ constexpr double max_altitude = 5.0e7; // Metres above the ellipsoid.
 constexpr double max_tilt = 85.0;      // Degrees from looking straight down at the pivot.
 constexpr double throw_window = 0.1;   // Seconds of a pan that set the speed of its throw.
 constexpr double throw_decay = 3.0;    // How fast a throw slows down, per second.
+constexpr double focus_fade = 0.5;     // Seconds over which the focus fades after a movement.
 // Keys move the camera over the ground at up to four view heights per second. The speed eases in
 // and out, as a critically damped spring: starting, it reaches 83% in a second and 99% in two;
 // stopping or reversing, it falls below 5% in 0.15 seconds.
@@ -307,14 +308,22 @@ void globe_navigation::orbit_by(camera& c, const vgl_dvec3& pivot, double yaw, d
         {
             const vgl_dvec3 k = normalize(across);
             const vgl_dvec3 offset = add(p.eye, scale(pivot, -1.0));
-            // Past straight down the camera would look back at the pivot from the other side, and
-            // a camera without roll would turn the view over: tilting stops at straight down, the
-            // angle that turns the eye onto the vertical through the pivot.
-            const vgl_dvec3 o = normalize(offset);
-            const double to_down = std::atan2(dot(cross(o, n), k), dot(o, n));
-            if (dot(rotate(p.up, k, tilt), n) < 0.0)
+            // Past straight down a camera without roll would turn the view over: tilting stops
+            // where the camera looks straight down, its image's up level with its own horizon.
+            // For a pivot off the centre of the view, that comes before the eye is above it.
+            const auto above_horizon = [&](double angle) {
+                return dot(rotate(p.up, k, angle), up_at(add(pivot, rotate(offset, k, angle))));
+            };
+            if (above_horizon(tilt) < 0.0)
             {
-                tilt = to_down;
+                double lo = 0.0;
+                double hi = tilt;
+                for (int i = 0; i < 40; ++i)
+                {
+                    const double mid = 0.5 * (lo + hi);
+                    (above_horizon(mid) >= 0.0 ? lo : hi) = mid;
+                }
+                tilt = lo;
                 down = true;
             }
             const vgl_dvec3 eye = add(pivot, rotate(offset, k, tilt));
@@ -402,8 +411,9 @@ bool globe_navigation::project(const camera& c, const vgl_dvec3& p, double& x, d
 void globe_navigation::aim(camera& c, const vgl_dvec3& p, double x, double y) const
 {
     // Newton's method on the heading and pitch, which a level horizon leaves free, until the
-    // point appears at (x, y); a few steps reach well under a pixel.
-    for (int step = 0; step < 6; ++step)
+    // point appears at (x, y); a few steps reach well under a pixel, a few more after a large
+    // turn.
+    for (int step = 0; step < 12; ++step)
     {
         double px = 0.0;
         double py = 0.0;
@@ -466,11 +476,23 @@ void globe_navigation::press(drag mode, double x, double y, const camera& c)
     }
     if (mode == drag::orbit)
     {
-        pivot_ = anchor(c, width_ / 2.0, height_ / 2.0);
+        // Around the point under the cursor, which stays there; pressed over space, nothing.
+        if (!pick(c, x, y, pivot_))
+        {
+            mode_ = drag::none;
+        }
+        pivot_x_ = x;
+        pivot_y_ = y;
+        focus_ = pivot_;
+        has_focus_ = mode_ == drag::orbit;
+        focus_since_ = 0.0;
     }
     if (mode == drag::zoom)
     {
         pivot_ = anchor(c, x, y);
+        focus_ = pivot_;
+        has_focus_ = true;
+        focus_since_ = 0.0;
     }
 }
 
@@ -502,6 +524,9 @@ void globe_navigation::move(double x, double y, camera& c)
     case drag::orbit:
         orbit_by(
             c, pivot_, vgl::degrees_to_radians(-dx * 0.25), vgl::degrees_to_radians(-dy * 0.25));
+        // Turning about a point off the centre would roll the camera, which has no roll: aim it
+        // to keep the point under the cursor.
+        aim(c, pivot_, pivot_x_, pivot_y_);
         return;
     case drag::look:
         c.heading = std::remainder(c.heading + dx * 0.15, 360.0);
@@ -575,6 +600,9 @@ void globe_navigation::scroll(double steps, double x, double y, const camera& c)
 {
     settle();
     zoom_point_ = anchor(c, x, y);
+    focus_ = zoom_point_;
+    has_focus_ = true;
+    focus_since_ = 0.0;
     zoom_left_ += -steps * 0.3;
 }
 
@@ -585,6 +613,9 @@ void globe_navigation::double_click(double x, double y, const camera& c)
     if (pick(c, x, y, p))
     {
         zoom_point_ = p;
+        focus_ = p;
+        has_focus_ = true;
+        focus_since_ = 0.0;
         zoom_left_ = std::log(0.5);
     }
 }
@@ -680,6 +711,16 @@ void globe_navigation::update(double dt, const navigation_keys& keys, camera& c)
         zoom_by(c, anchor(c, cx, cy), std::exp((keys.zoom_in ? -1.2 : 1.2) * dt));
     }
     settle();
+
+    // The focus shows while the mouse orbits or zooms around it, then fades.
+    const bool focused = mode_ == drag::orbit || mode_ == drag::zoom || zoom_left_ != 0.0;
+    focus_since_ = focused ? 0.0 : focus_since_ + dt;
+}
+
+bool globe_navigation::focus(const camera& c, double& x, double& y, double& strength) const
+{
+    strength = has_focus_ ? 1.0 - focus_since_ / focus_fade : 0.0;
+    return strength > 0.0 && project(c, focus_, x, y);
 }
 
 } // namespace sample

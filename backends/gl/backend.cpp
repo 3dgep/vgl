@@ -43,6 +43,7 @@ struct gl_resource
     GLuint buffer = 0;       // Indices or vertices.
     GLuint vertex_array = 0; // Meshes: the vertex layout and the index list's buffer.
     GLuint texture = 0;      // Textures.
+    std::uint32_t grid = 0;  // Meshes: vertices along a side of the grid, or 0 if unknown.
 };
 
 // The host's state that drawing changes (NFR-08; vgl/gl.h lists it).
@@ -71,7 +72,6 @@ struct saved_state
     GLint unpack_row_length = 0;
     GLint unpack_skip_rows = 0;
     GLint unpack_skip_pixels = 0;
-    std::array<GLint, 2> polygon_mode = {}; // Front and back; saved only for the wireframe.
 };
 
 constexpr std::size_t message_size = 1024;
@@ -104,7 +104,7 @@ struct vgl_gl_backend
     GLint u_debug = -1;
     GLint u_level = -1;
     GLint u_imagery_coarser = -1;
-    GLint u_wire = -1;
+    GLint u_cells = -1;
     GLint u_contour_interval = -1;
     GLint u_geoid = -1;
     GLint u_centre = -1;
@@ -215,7 +215,7 @@ vgl_result build_program(vgl_gl_backend& b, const char* function)
     b.u_debug = gl.GetUniformLocation(program, "u_debug");
     b.u_level = gl.GetUniformLocation(program, "u_level");
     b.u_imagery_coarser = gl.GetUniformLocation(program, "u_imagery_coarser");
-    b.u_wire = gl.GetUniformLocation(program, "u_wire");
+    b.u_cells = gl.GetUniformLocation(program, "u_cells");
     b.u_contour_interval = gl.GetUniformLocation(program, "u_contour_interval");
     b.u_geoid = gl.GetUniformLocation(program, "u_geoid");
     b.u_centre = gl.GetUniformLocation(program, "u_centre");
@@ -352,11 +352,6 @@ saved_state save_state(const vgl_gl_backend& b)
     gl.GetIntegerv(GL_UNPACK_ROW_LENGTH, &s.unpack_row_length);
     gl.GetIntegerv(GL_UNPACK_SKIP_ROWS, &s.unpack_skip_rows);
     gl.GetIntegerv(GL_UNPACK_SKIP_PIXELS, &s.unpack_skip_pixels);
-    if (b.gl.PolygonMode != nullptr)
-    {
-        s.polygon_mode = {static_cast<GLint>(GL_FILL), static_cast<GLint>(GL_FILL)};
-        gl.GetIntegerv(GL_POLYGON_MODE, s.polygon_mode.data());
-    }
     return s;
 }
 
@@ -411,11 +406,6 @@ void restore_state(const vgl_gl_backend& b, const saved_state& s)
     gl.PixelStorei(GL_UNPACK_ROW_LENGTH, s.unpack_row_length);
     gl.PixelStorei(GL_UNPACK_SKIP_ROWS, s.unpack_skip_rows);
     gl.PixelStorei(GL_UNPACK_SKIP_PIXELS, s.unpack_skip_pixels);
-    if (b.gl.PolygonMode != nullptr)
-    {
-        // Core profiles set both faces at once.
-        gl.PolygonMode(GL_FRONT_AND_BACK, static_cast<GLenum>(s.polygon_mode[0]));
-    }
 }
 
 const void* buffer_offset(std::uintptr_t offset)
@@ -464,6 +454,13 @@ void create_mesh(vgl_gl_backend& b, vgl_frame* frame, const vgl_mesh_data& d)
         return;
     }
     r->kind = resource_kind::mesh;
+    // A grid of g x g vertices and its skirts' 4 (g - 1) (docs/render-interface.md, section 6).
+    const auto grid = static_cast<std::uint32_t>(
+        std::lround(std::sqrt(8.0 + static_cast<double>(d.vertex_count)) - 2.0));
+    if (grid > 1 && std::size_t{grid} * grid + 4 * (std::size_t{grid} - 1) == d.vertex_count)
+    {
+        r->grid = grid;
+    }
     gl.GenBuffers(1, &r->buffer);
     gl.GenVertexArrays(1, &r->vertex_array);
     gl.BindVertexArray(r->vertex_array);
@@ -625,7 +622,6 @@ void draw_items(const vgl_gl_backend& b,
     gl.UseProgram(b.program);
     gl.UniformMatrix4fv(b.u_projection, 1, GL_FALSE, to_float(projection).data());
     gl.Uniform1i(b.u_debug, static_cast<GLint>(info.debug_flags));
-    gl.Uniform1i(b.u_wire, 0);
     gl.Uniform1i(b.u_sea, info.sea_surface != VGL_FALSE ? 1 : 0);
     gl.Uniform1f(b.u_contour_interval,
                  static_cast<GLfloat>(info.contour_interval > 0.0 ? info.contour_interval : 500.0));
@@ -760,38 +756,10 @@ void draw_items(const vgl_gl_backend& b,
             continue;
         }
         gl.UniformMatrix4fv(b.u_model_view, 1, GL_FALSE, item.model_view);
-        gl.BindVertexArray(mesh->vertex_array);
-        gl.DrawElements(GL_TRIANGLES,
-                        static_cast<GLsizei>(item.index_count),
-                        item.index_size == 2 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT,
-                        nullptr);
-    }
-
-    // The wireframe, over the shaded tiles: the same triangles as lines, at the same depths,
-    // which the depth test lets through where they are equal.
-    if ((info.debug_flags & VGL_GL_DEBUG_FLAG_WIREFRAME) == 0 || gl.PolygonMode == nullptr)
-    {
-        return;
-    }
-    gl.PolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-    gl.DepthFunc(b.depth == VGL_DEPTH_CONVENTION_REVERSED_Z ? GL_GEQUAL : GL_LEQUAL);
-    gl.DepthMask(GL_FALSE);
-    gl.Uniform1i(b.u_wire, 1);
-    for (std::uint32_t i = 0; i < count; ++i)
-    {
-        const vgl_draw_item& item = items[i];
-        const gl_resource* mesh =
-            item.mesh_handle != 0 ? from_handle(item.mesh_handle) : b.resources.find(item.mesh);
-        if (mesh == nullptr)
+        if ((info.debug_flags & VGL_GL_DEBUG_FLAG_WIREFRAME) != 0)
         {
-            continue;
+            gl.Uniform1f(b.u_cells, static_cast<GLfloat>(mesh->grid > 1 ? mesh->grid - 1 : 0));
         }
-        gl.UniformMatrix4fv(b.u_model_view, 1, GL_FALSE, item.model_view);
-        gl.Uniform4fv(b.u_geoid, 1, item.geoid_heights);
-        gl.Uniform3f(b.u_centre,
-                     static_cast<GLfloat>(item.centre.x),
-                     static_cast<GLfloat>(item.centre.y),
-                     static_cast<GLfloat>(item.centre.z));
         gl.BindVertexArray(mesh->vertex_array);
         gl.DrawElements(GL_TRIANGLES,
                         static_cast<GLsizei>(item.index_count),

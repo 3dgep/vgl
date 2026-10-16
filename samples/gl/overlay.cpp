@@ -138,7 +138,37 @@ void overlay::frame(const vgl_context_statistics& s,
     {
         frustum_lines(view, projection, frustum);
     }
+    if (info.focus_strength > 0.0)
+    {
+        reticle(info.focus_x, info.focus_y, info.focus_strength);
+    }
     ImGui::Render();
+}
+
+void overlay::reticle(double x, double y, double strength)
+{
+    // A ring with four short ticks, white over a dark outline so that it shows on any ground,
+    // behind the panel.
+    ImDrawList* list = ImGui::GetBackgroundDrawList();
+    const ImVec2 c(static_cast<float>(x), static_cast<float>(y));
+    const auto a = static_cast<float>(std::clamp(strength, 0.0, 1.0));
+    constexpr float radius = 9.0f;
+    constexpr float tick = 5.0f;
+    for (int pass = 0; pass < 2; ++pass)
+    {
+        const ImU32 color = pass == 0 ? ImGui::GetColorU32(ImVec4(0.0f, 0.0f, 0.0f, 0.55f * a))
+                                      : ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, 0.95f * a));
+        const float thickness = pass == 0 ? 3.5f : 1.5f;
+        list->AddCircle(c, radius, color, 32, thickness);
+        list->AddLine(
+            ImVec2(c.x - radius - tick, c.y), ImVec2(c.x - radius, c.y), color, thickness);
+        list->AddLine(
+            ImVec2(c.x + radius, c.y), ImVec2(c.x + radius + tick, c.y), color, thickness);
+        list->AddLine(
+            ImVec2(c.x, c.y - radius - tick), ImVec2(c.x, c.y - radius), color, thickness);
+        list->AddLine(
+            ImVec2(c.x, c.y + radius), ImVec2(c.x, c.y + radius + tick), color, thickness);
+    }
 }
 
 void overlay::render()
@@ -182,14 +212,7 @@ void overlay::panel(const vgl_context_statistics& s, const panel_info& info, deb
 
     if (ImGui::CollapsingHeader("Debug views", ImGuiTreeNodeFlags_DefaultOpen))
     {
-        ImGui::BeginDisabled(!info.wireframe_available);
         ImGui::Checkbox("Wireframe (F2)", &d.wireframe);
-        ImGui::EndDisabled();
-        if (!info.wireframe_available)
-        {
-            ImGui::SameLine();
-            ImGui::TextDisabled("(not on OpenGL ES)");
-        }
         ImGui::Checkbox("Colour by tile level (F3)", &d.level_colors);
         ImGui::Checkbox("Imagery source (F4)", &d.imagery_source);
         if (d.imagery_source)

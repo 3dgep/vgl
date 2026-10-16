@@ -98,8 +98,6 @@ constexpr GLenum GL_DEPTH_ATTACHMENT = 0x8D00;
 constexpr GLenum GL_FRAMEBUFFER = 0x8D40;
 constexpr GLenum GL_RENDERBUFFER = 0x8D41;
 constexpr GLenum GL_CLIP_DEPTH_MODE = 0x935D;
-constexpr GLenum GL_POLYGON_MODE = 0x0B40;
-constexpr GLenum GL_FILL = 0x1B02;
 constexpr GLenum GL_NEGATIVE_ONE_TO_ONE = 0x935E;
 constexpr GLenum GL_ZERO_TO_ONE = 0x935F;
 
@@ -913,6 +911,90 @@ void navigation_check()
             nav.release();
             expect(steady, "tilting never turns the view over" + where);
         }
+
+        // Orbit around a point off the centre: it stays under the cursor while the camera turns
+        // and tilts, also through straight down, and the view never turns over.
+        {
+            const double px = w / 2.0 + 90.0;
+            const double py = h / 2.0 + 60.0;
+            for (const auto& [mx, my] :
+                 {std::pair{5.0, -3.0}, std::pair{0.0, 2.0}, std::pair{0.0, -2.0}})
+            {
+                c = start;
+                vgl_dvec3 pivot{};
+                expect(nav.pick(c, px, py, pivot), "the cursor is over the globe" + where);
+                nav.press(drag::orbit, px, py, c);
+                bool held = true;
+                bool upright = true;
+                double previous = c.heading;
+                for (int k = 1; k <= 120; ++k)
+                {
+                    nav.move(px + mx * k, py + my * k, c);
+                    held = held && project(c, pivot, w, h, x, y) && near(x, y, px, py);
+                    upright = upright && c.pitch <= 90.0 &&
+                              std::abs(std::remainder(c.heading - previous, 360.0)) < 90.0;
+                    previous = c.heading;
+                }
+                nav.release();
+                expect(held, "orbiting keeps the clicked point under the cursor" + where);
+                expect(upright,
+                       "orbiting around the clicked point never turns the view over" + where);
+            }
+        }
+
+        // The reticle: at the clicked point while the mouse orbits around it, then fading over
+        // half a second; at the cursor while a scroll zooms towards it, until the zoom ends.
+        {
+            nav.stop();
+            c = start;
+            const double px = w / 2.0 + 90.0;
+            const double py = h / 2.0 + 60.0;
+            double fx = 0.0;
+            double fy = 0.0;
+            double strength = 0.0;
+            nav.press(drag::orbit, px, py, c);
+            nav.move(px + 10.0, py, c);
+            nav.update(0.01, {}, c);
+            const bool orbiting =
+                nav.focus(c, fx, fy, strength) && near(fx, fy, px, py) && strength == 1.0;
+            nav.release();
+            nav.update(0.25, {}, c);
+            const bool fading = nav.focus(c, fx, fy, strength) && strength > 0.4 && strength < 0.6;
+            nav.update(0.3, {}, c);
+            const bool gone = !nav.focus(c, fx, fy, strength);
+            expect(orbiting && fading && gone,
+                   "the reticle shows the orbit's point, then fades" + where);
+
+            c = start;
+            nav.scroll(1.0, zx, zy, c);
+            nav.update(0.05, {}, c);
+            const bool zooming =
+                nav.focus(c, fx, fy, strength) && near(fx, fy, zx, zy) && strength == 1.0;
+            for (int k = 0; k < 200; ++k)
+            {
+                nav.update(0.01, {}, c);
+            }
+            const bool done = !nav.focus(c, fx, fy, strength);
+            expect(zooming && done, "the reticle shows a zoom's point until it ends" + where);
+            nav.stop();
+        }
+
+        // Pressed over space, the orbit does nothing.
+        c = start;
+        vgl_dvec3 sky{};
+        if (!nav.pick(c, 5.0, 5.0, sky))
+        {
+            nav.press(drag::orbit, 5.0, 5.0, c);
+            for (int k = 1; k <= 20; ++k)
+            {
+                nav.move(5.0 + 4.0 * k, 5.0 + 3.0 * k, c);
+            }
+            nav.release();
+            expect(c.latitude == start.latitude && c.longitude == start.longitude &&
+                       c.altitude == start.altitude && c.heading == start.heading &&
+                       c.pitch == start.pitch,
+                   "orbiting from space does nothing" + where);
+        }
     }
 }
 
@@ -1061,8 +1143,7 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
             }
             images[c].push_back(std::move(pixels));
         }
-        // The debug views draw without OpenGL errors, and leave the host's state as it was,
-        // the polygon mode included.
+        // The debug views draw without OpenGL errors, and leave the host's state as it was.
         s.debug.wireframe = s.debug.level_colors = s.debug.imagery_source = true;
         s.debug.height_colors = s.debug.contours = s.debug.sea = true;
         clear(gl, s, t);
@@ -1071,12 +1152,6 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
                "vgl_gl_backend_draw succeeds with the debug views");
         sentinel_state_check(gl, host_vertex_array, s.depth);
         expect(gl.GetError() == 0, "OpenGL reports no error with the debug views");
-        if (!o.es)
-        {
-            GLint mode[2] = {0, 0}; // NOLINT(modernize-avoid-c-arrays)
-            gl.GetIntegerv(GL_POLYGON_MODE, mode);
-            expect(static_cast<GLenum>(mode[0]) == GL_FILL, "the polygon mode is restored");
-        }
         if (!o.save.empty())
         {
             save_image(read_image(gl, t),
@@ -1084,6 +1159,20 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
                        height,
                        o.save + "/" + depth_name(s.depth) + "-debug.ppm");
         }
+        // The wireframe alone: the grid's cells over the imagery.
+        s.debug.level_colors = s.debug.imagery_source = false;
+        s.debug.height_colors = s.debug.contours = s.debug.sea = false;
+        clear(gl, s, t);
+        expect(draw(*backend, s, width, height) == vgl::result::success,
+               "vgl_gl_backend_draw succeeds with the wireframe");
+        if (!o.save.empty())
+        {
+            save_image(read_image(gl, t),
+                       width,
+                       height,
+                       o.save + "/" + depth_name(s.depth) + "-wireframe.ppm");
+        }
+        s.debug.height_colors = s.debug.contours = s.debug.sea = true;
         // The heightmap with contour lines alone, every 100 m.
         s.debug.wireframe = s.debug.level_colors = s.debug.imagery_source = false;
         s.debug.contour_interval = 100.0f;
@@ -1325,11 +1414,6 @@ int run_interactive(const options& o, GLFWwindow* window, const host_gl& gl, vgl
     panel.gl_version = reinterpret_cast<const char*>(gl.GetString(GL_VERSION));
     panel.gl_renderer = reinterpret_cast<const char*>(gl.GetString(GL_RENDERER));
     panel.depth = depth_name(s.depth);
-    panel.wireframe_available = !o.es;
-    if (o.es)
-    {
-        s.debug.wireframe = false;
-    }
     bool was_frozen = false;
     auto last_frame = std::chrono::steady_clock::now();
     auto last_navigated = last_frame;
@@ -1420,6 +1504,12 @@ int run_interactive(const options& o, GLFWwindow* window, const host_gl& gl, vgl
         const double aspect = static_cast<double>(width) / height;
         panel.live = s.camera;
         panel.frozen = s.frozen;
+        panel.focus_strength = 0.0;
+        double focus_strength = 0.0;
+        if (nav.focus(s.camera, panel.focus_x, panel.focus_y, focus_strength))
+        {
+            panel.focus_strength = focus_strength;
+        }
         panel.credits = ctx.attribution_get();
         // The frozen frustum reaches to about the frozen camera's horizon.
         const double reach = std::sqrt(s.frozen.altitude * (2.0 * 6371000.0 + s.frozen.altitude));

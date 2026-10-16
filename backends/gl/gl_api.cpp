@@ -115,11 +115,6 @@ vgl_result load(vgl_gl_get_proc_address_fn get_proc_address,
             std::snprintf(message, message_size, "the loader returned no %s", missing));
         return VGL_RESULT_NOT_SUPPORTED;
     }
-    if (!d.es)
-    {
-        f.PolygonMode =
-            reinterpret_cast<decltype(f.PolygonMode)>(get_proc_address(user_data, "glPolygonMode"));
-    }
     d.primitive_restart = !d.es;
     d.primitive_restart_fixed_index = d.es || at_least(d, 4, 3);
     if ((!d.es && at_least(d, 4, 6)) || has_extension(f, "GL_EXT_texture_filter_anisotropic") ||

@@ -136,9 +136,9 @@ The pack format has its own version number, independent of the library version.
   items get one layer per imagery pack with the deepest resident texture, mapped into an
   ancestor's texture and inside its border. Imagery packs are credited when in view.
 - Debug views in the OpenGL backend: `vgl_gl_draw_info::debug_flags` with
-  `VGL_GL_DEBUG_FLAG_WIREFRAME` (OpenGL only), `VGL_GL_DEBUG_FLAG_LEVEL_COLORS` (a tint per
-  tile level, with tile borders) and `VGL_GL_DEBUG_FLAG_IMAGERY_SOURCE` (imagery coarser than
-  the tile, or missing). The polygon mode is saved and restored when the wireframe is drawn.
+  `VGL_GL_DEBUG_FLAG_WIREFRAME`, `VGL_GL_DEBUG_FLAG_LEVEL_COLORS` (a tint per tile level,
+  with tile borders) and `VGL_GL_DEBUG_FLAG_IMAGERY_SOURCE` (imagery coarser than the tile, or
+  missing).
 - Sample detail (`samples/data/packs/glo30-sognefjord`): Copernicus GLO-30 over the Sognefjord,
   Jostedalsbreen and the western Jotunheimen to level 11 (about 76 m), 10.9 MB, above GEBCO in
   the samples, with its bake configuration. The OpenGL sample has a place there (7), and the
@@ -164,7 +164,12 @@ The pack format has its own version number, independent of the library version.
   within a pixel, that tilting stops at its limit, and that the camera stays above the ground.
   The terrain height that points are found on is taken when a drag, throw or smooth zoom
   begins and held until it ends, so that panning and zooming over relief do not jitter or drift. Tilting stops at straight
-  down instead of turning the view over. A throw keeps the globe turning about its centre at
+  down instead of turning the view over. Orbiting with the middle button or Shift and the left
+  button turns around the point under the cursor, which stays there, and does nothing when
+  pressed over space; tilting stops where the camera looks straight down, which for a point off
+  the centre of the view comes before the eye is above it. As in Google Earth, a small reticle
+  marks the point that the mouse orbits or zooms around while it does, then fades over half a
+  second (`globe_navigation::focus`, drawn by the OpenGL sample's overlay). A throw keeps the globe turning about its centre at
   the rate of the pan's last tenth of a second, measured on the clock of the frames, so that it
   starts at the speed of the hand, however the mouse events and frames fall, and slows down
   smoothly: its decay is integrated exactly, so that it goes as far in uneven frames as in even
@@ -176,7 +181,13 @@ The pack format has its own version number, independent of the library version.
   by pixels, which was faster forward than sideways when tilted. The speed eases in over about
   two seconds and stops within about 0.15 seconds, as a critically damped spring solved exactly
   for each frame. WASD move as the arrows do.
-- The wireframe debug view is drawn in bright cyan, which shows against dark and light ground.
+- The wireframe debug view shows the mesh's grid cells, without the diagonals that split them
+  into triangles, in bright cyan, which shows against dark and light ground. Lines are a pixel
+  wide and box-filtered. Where cells are closer than four pixels, it draws every second, fourth,
+  eighth line and so on, blending from one step to the next, so that a readable grid shows at
+  every distance, and it always draws the tiles' edges. It is drawn in the shading pass from the texture
+  coordinates rather than as a second pass in line polygon mode, so it also works on OpenGL
+  ES, and the backend no longer changes the polygon mode.
 - The OpenGL sample's overlay, with Dear ImGui 1.92.9b (downloaded at a pinned hash, sample
   only): the context's statistics with memory against the budgets and a frame-time graph, the
   credits, the camera, the debug views, a frozen selection with the frozen frustum outlined,

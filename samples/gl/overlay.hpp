@@ -25,7 +25,7 @@ namespace sample
 struct debug_settings
 {
     bool panel = true;               // The overlay itself (F1).
-    bool wireframe = false;          // F2; desktop OpenGL only.
+    bool wireframe = false;          // F2
     bool level_colors = false;       // F3.
     bool imagery_source = false;     // F4.
     bool freeze = false;             // F5: select tiles for a frozen camera.
@@ -44,10 +44,14 @@ struct panel_info
     const char* gl_version = "";
     const char* gl_renderer = "";
     const char* depth = "";
-    bool wireframe_available = true;
     camera live;
     camera frozen;
     std::vector<const char*> credits;
+    // The point the mouse orbits or zooms around, in window coordinates, and how strongly to
+    // show its reticle (0 for none).
+    double focus_x = 0.0;
+    double focus_y = 0.0;
+    double focus_strength = 0.0;
 };
 
 class overlay
@@ -68,8 +72,9 @@ public:
     [[nodiscard]] bool wants_mouse() const;
     [[nodiscard]] bool wants_keyboard() const;
 
-    // One frame of the overlay: the panel, and the frozen frustum when frozen. The frame
-    // took frame_seconds on the CPU. view and projection are the live camera's.
+    // One frame of the overlay: the panel, the reticle of the point the mouse orbits or zooms
+    // around, and the frozen frustum when frozen. The frame took frame_seconds on the CPU. view
+    // and projection are the live camera's.
     void frame(const vgl_context_statistics& s,
                const panel_info& info,
                double frame_seconds,
@@ -86,6 +91,7 @@ private:
     void frustum_lines(const vgl_dmat4& view,
                        const vgl_dmat4& projection,
                        const std::array<vgl_dvec3, 5>& frustum);
+    static void reticle(double x, double y, double strength);
 
     bool initialized_ = false;
     std::array<float, 240> frame_ms_ = {};

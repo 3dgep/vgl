@@ -8,11 +8,11 @@
 //   left drag            grab the globe: the point under the cursor stays under it, and
 //                        releasing while moving throws it
 //   scroll, double-click zoom towards the point under the cursor
-//   shift + left drag,   orbit around the point at the centre of the view: sideways turns,
-//   middle drag          up and down tilts
+//   shift + left drag,   orbit around the point under the cursor, which stays there: sideways
+//   middle drag          turns, up and down tilts; pressed over space, nothing
 //   ctrl + left drag     look around from where the camera is
 //   right drag           zoom
-//   arrows, WASD         move; with shift, turn and tilt
+//   arrows, WASD         move; with shift, turn and tilt around the point at the centre
 //   page up, page down   zoom
 //
 // Points under the cursor are found on the ellipsoid raised to the terrain's height under the
@@ -75,6 +75,11 @@ public:
 
     [[nodiscard]] bool dragging() const { return mode_ != drag::none; }
 
+    // The point that the mouse orbits or zooms around, for a reticle: where it appears in the
+    // window, and how strongly to show it, 1 while the movement lasts, fading to 0 over half a
+    // second after it ends. False when there is none to show.
+    [[nodiscard]] bool focus(const camera& c, double& x, double& y, double& strength) const;
+
     // The point of the (raised) ellipsoid under a cursor position, if the ray meets it.
     [[nodiscard]] bool pick(const camera& c, double x, double y, vgl_dvec3& out) const;
 
@@ -110,6 +115,8 @@ private:
     camera start_; // The camera when a pan began.
     vgl_dvec3 grabbed_{};
     vgl_dvec3 pivot_{};
+    double pivot_x_ = 0.0; // Where an orbit's pivot stays on the screen.
+    double pivot_y_ = 0.0;
 
     // Where the camera was during a pan, at each update, to measure how fast the globe turned
     // when it was released: a ring of the latest positions, on a clock of the updates' times.
@@ -142,6 +149,11 @@ private:
     // A smooth zoom: the natural logarithm of the factor still to apply, towards a point.
     double zoom_left_ = 0.0;
     vgl_dvec3 zoom_point_{};
+
+    // The point the mouse last orbited or zoomed around, and seconds since it stopped.
+    vgl_dvec3 focus_{};
+    bool has_focus_ = false;
+    double focus_since_ = 1.0e9;
 };
 
 } // namespace sample

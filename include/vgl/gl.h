@@ -178,8 +178,10 @@ typedef struct vgl_gl_draw_info
 /* Debug views of vgl_gl_draw_info.debug_flags, for inspecting level of detail and loading. */
 typedef enum vgl_gl_debug_flag
 {
-    /* The triangles as bright cyan lines over the shading. OpenGL only: OpenGL ES has no line
-     * polygon mode, and ignores it. */
+    /* The mesh's grid cells as bright cyan lines a pixel wide over the shading, without the
+     * diagonals that split them into triangles. Where cells are closer than four pixels, every
+     * second, fourth, eighth line and so on, which keeps them that far apart; the tiles' edges
+     * always. */
     VGL_GL_DEBUG_FLAG_WIREFRAME = 0x1,
     /* Each tile tinted by its level, with its borders outlined. */
     VGL_GL_DEBUG_FLAG_LEVEL_COLORS = 0x2,

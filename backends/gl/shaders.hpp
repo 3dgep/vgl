@@ -105,7 +105,7 @@ uniform sampler2D u_layer3;
 uniform int u_debug;              // The flags.
 uniform float u_level;            // The tile's level.
 uniform float u_imagery_coarser;  // Levels by which the top layer is coarser than the tile.
-uniform int u_wire;               // 1 in the wireframe pass.
+uniform float u_cells;            // The mesh's grid cells along a side, for the wireframe.
 uniform float u_contour_interval; // Metres between contour lines.
 
 layout(location = 0) out vec4 o_color;
@@ -149,6 +149,38 @@ vec3 level_color(float level)
 }
 
 // Blends a layer over the colour below it, by its alpha and opacity.
+// The share of a pixel covered by lines a pixel wide at every multiple of `spacing` cells, for a
+// coordinate g in cells that changes by w cells per pixel: the part of the pixel's footprint
+// along the coordinate's screen gradient that the lines overlap, a box filter, so that crowded
+// lines blend into a tint instead of shimmering. Lines closer than two pixels fade, and are gone
+// at one.
+float grid_lines(float g, float w, float spacing)
+{
+    float x = g / spacing;
+    float f = w / spacing; // The footprint, in spacings.
+    float width = min(f, 1.0);
+    // The lines' length within [0, t], with each line centred on a whole number.
+    float lo = x - 0.5 * f + 0.5 * width;
+    float hi = x + 0.5 * f + 0.5 * width;
+    float covered = floor(hi) * width + min(fract(hi), width) - floor(lo) * width -
+                    min(fract(lo), width);
+    return clamp(covered / max(f, 1e-6), 0.0, 1.0) * (1.0 - smoothstep(0.5, 1.0, f));
+}
+
+// The wireframe's lines along one coordinate: every cell's edge where they are at least four
+// pixels apart; where they crowd, every second, fourth, eighth line and so on, a power of two of
+// cells that keeps them that far apart, blending into the next as they crowd further. The
+// tile's edges are always drawn.
+float wire_lines(float g, float w)
+{
+    float top = log2(u_cells);
+    float level = clamp(log2(max(w * 4.0, 1e-6)), 0.0, top);
+    float k = floor(level);
+    float fine = grid_lines(g, w, exp2(k));
+    float coarse = grid_lines(g, w, exp2(min(k + 1.0, top)));
+    return max(mix(fine, coarse, level - k), grid_lines(g, w, u_cells));
+}
+
 vec3 blend(vec3 below, sampler2D layer, vec4 uv, float opacity)
 {
     vec4 texel = texture(layer, v_uv * uv.xy + uv.zw);
@@ -229,9 +261,16 @@ void main()
         lit = water * (0.35 + 0.65 * d) + vec3(0.5) * glint;
     }
     o_color = vec4(lit, 1.0);
-    if (u_wire != 0)
+    if ((u_debug & 1) != 0 && u_cells > 0.0)
     {
-        o_color = vec4(0.3, 1.0, 0.95, 1.0); // Bright cyan: clear on dark and light ground.
+        // The wireframe: the grid's cells, without the diagonals that split them into triangles,
+        // along each texture coordinate. A coordinate that barely changes across a fragment
+        // compared with the other, as on the skirts that hang from a tile's edges, where it is
+        // constant but for rounding, draws none. Bright cyan: clear on dark and light ground.
+        vec2 g = v_uv * u_cells;
+        vec2 w = vec2(length(vec2(dFdx(g.x), dFdy(g.x))), length(vec2(dFdx(g.y), dFdy(g.y))));
+        vec2 on = vec2(wire_lines(g.x, w.x), wire_lines(g.y, w.y)) * step(1e-3 * vec2(w.y, w.x), w);
+        o_color.rgb = mix(o_color.rgb, vec3(0.3, 1.0, 0.95), max(on.x, on.y));
     }
 #ifdef VGL_LOGARITHMIC_DEPTH
     gl_FragDepth = log2(v_log_depth) * u_log_depth * 0.5;
