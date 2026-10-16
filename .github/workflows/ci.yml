@@ -3,11 +3,17 @@
 
 name: CI
 
+# Pushes to main run a quick check: formatting and sources, Linux GCC with every test including
+# the OpenGL checks on Mesa, and Windows MSVC. Pull requests, manual runs (gh workflow run CI)
+# and a weekly run build everything: every preset, macOS, Android, iOS, the baker and
+# clang-tidy. macOS minutes cost ten times Linux minutes, and Windows twice.
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * 1" # Mondays at 04:00 UTC.
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -60,6 +66,7 @@ jobs:
 
   build:
     name: ${{ matrix.name }}
+    if: github.event_name != 'push'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -108,11 +115,11 @@ jobs:
           cc tests/api_c.c $(pkg-config --static --cflags --libs vgl) -o api_c_pkgconfig
           LD_LIBRARY_PATH="$PWD/install/lib" ./api_c_pkgconfig
 
-  # The OpenGL samples' checks, which draw the sample data with every depth convention and
-  # check the images and the host's state: on OpenGL and OpenGL ES (design document, section
-  # 7.6), with Mesa's software renderer under a virtual X server.
+  # Every test, with the OpenGL samples' checks, which draw the sample data with every depth
+  # convention and check the images and the host's state: on OpenGL and OpenGL ES (design
+  # document, section 7.6), with Mesa's software renderer under a virtual X server.
   opengl:
-    name: OpenGL and OpenGL ES (Mesa, Xvfb)
+    name: Linux GCC with OpenGL and OpenGL ES (Mesa, Xvfb)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -128,13 +135,25 @@ jobs:
           cmake --preset linux-gcc-shared -DVGL_TEST_GL=ON
           cmake --build --preset linux-gcc-shared-release
 
-      - name: Run the OpenGL checks
+      - name: Run the tests and the OpenGL checks
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
-        run: xvfb-run -a ctest --test-dir build/linux-gcc-shared -C Release -R "^gl" --output-on-failure
+        run: xvfb-run -a ctest --test-dir build/linux-gcc-shared -C Release --output-on-failure
+
+  # Windows on pushes, where the full set of presets does not run.
+  windows-quick:
+    name: Windows MSVC shared Debug
+    if: github.event_name == 'push'
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Configure, build and test
+        run: cmake --workflow --preset windows-msvc-shared-debug
 
   macos:
     name: ${{ matrix.name }}
+    if: github.event_name != 'push'
     runs-on: macos-15
     strategy:
       fail-fast: false
@@ -153,6 +172,7 @@ jobs:
 
   android:
     name: Android arm64 (cross-build)
+    if: github.event_name != 'push'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -170,6 +190,7 @@ jobs:
 
   ios:
     name: iOS arm64 (cross-build)
+    if: github.event_name != 'push'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v5
@@ -183,6 +204,7 @@ jobs:
 
   baker-linux:
     name: Baker (Linux, system GDAL)
+    if: github.event_name != 'push'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
@@ -197,6 +219,7 @@ jobs:
 
   baker-windows:
     name: Baker (Windows, conda-forge GDAL)
+    if: github.event_name != 'push'
     runs-on: windows-2025
     defaults:
       run:
@@ -216,6 +239,7 @@ jobs:
 
   clang-tidy:
     name: clang-tidy
+    if: github.event_name != 'push'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5

@@ -535,7 +535,7 @@ The library follows Semantic Versioning. Within a major version, the C ABI stays
 
 ### 13.4 Repository and contributions
 
-The repository is public at github.com/3dgep/vgl, with continuous integration through GitHub Actions on Windows, Linux and macOS, and builds for Android and iOS. CI builds every backend, runs the tests, and runs the GLES path through ANGLE and Mesa and the headless sample. Contribution guidelines describe the coding style (enforced with clang-format and clang-tidy), the DCO sign-off and the review process, and issue templates cover bug reports and feature requests. Packages for vcpkg and Conan can follow once the API has stabilized.
+The repository is public at github.com/3dgep/vgl, with continuous integration through GitHub Actions on Windows, Linux and macOS, and builds for Android and iOS. CI builds every backend, runs the tests, and runs the GLES path through ANGLE and Mesa and the headless sample. While the repository is private its minutes are limited, so pushes to `main` run a quick check (formatting and sources, Linux with every test and the OpenGL checks, and Windows), and pull requests, manual runs and a weekly run build everything. Contribution guidelines describe the coding style (enforced with clang-format and clang-tidy), the DCO sign-off and the review process, and issue templates cover bug reports and feature requests. Packages for vcpkg and Conan can follow once the API has stabilized.
 
 ---
 
