@@ -276,8 +276,8 @@ void overlay::panel(const vgl_context_statistics& s, const panel_info& info, deb
         row("Shift or middle drag", "orbit and tilt");
         row("Ctrl drag", "look around");
         row("Right drag", "zoom");
-        row("Arrows", "move");
-        row("Shift + arrows", "orbit and tilt");
+        row("Arrows, WASD", "move");
+        row("Shift + arrows, WASD", "orbit and tilt");
         row("Page up, down", "zoom");
         row("N, U, R", "north up, top down, both");
         row("1 to 7", "places");

@@ -162,6 +162,12 @@ The pack format has its own version number, independent of the library version.
   around, keys to move, turn, tilt and zoom, and N, U and R to turn north up and look straight
   down. Its check verifies that grabbed points, zoom targets and orbit pivots stay in place to
   within a pixel, that tilting stops at its limit, and that the camera stays above the ground.
+  The terrain height that points are found on is taken when a drag, throw or smooth zoom
+  begins and held until it ends, so that panning and zooming over relief do not jitter or drift. Tilting stops at straight
+  down instead of turning the view over. A throw keeps the globe turning about its centre at
+  the rate of the pan's last tenth of a second, measured on the clock of the frames, so that it
+  starts at the speed of the hand, however the mouse events and frames fall, and slows down
+  smoothly. WASD move as the arrows do.
 - The wireframe debug view is drawn in bright cyan, which shows against dark and light ground.
 - The OpenGL sample's overlay, with Dear ImGui 1.92.9b (downloaded at a pinned hash, sample
   only): the context's statistics with memory against the budgets and a frame-time graph, the

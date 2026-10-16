@@ -17,6 +17,8 @@ constexpr double semi_minor = 6356752.314245;
 constexpr double min_clearance = 20.0; // Metres above the terrain.
 constexpr double max_altitude = 5.0e7; // Metres above the ellipsoid.
 constexpr double max_tilt = 85.0;      // Degrees from looking straight down at the pivot.
+constexpr double throw_window = 0.1;   // Seconds of a pan that set the speed of its throw.
+constexpr double throw_decay = 3.0;    // How fast a throw slows down, per second.
 
 vgl_dvec3 add(const vgl_dvec3& a, const vgl_dvec3& b)
 {
@@ -140,7 +142,18 @@ void globe_navigation::viewport(double width, double height, double field_of_vie
 
 void globe_navigation::ground(double height)
 {
-    ground_ = height;
+    latest_ground_ = height;
+    settle();
+}
+
+void globe_navigation::settle()
+{
+    // Between movements, points are found at the latest height; during one, at the height it
+    // began with.
+    if (mode_ == drag::none && !released_ && !throwing_ && zoom_left_ == 0.0)
+    {
+        ground_ = latest_ground_;
+    }
 }
 
 bool globe_navigation::pick(const camera& c, double x, double y, vgl_dvec3& out) const
@@ -245,13 +258,25 @@ void globe_navigation::orbit_by(camera& c, const vgl_dvec3& pivot, double yaw, d
     }
     // Tilt about the camera's own horizontal axis through the pivot, within limits: well defined
     // even looking straight down.
+    bool down = false;
     if (tilt != 0.0)
     {
         const vgl_dvec3 across = cross(p.forward, p.up); // The camera's right.
         if (length(across) > 1e-9)
         {
             const vgl_dvec3 k = normalize(across);
-            const vgl_dvec3 eye = add(pivot, rotate(add(p.eye, scale(pivot, -1.0)), k, tilt));
+            const vgl_dvec3 offset = add(p.eye, scale(pivot, -1.0));
+            // Past straight down the camera would look back at the pivot from the other side, and
+            // a camera without roll would turn the view over: tilting stops at straight down, the
+            // angle that turns the eye onto the vertical through the pivot.
+            const vgl_dvec3 o = normalize(offset);
+            const double to_down = std::atan2(dot(cross(o, n), k), dot(o, n));
+            if (dot(rotate(p.up, k, tilt), n) < 0.0)
+            {
+                tilt = to_down;
+                down = true;
+            }
+            const vgl_dvec3 eye = add(pivot, rotate(offset, k, tilt));
             const double from_vertical = vgl::radians_to_degrees(
                 std::acos(std::clamp(dot(n, normalize(add(eye, scale(pivot, -1.0)))), -1.0, 1.0)));
             if (from_vertical <= max_tilt)
@@ -262,7 +287,11 @@ void globe_navigation::orbit_by(camera& c, const vgl_dvec3& pivot, double yaw, d
             }
         }
     }
-    const camera next = camera_of(p, c);
+    // Stopped at straight down, the heading comes from the image's up: the view's own direction
+    // has no horizontal part left to give it.
+    camera straight_down = c;
+    straight_down.pitch = 90.0;
+    const camera next = down ? camera_of(p, straight_down, true) : camera_of(p, c);
     if (next.altitude >= ground_ + min_clearance)
     {
         c = next;
@@ -373,6 +402,7 @@ void globe_navigation::aim(camera& c, const vgl_dvec3& p, double x, double y) co
 void globe_navigation::press(drag mode, double x, double y, const camera& c)
 {
     stop();
+    ground_ = latest_ground_;
     mode_ = mode;
     x_ = x;
     y_ = y;
@@ -380,6 +410,13 @@ void globe_navigation::press(drag mode, double x, double y, const camera& c)
     if (mode == drag::pan && !pick(c, x, y, grabbed_))
     {
         mode_ = drag::look; // Grabbing the sky turns the camera instead.
+    }
+    if (mode_ == drag::pan)
+    {
+        pan_eye_ = camera_eye(c);
+        moved_ = false;
+        sample_count_ = 0;
+        record();
     }
     if (mode == drag::orbit)
     {
@@ -411,10 +448,9 @@ void globe_navigation::move(double x, double y, camera& c)
             camera moved = start_;
             bring(moved, grabbed_, x, y);
             c = moved;
+            pan_eye_ = camera_eye(c);
+            moved_ = true;
         }
-        frame_dx_ += dx;
-        frame_dy_ += dy;
-        since_move_ = 0.0;
         return;
     }
     case drag::orbit:
@@ -433,20 +469,72 @@ void globe_navigation::move(double x, double y, camera& c)
 
 void globe_navigation::release()
 {
-    // A pan released while moving carries on, slowing down.
-    throwing_ = mode_ == drag::pan && since_move_ < 0.08 &&
-                (std::abs(velocity_x_) + std::abs(velocity_y_)) > 30.0;
+    // A pan released while moving carries on, slowing down: the next update, which knows when
+    // the last moves happened, decides.
+    released_ = mode_ == drag::pan;
     mode_ = drag::none;
+    settle();
+}
+
+void globe_navigation::record()
+{
+    samples_[sample_count_ % samples_.size()] = {clock_, pan_eye_};
+    ++sample_count_;
+}
+
+void globe_navigation::start_throw(const camera& c)
+{
+    // How fast the globe turned over the last moments of the pan, measured from the oldest
+    // position in that window to the last: steady however the moves and frames fell.
+    const std::size_t kept = std::min(sample_count_, samples_.size());
+    if (kept < 2)
+    {
+        return;
+    }
+    const pan_sample& last = samples_[(sample_count_ - 1) % samples_.size()];
+    const pan_sample* first = &last;
+    for (std::size_t i = 2; i <= kept; ++i)
+    {
+        const pan_sample& s = samples_[(sample_count_ - i) % samples_.size()];
+        if (last.time - s.time > throw_window)
+        {
+            break;
+        }
+        first = &s;
+    }
+    const double elapsed = last.time - first->time;
+    if (elapsed <= 0.0)
+    {
+        return;
+    }
+    const vgl_dvec3 a = normalize(first->eye);
+    const vgl_dvec3 b = normalize(last.eye);
+    const vgl_dvec3 axis = cross(a, b);
+    const double sine = length(axis);
+    if (sine < 1e-15)
+    {
+        return;
+    }
+    // Measured against how much of the globe the view spans: a throw needs a twentieth of the
+    // view each second to start, and stops below a hundred-and-fiftieth.
+    const double span = std::max(c.altitude - ground_, 1.0) * 2.0 *
+                        std::tan(vgl::degrees_to_radians(field_of_view_) / 2.0) / semi_major;
+    throw_axis_ = scale(axis, 1.0 / sine);
+    throw_rate_ = std::atan2(sine, dot(a, b)) / elapsed;
+    throw_stop_ = span / 150.0;
+    throwing_ = throw_rate_ > span / 20.0;
 }
 
 void globe_navigation::scroll(double steps, double x, double y, const camera& c)
 {
+    settle();
     zoom_point_ = anchor(c, x, y);
     zoom_left_ += -steps * 0.3;
 }
 
 void globe_navigation::double_click(double x, double y, const camera& c)
 {
+    settle();
     vgl_dvec3 p{};
     if (pick(c, x, y, p))
     {
@@ -457,10 +545,11 @@ void globe_navigation::double_click(double x, double y, const camera& c)
 
 void globe_navigation::stop()
 {
+    released_ = false;
     throwing_ = false;
-    velocity_x_ = velocity_y_ = 0.0;
-    frame_dx_ = frame_dy_ = 0.0;
+    throw_rate_ = 0.0;
     zoom_left_ = 0.0;
+    settle();
 }
 
 void globe_navigation::update(double dt, const navigation_keys& keys, camera& c)
@@ -469,24 +558,26 @@ void globe_navigation::update(double dt, const navigation_keys& keys, camera& c)
     {
         return;
     }
-    // The cursor's velocity while panning, smoothed over the last few frames.
-    if (mode_ == drag::pan)
+    // The moves since the last update happened during the dt that has just passed. During a pan,
+    // every update counts, moved or not, so that holding still slows it; after its release, only
+    // moves that came before the release.
+    clock_ += dt;
+    if (mode_ == drag::pan || (released_ && moved_))
     {
-        const double blend = std::min(1.0, dt * 20.0);
-        velocity_x_ += (frame_dx_ / dt - velocity_x_) * blend;
-        velocity_y_ += (frame_dy_ / dt - velocity_y_) * blend;
-        frame_dx_ = frame_dy_ = 0.0;
-        since_move_ += dt;
+        record();
+    }
+    moved_ = false;
+    if (released_)
+    {
+        released_ = false;
+        start_throw(c);
     }
     if (throwing_)
     {
-        pan_by(c, x_, y_, velocity_x_ * dt, velocity_y_ * dt);
-        x_ += velocity_x_ * dt;
-        y_ += velocity_y_ * dt;
-        const double decay = std::exp(-dt * 3.0);
-        velocity_x_ *= decay;
-        velocity_y_ *= decay;
-        throwing_ = std::abs(velocity_x_) + std::abs(velocity_y_) > 5.0;
+        c = camera_of(rotated(pose_of(c), throw_axis_, throw_rate_ * dt), c, true);
+        throw_rate_ *= std::exp(-dt * throw_decay);
+        throwing_ = throw_rate_ > throw_stop_;
+        settle();
     }
 
     // Smooth zoom: most of what is left, each frame.
@@ -496,6 +587,7 @@ void globe_navigation::update(double dt, const navigation_keys& keys, camera& c)
             std::abs(zoom_left_) < 1e-4 ? zoom_left_ : zoom_left_ * (1.0 - std::exp(-dt * 10.0));
         zoom_by(c, zoom_point_, std::exp(step));
         zoom_left_ -= step;
+        settle();
     }
 
     // Keys: move at a third of the view per second, turn at 45 and tilt at 30 degrees per second.

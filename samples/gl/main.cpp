@@ -10,8 +10,8 @@
 //
 // Controls, as in Google Earth (samples/common/navigation.hpp, shared by the samples): drag to grab
 // the globe, scroll or double-click to zoom to the cursor, shift-drag or middle-drag to orbit and
-// tilt, ctrl-drag to look around, right-drag to zoom; arrows move, with shift they turn and tilt,
-// page up and down zoom; N turns north up, U looks straight down, R does both. 1 to 7 jump to
+// tilt, ctrl-drag to look around, right-drag to zoom; arrows or WASD move, with shift they turn and
+// tilt, page up and down zoom; N turns north up, U looks straight down, R does both. 1 to 7 jump to
 // places, and L switches between sunlight and a headlight. A panel shows the context's statistics
 // and the debug views: F1 shows or hides it, F2 the wireframe, F3 colours by tile level, F4 the
 // imagery source, F5 freezes the selection, so that tiles are selected for the frozen camera while
@@ -545,10 +545,11 @@ void navigation_check()
     constexpr double w = 1280.0;
     constexpr double h = 720.0;
     using drag = sample::globe_navigation::drag;
-    const std::array<sample::camera, 3> starts{{
+    const std::array<sample::camera, 4> starts{{
         {30.0, -30.0, 2.0e7, 0.0, 90.0},
         {44.5, 9.0, 3.0e5, 0.0, 35.0},
         {27.0, 86.9, 2.0e4, 45.0, 60.0},
+        {61.5, 7.5, 2.0e4, 0.0, 90.0},
     }};
     const auto near = [](double x, double y, double ex, double ey) {
         return std::abs(x - ex) < 1.0 && std::abs(y - ey) < 1.0;
@@ -556,7 +557,8 @@ void navigation_check()
     for (const sample::camera& start : starts)
     {
         const std::string where =
-            " from " + std::to_string(static_cast<int>(start.altitude / 1000.0)) + " km";
+            " from " + std::to_string(static_cast<int>(start.altitude / 1000.0)) + " km at " +
+            std::to_string(static_cast<int>(start.pitch)) + " degrees";
         sample::globe_navigation nav;
         nav.viewport(w, h, field_of_view);
         nav.ground(0.0);
@@ -576,6 +578,107 @@ void navigation_check()
         expect(project(c, grabbed, w, h, x, y) && near(x, y, 720.0, 340.0),
                "a grabbed point stays under the cursor" + where);
 
+        // The same drag while the terrain under the camera changes, as it does with every move:
+        // the height taken when the drag began holds until it ends, so the camera turns the same.
+        sample::camera bumpy = start;
+        nav.press(drag::pan, 600.0, 420.0, bumpy);
+        for (int k = 1; k <= 10; ++k)
+        {
+            nav.ground(150.0 * k);
+            nav.move(600.0 + 12.0 * k, 420.0 - 8.0 * k, bumpy);
+        }
+        nav.release();
+        nav.ground(0.0);
+        expect(std::abs(bumpy.heading - c.heading) < 1e-6 &&
+                   std::abs(bumpy.pitch - c.pitch) < 1e-6 &&
+                   std::abs(bumpy.latitude - c.latitude) < 1e-9 &&
+                   std::abs(bumpy.longitude - c.longitude) < 1e-9,
+               "a drag holds the ground height it began with" + where);
+
+        // A throw, from a steady drag with uneven frames and mouse events that do not line up
+        // with them: the globe carries on turning at the speed of the drag's last tenth of a
+        // second, and slows down smoothly.
+        {
+            const auto turned = [](const sample::camera& from, const sample::camera& to) {
+                const vgl_dvec3 a = sample::normalize(sample::camera_eye(from));
+                const vgl_dvec3 b = sample::normalize(sample::camera_eye(to));
+                const vgl_dvec3 axis = sample::cross(a, b);
+                return std::atan2(std::sqrt(sample::dot(axis, axis)), sample::dot(a, b));
+            };
+            constexpr std::array<double, 5> frames{0.002, 0.009, 0.004, 0.0015, 0.012};
+            sample::camera t = start;
+            nav.press(drag::pan, 600.0, 420.0, t);
+            double now = 0.0;
+            double mouse = 0.0; // Time of the next mouse event, every 8 ms.
+            int events = 0;
+            std::size_t frame = 0;
+            sample::camera mid = t;
+            double mid_time = 0.0;
+            while (now < 0.4)
+            {
+                now += frames[frame++ % frames.size()];
+                for (; mouse <= now; mouse += 0.008)
+                {
+                    ++events;
+                    nav.move(600.0 + 3.0 * events, 420.0 - 3.0 * events, t);
+                }
+                nav.update(frames[(frame - 1) % frames.size()], {}, t);
+                if (mid_time == 0.0 && now >= 0.3)
+                {
+                    mid = t;
+                    mid_time = now;
+                }
+            }
+            const double drag_rate = turned(mid, t) / (now - mid_time);
+            nav.release();
+            bool smooth = true;
+            double first = 0.0;
+            double last = 0.0;
+            double lasted = 0.0;
+            for (int k = 0; k < 400; ++k)
+            {
+                const double dt = frames[frame++ % frames.size()];
+                const sample::camera before = t;
+                nav.update(dt, {}, t);
+                const double rate = turned(before, t) / dt;
+                if (rate == 0.0)
+                {
+                    break;
+                }
+                lasted += dt;
+                if (first == 0.0)
+                {
+                    first = rate;
+                }
+                else
+                {
+                    smooth = smooth && rate <= last * (1.0 + 1e-6) && rate >= last * 0.9;
+                }
+                last = rate;
+            }
+            expect(std::abs(first - drag_rate) < 0.1 * drag_rate,
+                   "a throw carries on at the drag's speed" + where);
+            expect(smooth && lasted > 0.5, "a throw slows down smoothly" + where);
+            nav.stop();
+
+            // Holding still before letting go does not throw.
+            nav.press(drag::pan, 600.0, 420.0, t);
+            for (int k = 1; k <= 20; ++k)
+            {
+                nav.move(600.0 + 3.0 * k, 420.0 - 3.0 * k, t);
+                nav.update(0.008, {}, t);
+            }
+            for (int k = 0; k < 20; ++k)
+            {
+                nav.update(0.008, {}, t);
+            }
+            nav.release();
+            const sample::camera held = t;
+            nav.update(0.008, {}, t);
+            nav.update(0.008, {}, t);
+            expect(turned(held, t) == 0.0, "letting go after holding still does not throw" + where);
+        }
+
         // Zoom towards the cursor.
         c = start;
         vgl_dvec3 under{};
@@ -591,6 +694,22 @@ void navigation_check()
         expect(c.altitude < start.altitude, "scrolling up zooms in" + where);
         expect(project(c, under, w, h, x, y) && near(x, y, zx, zy),
                "zooming keeps the point under the cursor" + where);
+
+        // The same zoom while the terrain under the camera changes: a smooth zoom holds the
+        // ground height it began with, like a drag, so that it zooms the same.
+        sample::camera rising = start;
+        nav.scroll(2.0, zx, zy, rising);
+        for (int k = 0; k < 120; ++k)
+        {
+            nav.ground(10.0 * k);
+            nav.update(1.0 / 60.0, {}, rising);
+        }
+        nav.ground(0.0);
+        expect(std::abs(rising.heading - c.heading) < 1e-6 &&
+                   std::abs(rising.pitch - c.pitch) < 1e-6 &&
+                   std::abs(rising.latitude - c.latitude) < 1e-9 &&
+                   std::abs(rising.longitude - c.longitude) < 1e-9,
+               "a smooth zoom holds the ground height it began with" + where);
 
         // Orbit around the centre, tilting as far as it goes.
         c = start;
@@ -610,6 +729,23 @@ void navigation_check()
             std::acos(sample::dot(up, sample::normalize(sample::sub(eye, centre)))));
         expect(tilt < 86.0, "orbiting stops at the tilt limit" + where);
         expect(c.altitude >= 20.0, "the camera stays above the ground" + where);
+
+        // Tilt only, both ways, through straight down: the view stops there instead of turning
+        // over, so the heading never jumps.
+        for (const double step : {2.0, -2.0})
+        {
+            c = start;
+            nav.press(drag::orbit, w / 2.0, h / 2.0, c);
+            bool steady = true;
+            for (int k = 1; k <= 200; ++k)
+            {
+                nav.move(w / 2.0, h / 2.0 + step * k, c);
+                const double turned = std::abs(std::remainder(c.heading - start.heading, 360.0));
+                steady = steady && turned < 1.0 && c.pitch <= 90.0;
+            }
+            nav.release();
+            expect(steady, "tilting never turns the view over" + where);
+        }
     }
 }
 
@@ -1070,10 +1206,10 @@ int run_interactive(const options& o, GLFWwindow* window, const host_gl& gl, vgl
         if (!ui.wants_keyboard())
         {
             const auto held = [&](int key) { return glfwGetKey(window, key) == GLFW_PRESS; };
-            keys.left = held(GLFW_KEY_LEFT);
-            keys.right = held(GLFW_KEY_RIGHT);
-            keys.up = held(GLFW_KEY_UP);
-            keys.down = held(GLFW_KEY_DOWN);
+            keys.left = held(GLFW_KEY_LEFT) || held(GLFW_KEY_A);
+            keys.right = held(GLFW_KEY_RIGHT) || held(GLFW_KEY_D);
+            keys.up = held(GLFW_KEY_UP) || held(GLFW_KEY_W);
+            keys.down = held(GLFW_KEY_DOWN) || held(GLFW_KEY_S);
             keys.zoom_in = held(GLFW_KEY_PAGE_UP) || held(GLFW_KEY_EQUAL) || held(GLFW_KEY_KP_ADD);
             keys.zoom_out =
                 held(GLFW_KEY_PAGE_DOWN) || held(GLFW_KEY_MINUS) || held(GLFW_KEY_KP_SUBTRACT);
