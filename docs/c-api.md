@@ -410,6 +410,7 @@ typedef struct vgl_allocator_interface
 - `deallocate` receives the same size and alignment that were passed to `allocate`. It is never called with a null pointer. (The entry is not named `free`, because the debug heap of the Microsoft C runtime defines `free` as a macro.)
 - The allocator is supplied when the context is created. If it is not, the library uses the C runtime heap.
 - Every allocation made on behalf of a context, and of the objects created from it, goes through that context's allocator (NFR-03). Functions that take no context do not allocate.
+- Libraries that work on behalf of a context from outside the core, such as the backends, get the allocator with `vgl_context_allocator_get`: the host's, or one that uses the C heap. Libraries that take no context, such as the defaults module, take an allocator of their own.
 - If the host runs library work on several threads (section 11), the allocator must be thread-safe.
 
 ### 10.2 Ownership
@@ -467,6 +468,7 @@ typedef void (*vgl_log_fn)(void* user_data, vgl_log_level level, const char* mes
 - The default minimum level is `VGL_LOG_LEVEL_WARNING`.
 - `message` is UTF-8 without a trailing newline, and is valid only during the call.
 - Messages start with the name of the API function involved, say what happened, and say how to fix it where the fix is known. For example: `vgl_context_create: info->gpu_budget (1 MiB) is below the minimum of 16 MiB; raise it or set it to 0 for the default.`
+- Libraries that work on behalf of a context, such as the backends, log through it with `vgl_context_log`, so that their messages reach the same callback, filtered by the same level, and follow the same rules.
 
 ---
 

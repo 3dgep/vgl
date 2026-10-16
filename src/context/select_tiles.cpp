@@ -10,6 +10,7 @@
 #include "tiling/tile.hpp"
 
 #include <algorithm>
+#include <cstring>
 
 namespace vgl::internal
 {
@@ -366,6 +367,25 @@ extern "C" VGL_API vgl_result vgl_context_view_set(vgl_context* context, const v
         return VGL_RESULT_INVALID_ARGUMENT;
     }
     context->view = state;
+    context->host_view = *view;
+    context->host_view.struct_size = sizeof(vgl_view);
     context->has_view = true;
+    return VGL_RESULT_SUCCESS;
+}
+
+extern "C" VGL_API vgl_result vgl_context_view_get(const vgl_context* context, vgl_view* out_view)
+{
+    if (context == nullptr || out_view == nullptr || out_view->struct_size < sizeof(vgl_view))
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    if (!context->has_view)
+    {
+        return VGL_RESULT_NOT_FOUND;
+    }
+    // Fields beyond this version stay as the caller left them (docs/c-api.md, section 8.4).
+    const std::uint32_t size = out_view->struct_size;
+    std::memcpy(out_view, &context->host_view, sizeof(vgl_view));
+    out_view->struct_size = size;
     return VGL_RESULT_SUCCESS;
 }

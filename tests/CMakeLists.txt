@@ -28,6 +28,7 @@ function(vgl_add_internal_test name)
 endfunction()
 
 vgl_add_internal_test(foundation foundation_test.cpp)
+vgl_add_internal_test(common common_test.cpp WRITER)
 vgl_add_internal_test(geodesy geodesy_test.cpp data/geographiclib_reference.inc)
 vgl_add_internal_test(tiling tiling_test.cpp)
 vgl_add_internal_test(selection selection_test.cpp)

@@ -1031,6 +1031,30 @@ extern "C" VGL_API vgl_result vgl_context_destroy(vgl_context* context)
     return VGL_RESULT_SUCCESS;
 }
 
+extern "C" VGL_API vgl_result vgl_context_allocator_get(const vgl_context* context,
+                                                        vgl_allocator_interface* out_allocator)
+{
+    if (context == nullptr || out_allocator == nullptr)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    *out_allocator = context->memory.host_interface();
+    return VGL_RESULT_SUCCESS;
+}
+
+extern "C" VGL_API vgl_result vgl_context_log(const vgl_context* context,
+                                              vgl_log_level level,
+                                              const char* message)
+{
+    if (context == nullptr || message == nullptr || level < VGL_LOG_LEVEL_ERROR ||
+        level > VGL_LOG_LEVEL_DEBUG)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    context->log.log(level, "%s", message);
+    return VGL_RESULT_SUCCESS;
+}
+
 extern "C" VGL_API vgl_result vgl_context_update(vgl_context* context, const vgl_update_info* info)
 {
     vgl_context* const ctx = context;

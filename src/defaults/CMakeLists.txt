@@ -9,7 +9,7 @@
 find_package(Threads REQUIRED)
 
 add_library(vgl_defaults
-    defaults_memory.hpp
+    ../common/host_memory.hpp
     file_reader.cpp
     thread_pool.cpp)
 add_library(vgl::defaults ALIAS vgl_defaults)

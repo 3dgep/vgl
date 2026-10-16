@@ -4,7 +4,7 @@
 // The default filesystem reader (vgl/defaults.h). Each read opens the file, reads the range
 // and closes it again, so the reader keeps no file handles between reads.
 
-#include "defaults/defaults_memory.hpp"
+#include "common/host_memory.hpp"
 
 #include <vgl/defaults.h>
 
@@ -15,7 +15,7 @@
 #include <cstring>
 #include <mutex>
 
-using vgl::defaults::memory;
+using vgl::common::memory;
 
 namespace
 {
@@ -360,14 +360,13 @@ vgl_file_reader_create(const vgl_file_reader_create_info* info_in, vgl_file_read
     }
     *out_reader = nullptr;
     vgl_file_reader_create_info info;
-    vgl_result r =
-        vgl::defaults::read_versioned(info_in, sizeof(vgl_file_reader_create_info), info);
+    vgl_result r = vgl::common::read_versioned(info_in, sizeof(vgl_file_reader_create_info), info);
     if (r != VGL_RESULT_SUCCESS)
     {
         return r;
     }
     memory m;
-    r = vgl::defaults::make_memory(info.allocator, m);
+    r = vgl::common::make_memory(info.allocator, m);
     if (r != VGL_RESULT_SUCCESS)
     {
         return r;

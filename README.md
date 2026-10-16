@@ -8,8 +8,9 @@ application. It streams level-of-detail terrain and imagery on the WGS84 ellipso
 through backends for OpenGL / OpenGL ES, Direct3D 11 and Ogre, on Windows, Linux, macOS, Android and iOS. The public interface is a C
 API, so the library embeds as easily in a C code base as in a C++ one.
 
-> **Status:** early development. Planning is complete and work is at milestone M0 (foundations).
-> Nothing is usable yet, and the API will change without notice before version 1.0.
+> **Status:** early development, at milestone M2 (MVP runtime). The runtime loads baked packs,
+> selects and meshes tiles, and the OpenGL / OpenGL ES backend draws the terrain, without
+> imagery so far. The API will change without notice before version 1.0.
 
 ## Goals
 
@@ -80,9 +81,15 @@ cmake --workflow --preset linux-gcc-static-debug
 | `VGL_BACKEND_OGRE` | `OFF` | Build the Ogre backend (classic Ogre, 1.x) |
 | `VGL_DISABLE_EXCEPTIONS` | `OFF` | Build the library without exceptions and RTTI |
 | `VGL_WARNINGS_AS_ERRORS` | `OFF` | Treat compiler warnings as errors |
+| `VGL_FETCH_DEPENDENCIES` | `ON` | Download Zstandard, and GLFW for the samples, when they are not installed |
+| `VGL_TEST_GL` | `OFF` | Run the OpenGL samples' checks as tests (needs a display) |
 | `VGL_INSTALL` | `ON` (top level) | Generate install rules |
 
-Most modules, backends, samples and the baker are still empty placeholders.
+The Direct3D 11 and Ogre backends are still empty placeholders.
+
+The samples run on the sample data in `samples/data`: `vgl-headless` without a GPU, `vgl-gl`
+in a window (`--es` for OpenGL ES, `--depth reversed` for reversed-Z), and `vgl-c`, the same
+in C.
 
 ### Using vgl
 
@@ -90,7 +97,7 @@ After `cmake --install build`, consume vgl through its CMake package:
 
 ```cmake
 find_package(vgl REQUIRED)
-target_link_libraries(my_app PRIVATE vgl::vgl)
+target_link_libraries(my_app PRIVATE vgl::vgl vgl::gl)
 ```
 
 or through pkg-config:

@@ -241,6 +241,66 @@ TEST_CASE(pack_create_needs_an_io_interface)
     CHECK_EQ(vgl_context_destroy(ctx), VGL_RESULT_SUCCESS);
 }
 
+TEST_CASE(libraries_on_a_context_share_its_allocator_log_and_view)
+{
+    test_allocator memory;
+    struct messages
+    {
+        std::vector<std::pair<vgl_log_level, std::string>> lines;
+    } log;
+    vgl_context_create_info info = context_info();
+    info.allocator = &memory.table;
+    info.log_level = VGL_LOG_LEVEL_INFO;
+    info.log = [](void* user_data, vgl_log_level level, const char* message) {
+        static_cast<messages*>(user_data)->lines.emplace_back(level, message);
+    };
+    info.log_user_data = &log;
+    vgl_context* ctx = nullptr;
+    REQUIRE(vgl_context_create(&info, &ctx) == VGL_RESULT_SUCCESS);
+
+    // The host's allocator itself, not a wrapper.
+    vgl_allocator_interface a{};
+    CHECK_EQ(vgl_context_allocator_get(ctx, &a), VGL_RESULT_SUCCESS);
+    CHECK(a.user_data == &memory && a.allocate == memory.table.allocate);
+    CHECK_EQ(vgl_context_allocator_get(ctx, nullptr), VGL_RESULT_INVALID_ARGUMENT);
+
+    // Messages pass the context's level filter.
+    CHECK_EQ(vgl_context_log(ctx, VGL_LOG_LEVEL_INFO, "test: shown"), VGL_RESULT_SUCCESS);
+    CHECK_EQ(vgl_context_log(ctx, VGL_LOG_LEVEL_DEBUG, "test: hidden"), VGL_RESULT_SUCCESS);
+    CHECK_EQ(vgl_context_log(ctx, static_cast<vgl_log_level>(9), "test: bad"),
+             VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_context_log(ctx, VGL_LOG_LEVEL_ERROR, nullptr), VGL_RESULT_INVALID_ARGUMENT);
+    REQUIRE(log.lines.size() == 1u);
+    CHECK(log.lines[0].first == VGL_LOG_LEVEL_INFO && log.lines[0].second == "test: shown");
+
+    // The view comes back as it was set; a newer caller's extra fields are left alone.
+    struct
+    {
+        vgl_view view;
+        std::uint64_t extra;
+    } got{};
+    got.view.struct_size = sizeof(got);
+    got.extra = 7;
+    CHECK_EQ(vgl_context_view_get(ctx, &got.view), VGL_RESULT_NOT_FOUND);
+    const vgl_view view = make_view(
+        look_at({2e7, 0, 0}, {0, 0, 0}, {0, 0, 1}), perspective_gl(1.0, 1.5, 1.0, 1e9), 300, 200);
+    REQUIRE(vgl_context_view_set(ctx, &view) == VGL_RESULT_SUCCESS);
+    CHECK_EQ(vgl_context_view_get(ctx, &got.view), VGL_RESULT_SUCCESS);
+    CHECK(got.view.struct_size == sizeof(got) && got.extra == 7u);
+    CHECK(got.view.viewport_width == 300u && got.view.viewport_height == 200u);
+    CHECK(std::memcmp(&got.view.view_matrix, &view.view_matrix, sizeof(vgl_dmat4)) == 0);
+    CHECK(std::memcmp(&got.view.projection_matrix, &view.projection_matrix, sizeof(vgl_dmat4)) ==
+          0);
+    got.view.struct_size = 8;
+    CHECK_EQ(vgl_context_view_get(ctx, &got.view), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_context_view_set(ctx, nullptr), VGL_RESULT_SUCCESS);
+    got.view.struct_size = sizeof(vgl_view);
+    CHECK_EQ(vgl_context_view_get(ctx, &got.view), VGL_RESULT_NOT_FOUND);
+
+    CHECK_EQ(vgl_context_destroy(ctx), VGL_RESULT_SUCCESS);
+    CHECK_EQ(memory.live.load(), 0);
+}
+
 TEST_CASE(heights_come_from_the_deepest_level)
 {
     const test_pack pack = make_pack();

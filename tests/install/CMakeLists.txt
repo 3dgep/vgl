@@ -12,3 +12,8 @@ find_package(vgl REQUIRED)
 
 add_executable(vgl_install_test "${CMAKE_CURRENT_SOURCE_DIR}/../api_c.c")
 target_link_libraries(vgl_install_test PRIVATE vgl::vgl)
+
+# The backends that were built are in the package too.
+if(TARGET vgl::gl)
+    target_link_libraries(vgl_install_test PRIVATE vgl::gl)
+endif()

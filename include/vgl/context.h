@@ -83,6 +83,44 @@ VGL_API vgl_result vgl_context_create(const vgl_context_create_info* info,
  */
 VGL_API vgl_result vgl_context_destroy(vgl_context* context);
 
+/**
+ * Gets the allocator of the context: the host's, or one that uses the C heap. Libraries that
+ * work on behalf of a context, such as the backends, allocate through it, so that all of the
+ * context's memory reaches the host's allocator (NFR-03). The table stays valid while the
+ * context exists.
+ *
+ * @param context        The context.
+ * @param out_allocator  Receives the allocator interface.
+ *
+ * @retval VGL_RESULT_SUCCESS           The interface was written.
+ * @retval VGL_RESULT_INVALID_ARGUMENT  A pointer is null.
+ *
+ * @par Thread safety
+ * Free-threaded.
+ */
+VGL_API vgl_result vgl_context_allocator_get(const vgl_context* context,
+                                             vgl_allocator_interface* out_allocator);
+
+/**
+ * Passes a message to the context's log callback, if one is set and the level is enabled.
+ * Libraries that work on behalf of a context, such as the backends, log through it, so that
+ * their messages reach the host's log (docs/c-api.md, section 13).
+ *
+ * @param context  The context.
+ * @param level    Severity: VGL_LOG_LEVEL_ERROR to VGL_LOG_LEVEL_DEBUG.
+ * @param message  UTF-8 text without a trailing newline, starting with the name of the API
+ *                 function involved.
+ *
+ * @retval VGL_RESULT_SUCCESS           The message was passed on, or the level is disabled.
+ * @retval VGL_RESULT_INVALID_ARGUMENT  A pointer is null, or level is not a message level.
+ *
+ * @par Thread safety
+ * Free-threaded. The log callback runs on the calling thread.
+ */
+VGL_API vgl_result vgl_context_log(const vgl_context* context,
+                                   vgl_log_level level,
+                                   const char* message);
+
 /* Parameters of an update. Zero-initialize, set struct_size, then fill in. */
 typedef struct vgl_update_info
 {
@@ -135,6 +173,24 @@ typedef struct vgl_view
  * Context-synchronized.
  */
 VGL_API vgl_result vgl_context_view_set(vgl_context* context, const vgl_view* view);
+
+/**
+ * Gets the view set with vgl_context_view_set, for example for a backend that needs its
+ * projection matrix.
+ *
+ * @param context   The context.
+ * @param out_view  Receives the view. The caller sets struct_size, and only the fields that
+ *                  fit within it are written (docs/c-api.md, section 8.4).
+ *
+ * @retval VGL_RESULT_SUCCESS           The view was written.
+ * @retval VGL_RESULT_NOT_FOUND         No view is set; out_view is unchanged.
+ * @retval VGL_RESULT_INVALID_ARGUMENT  A pointer is null, or out_view->struct_size is smaller
+ *                                      than the first version of vgl_view.
+ *
+ * @par Thread safety
+ * Context-synchronized.
+ */
+VGL_API vgl_result vgl_context_view_get(const vgl_context* context, vgl_view* out_view);
 
 /**
  * Advances loading: processes completed reads and tasks, decodes (when there is no task

@@ -316,7 +316,16 @@ The backend targets the common subset of OpenGL 3.3 core and OpenGL ES 3.0. Desk
 - Buffers, vertex array objects, samplers and uniform buffers are used only in ways that exist in ES 3.0. Wireframe rendering is a debug-only feature.
 - Context creation belongs to the host, so EGL, WGL and GLX never appear in the library.
 
-Continuous testing keeps the GLES path working: the GL sample also runs on a GLES 3 context through ANGLE on Windows and Mesa on Linux.
+The backend (`vgl/gl.h`, target `vgl::gl`) is a consumer of the render interface in a library of its own, built on the C API like a third-party backend. It is implemented as follows:
+
+- **Functions.** The host passes a function loader, such as `glfwGetProcAddress`, when it creates the backend. The backend declares the part of OpenGL it uses itself, the same in OpenGL and OpenGL ES, and links no OpenGL library, so the same binary serves both.
+- **Memory and messages.** It allocates through the context's allocator and logs through the context's log (`vgl_context_allocator_get`, `vgl_context_log`), and takes the projection from the context's view unless the host passes one.
+- **Drawing.** Each mesh has its own buffer and vertex array, which also binds the shared index list's buffer, so a tile is one draw call: a vertex array, a model-view uniform and `glDrawElements`. Plain uniforms rather than uniform buffers keep the path the same on OpenGL ES. Index lists upload through `GL_COPY_WRITE_BUFFER`, because the element array binding belongs to whichever vertex array is bound, which may be the host's.
+- **Shading.** Until imagery arrives, tiles are shaded by height (a palette from the deep ocean floor to snow) and by their normal, lit by a sun direction the host passes or else from the camera.
+- **State.** `vgl/gl.h` lists the state the backend changes and restores. Primitive restart is switched off while it draws, because a 16-bit index list may use index 65,535 as a vertex. For the reversed-Z convention, it sets the clip control depth mode and keeps the host's origin.
+- **Lost contexts.** `vgl_gl_backend_reset` forgets the objects of a lost OpenGL context without deleting them, loads the functions again on the new context, and resets the context's resources, which are then uploaded again over a few frames.
+
+Continuous testing keeps the GLES path working. The OpenGL sample's check draws the sample data from five views with each depth convention, compares the images across conventions and with the expected coverage, and checks for OpenGL errors and that the host's state is restored. CI runs it on OpenGL and on OpenGL ES with Mesa under a virtual X server; a run through ANGLE on Windows is to follow.
 
 #### Direct3D 11 backend
 
@@ -457,14 +466,14 @@ Because shards are plain range-readable files, the first version of the client's
 
 | Sample | Purpose |
 |---|---|
-| OpenGL | Reference sample using GLFW for the window and context |
-| OpenGL ES | The same sample on a GLES 3 context, through ANGLE or EGL |
+| OpenGL | Reference sample using GLFW for the window and context (`samples/gl`, `vgl-gl`). It renders into its own framebuffer, with a 32-bit floating-point depth buffer for reversed-Z, and copies the result to the window. |
+| OpenGL ES | The same sample on a GLES 3 context (`vgl-gl --es`), and with `--egl` through EGL, as with ANGLE |
 | Direct3D 11 | Plain Win32 window and device |
 | Ogre | Globe inside a classic Ogre scene, on Windows, Linux, macOS, Android and iOS |
-| Pure C | The OpenGL sample written in C against the C API. This mirrors the client's integration; if it is awkward to write, the API needs to change. |
+| Pure C | The OpenGL sample's core written in C99 against the C API (`samples/c`, `vgl-c`). This mirrors the client's integration; if it is awkward to write, the API needs to change. |
 | Headless | Runs tile selection and loading with a scripted camera and prints statistics, without a GPU. Doubles as a test and benchmark. |
 
-All samples use a small dataset baked from public-domain sources, so they work offline and also exercise the baker. It lives in the repository, in `samples/data`: GEBCO to level 3 and the EGM2008 geoid to level 2, about 4 MB, with the bake configurations that produce them. The headless sample checks its own results with `--check`, and runs as a test in CI.
+All samples use a small dataset baked from public-domain sources, so they work offline and also exercise the baker. It lives in the repository, in `samples/data`: GEBCO to level 3 and the EGM2008 geoid to level 2, about 4 MB, with the bake configurations that produce them. The headless, OpenGL and pure-C samples check their own results with `--check`. The headless check runs as a test everywhere; the OpenGL checks need a display, and run as tests when `VGL_TEST_GL` is on, as in CI. GLFW is used only by the samples, from an installed package or downloaded at a pinned version with a checked hash, like the library's dependencies; Android and iOS build no OpenGL sample, since GLFW is for desktops.
 
 ---
 

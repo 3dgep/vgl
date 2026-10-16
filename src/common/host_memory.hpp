@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Jeremiah van Oosten
 //
-// Allocation and input checks for the defaults module. The module is its own library and
-// links vgl only through the C API, so it cannot use the core's internal helpers.
+// Allocation and input checks for the libraries built on the C API: the defaults module and
+// the backends. They link vgl only through the C API, so they cannot use the core's internal
+// helpers, which a shared vgl does not export.
 
-#ifndef VGL_DEFAULTS_DEFAULTS_MEMORY_HPP
-#define VGL_DEFAULTS_DEFAULTS_MEMORY_HPP
+#ifndef VGL_COMMON_HOST_MEMORY_HPP
+#define VGL_COMMON_HOST_MEMORY_HPP
 
 #include <vgl/foundation.h>
 
@@ -19,7 +20,7 @@
 #    include <malloc.h>
 #endif
 
-namespace vgl::defaults
+namespace vgl::common
 {
 
 class memory
@@ -134,6 +135,6 @@ template <typename T>
     return VGL_RESULT_SUCCESS;
 }
 
-} // namespace vgl::defaults
+} // namespace vgl::common
 
-#endif // VGL_DEFAULTS_DEFAULTS_MEMORY_HPP
+#endif // VGL_COMMON_HOST_MEMORY_HPP

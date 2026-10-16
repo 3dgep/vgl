@@ -5,8 +5,9 @@
 # selection and frames without a GPU, with statistics. With --check, it is also
 # a test of the whole runtime on the sample data.
 
-add_executable(vgl_headless main.cpp)
+add_executable(vgl_headless main.cpp ../common/sample_camera.hpp)
 set_target_properties(vgl_headless PROPERTIES OUTPUT_NAME vgl-headless)
+target_include_directories(vgl_headless PRIVATE ../common)
 target_link_libraries(vgl_headless PRIVATE vgl::vgl vgl::defaults)
 target_compile_definitions(vgl_headless PRIVATE
     VGL_SAMPLE_DATA_DIR="${PROJECT_SOURCE_DIR}/samples/data")

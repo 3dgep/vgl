@@ -1,6 +1,6 @@
 # Render interface specification
 
-**Status: accepted on 15 October 2026; the core side is implemented (`vgl/render.h`), the backends are not yet.** This document specifies the render interface, as the [C API conventions](c-api.md) and the [pack format](pack-format.md) specify theirs. The core, the built-in backends and third-party consumers follow it, and a change to the interface updates this document. Section 12 records the decisions and the alternatives that were considered.
+**Status: accepted on 15 October 2026; the core side is implemented (`vgl/render.h`), and so is the OpenGL / OpenGL ES backend (`vgl/gl.h`), without imagery so far.** This document specifies the render interface, as the [C API conventions](c-api.md) and the [pack format](pack-format.md) specify theirs. The core, the built-in backends and third-party consumers follow it, and a change to the interface updates this document. Section 12 records the decisions and the alternatives that were considered.
 
 This document specifies the contract between the vgl core and whatever draws the globe: the built-in OpenGL / OpenGL ES, Direct3D 11 and Ogre backends, third-party backends, and hosts that render the tiles themselves (FR-10).
 
@@ -303,17 +303,38 @@ The consumer owns the depth buffer, its clearing and the projection matrix, so i
 
 | Convention | Projection | Depth buffer | Where |
 |---|---|---|---|
-| Reversed-Z | The host's, reversed (near to 1, far to 0), ideally with an infinite far plane | 32-bit float, cleared to 0, compare `GREATER` | Direct3D 11; OpenGL 4.5 or `ARB_clip_control` |
-| Logarithmic | The host's, conventional | Any; the shader writes depth from the camera distance | Everywhere, including OpenGL ES and macOS |
-| Conventional | The host's | Any | Small scenes only; z-fighting at planetary scale |
+| Logarithmic (the default) | The host's, conventional; its near and far planes do not matter | Any, cleared to 1, compare `LESS`; the shader writes depth from the camera distance | Everywhere, including OpenGL ES and macOS |
+| Reversed-Z | The host's, reversed (near to 1, far to 0), ideally with an infinite far plane | 32-bit float, cleared to 0, compare `GREATER` | Direct3D 11; OpenGL 4.5, `ARB_clip_control`, or `EXT_clip_control` on OpenGL ES |
+| Conventional | The host's | Any, cleared to 1, compare `LESS` | Small scenes only; z-fighting at planetary scale |
 
-The backend states the convention when it is created, and fails if the device cannot do it: reversed-Z needs clip control under OpenGL. For the logarithmic convention, the frame reports the coefficient its shaders use, and the getting-started guides give the matching snippet in GLSL and HLSL, so that host geometry, such as an aircraft on the terrain, writes the same depths:
+`vgl/render.h` names them, for every backend:
+
+```c
+typedef enum vgl_depth_convention
+{
+    VGL_DEPTH_CONVENTION_LOGARITHMIC = 0,
+    VGL_DEPTH_CONVENTION_REVERSED_Z = 1,
+    VGL_DEPTH_CONVENTION_CONVENTIONAL = 2,
+    VGL_DEPTH_CONVENTION_MAX_ENUM = 0x7FFFFFFF
+} vgl_depth_convention;
+
+#define VGL_LOGARITHMIC_DEPTH_FAR_DEFAULT 1.0e8 /* metres */
+```
+
+The logarithmic convention is the zero value, and so the default, because it is the one that works on every device with an ordinary depth buffer. The backend states the convention when it is created, and fails if the device cannot do it: reversed-Z needs clip control under OpenGL, and the OpenGL backend sets the clip control depth mode while it draws, keeping the host's origin.
+
+For the logarithmic convention, the host passes the far distance in each backend's draw parameters (`VGL_LOGARITHMIC_DEPTH_FAR_DEFAULT`, 100,000 km, when it passes none), so it knows the coefficient the shaders use, and the getting-started guides give the matching snippet in GLSL and HLSL, so that host geometry, such as an aircraft on the terrain, writes the same depths. The vertex shader also moves the clip-space depth onto the same curve, so that the projection's near and far planes clip nothing in front of the camera:
 
 ```glsl
-// Vertex shader: pass camera-space distance; fragment shader:
-gl_FragDepth = log2(max(1e-6, 1.0 + w)) * log_depth_coefficient * 0.5;
+// Vertex shader, with p the camera-space position:
+v_log_depth = 1.0 + max(-p.z, 0.0);
+gl_Position.z = (log2(v_log_depth) * log_depth_coefficient - 1.0) * gl_Position.w;
+// Fragment shader:
+gl_FragDepth = log2(v_log_depth) * log_depth_coefficient * 0.5;
 // with log_depth_coefficient = 2.0 / log2(far + 1.0)
 ```
+
+The distance along the view axis, rather than the clip-space *w*, keeps the convention working with orthographic projections. With a 24-bit depth buffer and the default far distance, the depth resolves about a millimetre at 1 km and a centimetre at 10 km.
 
 ## 9. Threading
 
@@ -325,7 +346,7 @@ gl_FragDepth = log2(max(1e-6, 1.0 + w)) * log_depth_coefficient * 0.5;
 
 | | Direct3D 11 / OpenGL backend | Ogre backend | Host renderer |
 |---|---|---|---|
-| Where the frame is | Inside `vgl_gl_draw` / `vgl_d3d11_draw`, called by the host in its render pass | In a `RenderQueueListener` or a custom `MovableObject`'s `_updateRenderQueue`, once per Ogre frame | Wherever the host draws |
+| Where the frame is | Inside `vgl_gl_backend_draw` / `vgl_d3d11_backend_draw`, called by the host in its render pass | In a `RenderQueueListener` or a custom `MovableObject`'s `_updateRenderQueue`, once per Ogre frame | Wherever the host draws |
 | Destroy and create lists | Buffers and textures from a pool; a staging buffer per frame | `HardwareVertexBuffer`, `HardwareIndexBuffer` and `Texture` objects through Ogre's managers | Its own objects |
 | Draw list | One draw call per item, with a per-item constant buffer or uniform block | A pool of renderables, one per item, added to the render queue. Each reports `model_view` with `getUseIdentityView` set, so Ogre multiplies only the projection and the precision survives. | Its own draws |
 | Precision | `model_view` as is | `model_view` as is; an Ogre build with `OGRE_DOUBLE_PRECISION` is not needed | `model_view`, or its own composition from `centre` |
@@ -363,3 +384,10 @@ Implementing the core side changed some details of the accepted proposal, withou
 - A resource is drawn from the frame after the one that created it, so that a create the consumer reports as failed is never in the same frame's draw list.
 - Meshes of selected tiles are exempt from GPU eviction (section 4.3); without that, a region waiting for its last tiles could evict the others forever.
 - Frames allocate only while their lists grow (section 9), instead of never.
+
+Implementing the OpenGL backend added what a consumer built on the public API needs, again without touching the seven decisions:
+
+- `vgl_context_view_get`, so that a backend can use the projection the host already set; `vgl_context_allocator_get` and `vgl_context_log`, so that a backend in its own library allocates through the context's allocator and logs through its log (C API conventions, sections 10.1 and 13).
+- The depth conventions became an enumeration in `vgl/render.h`, with the logarithmic one as the default (section 8).
+- For the logarithmic convention, the host passes the far distance when it draws, instead of the frame reporting a coefficient: the host then knows it without asking, and it can change from frame to frame.
+- Destroying a built-in backend resets the context's resources (`vgl_context_resources_reset`), so that a consumer created later receives every resource again.

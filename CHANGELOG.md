@@ -100,6 +100,25 @@ The pack format has its own version number, independent of the library version.
 - Context tests with synchronous, deferred and threaded hosts, allocation accounting, failure
   injection for every allocation, corrupt packs and the CPU budget; and tests of the defaults
   module on packs written to disk.
+- OpenGL / OpenGL ES backend (`vgl/gl.h`, target `vgl::gl`, pkg-config `vgl-gl`):
+  `vgl_gl_backend_create` with the host's function loader, `vgl_gl_backend_draw`,
+  `vgl_gl_backend_reset` for a lost OpenGL context, and `vgl_gl_backend_destroy`. It draws on
+  OpenGL 3.3 and OpenGL ES 3.0 or later, one draw call per tile, shaded by height and normal
+  with an optional sun direction, and restores the host's state. C++ wrapper in `vgl/gl.hpp`.
+- Depth conventions for every backend in `vgl/render.h`: `vgl_depth_convention` (logarithmic
+  by default, reversed-Z and conventional) and `VGL_LOGARITHMIC_DEPTH_FAR_DEFAULT`.
+- For libraries that work on behalf of a context, such as backends: `vgl_context_view_get`,
+  `vgl_context_allocator_get` and `vgl_context_log`, with C++ wrappers.
+- OpenGL sample (`samples/gl`, `vgl-gl`): the globe in a GLFW window on OpenGL or, with `--es`,
+  OpenGL ES, with every depth convention and mouse controls. With `--check` it draws five
+  views with each convention and checks coverage, agreement between the conventions, OpenGL
+  errors and the restored host state.
+- Pure-C sample (`samples/c`, `vgl-c`): the OpenGL sample's core in C99, with a `--check`.
+- GLFW 3.4 for the samples, found or downloaded with a checked hash. The `VGL_TEST_GL` option
+  runs the OpenGL samples' checks as tests, and a CI job runs them on Mesa under Xvfb, on
+  OpenGL and OpenGL ES.
+- `vgl::common::pointer_map` (`src/common`), a map from resource identifiers to objects for
+  the libraries built on the C API, with tests.
 
 ### Changed
 
@@ -121,6 +140,13 @@ The pack format has its own version number, independent of the library version.
   the OpenGL / OpenGL ES backend first, then Direct3D 11; Windows 10, macOS 11 (universal),
   Android 7.0 (API 24, 64-bit) and iOS 15; Blue Marble and Sentinel-2 cloudless 2016 imagery;
   bathymetry with an optional sea surface; hosting on an object store without egress fees.
+- The defaults module's allocation helpers moved to `src/common/host_memory.hpp`, shared with
+  the backends. The samples share their camera math in `samples/common/sample_camera.hpp`.
+- C API conventions, sections 10.1 and 13: libraries working on behalf of a context use its
+  allocator and its log.
+- Render interface specification, section 8: the depth conventions are an enumeration, and for
+  the logarithmic one the host passes the far distance when drawing, instead of the frame
+  reporting a coefficient.
 - C API conventions, section 12: a context may be destroyed while I/O requests are
   outstanding. It cancels them, and the host completes them later, as before; the completions
   are discarded. Previously this was an error.

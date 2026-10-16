@@ -24,6 +24,15 @@ if(TARGET vgl_defaults)
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
 endif()
 
+# The OpenGL backend, as vgl::gl in the same package.
+if(TARGET vgl_gl)
+    install(TARGETS vgl_gl
+        EXPORT vgl-targets
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+endif()
+
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/vgl"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 install(DIRECTORY "${PROJECT_BINARY_DIR}/include/vgl"
@@ -102,5 +111,14 @@ if(TARGET vgl_defaults)
         "${PROJECT_BINARY_DIR}/vgl-defaults.pc"
         @ONLY)
     install(FILES "${PROJECT_BINARY_DIR}/vgl-defaults.pc"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
+endif()
+
+if(TARGET vgl_gl)
+    configure_file(
+        "${PROJECT_SOURCE_DIR}/cmake/vgl-gl.pc.in"
+        "${PROJECT_BINARY_DIR}/vgl-gl.pc"
+        @ONLY)
+    install(FILES "${PROJECT_BINARY_DIR}/vgl-gl.pc"
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/pkgconfig")
 endif()

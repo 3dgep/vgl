@@ -95,6 +95,33 @@ public:
         return static_cast<result>(vgl_context_view_set(handle_, view));
     }
 
+    // The view set with view_set, or result::not_found without one.
+    [[nodiscard]] expected<vgl_view> view_get() const noexcept
+    {
+        auto view = init<vgl_view>();
+        const auto r = static_cast<result>(vgl_context_view_get(handle_, &view));
+        if (r != result::success)
+        {
+            return unexpected(r);
+        }
+        return view;
+    }
+
+    // The allocator of the context: the host's, or the C heap's. The context must be valid.
+    [[nodiscard]] vgl_allocator_interface allocator_get() const noexcept
+    {
+        vgl_allocator_interface table{};
+        static_cast<void>(vgl_context_allocator_get(handle_, &table));
+        return table;
+    }
+
+    // Passes a message to the context's log callback.
+    [[nodiscard]] result log(log_level level, const char* message) const noexcept
+    {
+        return static_cast<result>(
+            vgl_context_log(handle_, static_cast<vgl_log_level>(level), message));
+    }
+
     // The texture formats the consumer can sample, most preferred first (vgl/render.h).
     [[nodiscard]] result texture_formats_set(std::span<const vgl_texture_format> formats) noexcept
     {

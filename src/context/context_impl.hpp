@@ -325,6 +325,7 @@ struct vgl_context
     std::uint64_t frame = 1;
 
     bool has_view = false;
+    vgl_view host_view{}; // As the host set it, for vgl_context_view_get.
     vgl::internal::view_state view;
     vgl::internal::vector<vgl::internal::selected_tile> selected; // For the view, this frame.
     vgl::internal::vector<vgl::internal::load_request> wanted;

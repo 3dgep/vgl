@@ -6,6 +6,7 @@
  * types follow docs/c-api.md.
  */
 #include <vgl/defaults.h>
+#include <vgl/gl.h>
 #include <vgl/vgl.h>
 
 #include <stdio.h>
@@ -48,6 +49,11 @@ static void check_types(void)
     CHECK(sizeof(vgl_draw_item) == 168);
     CHECK(offsetof(vgl_draw_item, model_view) == 64);
     CHECK(sizeof(vgl_frame_begin_info) == 24);
+    CHECK(sizeof(vgl_depth_convention) == 4);
+    /* The OpenGL backend's structures (vgl/gl.h). */
+    CHECK(sizeof(vgl_gl_backend_create_info) == 24);
+    CHECK(sizeof(vgl_gl_draw_info) == 64);
+    CHECK(offsetof(vgl_gl_draw_info, sun_direction) == 24);
 }
 
 static void check_results(void)
@@ -129,6 +135,9 @@ static void check_context(void)
     vgl_frame* frame = NULL;
     const vgl_draw_item* items = NULL;
     uint32_t item_count = 0;
+    vgl_view got = {.struct_size = sizeof(got)};
+    vgl_allocator_interface allocator;
+    void* memory = NULL;
 
     io.user_data = &reads;
     io.read = read_nothing;
@@ -144,6 +153,20 @@ static void check_context(void)
     CHECK(vgl_context_height_query(context, 0.0, 0.0, VGL_HEIGHT_REFERENCE_ELLIPSOID, &height) ==
           VGL_RESULT_NOT_FOUND);
 
+    /* The context's allocator, and its log, for libraries working on its behalf. */
+    CHECK(vgl_context_allocator_get(context, &allocator) == VGL_RESULT_SUCCESS);
+    CHECK(allocator.version == VGL_ALLOCATOR_INTERFACE_VERSION);
+    memory = allocator.allocate(allocator.user_data, 64, 16);
+    CHECK(memory != NULL);
+    if (memory != NULL)
+    {
+        allocator.deallocate(allocator.user_data, memory, 64, 16);
+    }
+    CHECK(vgl_context_log(context, VGL_LOG_LEVEL_INFO, "api_c: a message") == VGL_RESULT_SUCCESS);
+    CHECK(vgl_context_log(context, VGL_LOG_LEVEL_DEFAULT, "api_c: no level") ==
+          VGL_RESULT_INVALID_ARGUMENT);
+    CHECK(vgl_context_view_get(context, &got) == VGL_RESULT_NOT_FOUND);
+
     /* An identity view looks down -z from the centre of the Earth, which is valid. */
     view.view_matrix.m[0] = view.view_matrix.m[5] = view.view_matrix.m[10] = 1.0;
     view.view_matrix.m[15] = 1.0;
@@ -151,6 +174,9 @@ static void check_context(void)
     view.viewport_width = 640;
     view.viewport_height = 480;
     CHECK(vgl_context_view_set(context, &view) == VGL_RESULT_SUCCESS);
+    CHECK(vgl_context_view_get(context, &got) == VGL_RESULT_SUCCESS);
+    CHECK(got.struct_size == sizeof(got) && got.viewport_width == 640 &&
+          got.projection_matrix.m[15] == 1.0);
     CHECK(vgl_context_update(context, NULL) == VGL_RESULT_SUCCESS);
     CHECK(vgl_context_frame_begin(context, NULL, &frame) == VGL_RESULT_SUCCESS);
     CHECK(vgl_frame_draw_list_get(frame, &items, &item_count) == VGL_RESULT_SUCCESS);

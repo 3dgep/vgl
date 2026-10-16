@@ -11,6 +11,8 @@
 //
 // The directory holds packs/gebco and packs/egm2008 (samples/data).
 
+#include "sample_camera.hpp"
+
 #include <vgl/defaults.hpp>
 #include <vgl/vgl.hpp>
 
@@ -42,63 +44,6 @@ void expect(bool condition, const char* what)
     }
 }
 
-vgl_dvec3 sub(const vgl_dvec3& a, const vgl_dvec3& b)
-{
-    return {a.x - b.x, a.y - b.y, a.z - b.z};
-}
-
-vgl_dvec3 cross(const vgl_dvec3& a, const vgl_dvec3& b)
-{
-    return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
-}
-
-double dot(const vgl_dvec3& a, const vgl_dvec3& b)
-{
-    return a.x * b.x + a.y * b.y + a.z * b.z;
-}
-
-vgl_dvec3 normalize(const vgl_dvec3& v)
-{
-    const double l = std::sqrt(dot(v, v));
-    return {v.x / l, v.y / l, v.z / l};
-}
-
-// A right-handed view matrix looking from eye at target, column-major (vgl_dmat4).
-vgl_dmat4 look_at(const vgl_dvec3& eye, const vgl_dvec3& target, const vgl_dvec3& up)
-{
-    const vgl_dvec3 f = normalize(sub(target, eye));
-    const vgl_dvec3 s = normalize(cross(f, up));
-    const vgl_dvec3 u = cross(s, f);
-    vgl_dmat4 m{};
-    m.m[0] = s.x;
-    m.m[4] = s.y;
-    m.m[8] = s.z;
-    m.m[1] = u.x;
-    m.m[5] = u.y;
-    m.m[9] = u.z;
-    m.m[2] = -f.x;
-    m.m[6] = -f.y;
-    m.m[10] = -f.z;
-    m.m[12] = -dot(s, eye);
-    m.m[13] = -dot(u, eye);
-    m.m[14] = dot(f, eye);
-    m.m[15] = 1.0;
-    return m;
-}
-
-// An OpenGL-style perspective projection.
-vgl_dmat4 perspective(double fovy, double aspect, double near_plane, double far_plane)
-{
-    const double f = 1.0 / std::tan(fovy / 2.0);
-    vgl_dmat4 m{};
-    m.m[0] = f / aspect;
-    m.m[5] = f;
-    m.m[10] = (far_plane + near_plane) / (near_plane - far_plane);
-    m.m[11] = -1.0;
-    m.m[14] = 2.0 * far_plane * near_plane / (near_plane - far_plane);
-    return m;
-}
-
 struct waypoint
 {
     const char* name;
@@ -110,24 +55,12 @@ struct waypoint
 
 vgl_view make_view(const waypoint& w)
 {
-    const vgl_ellipsoid e = vgl::ellipsoid_wgs84_get();
-    const double lat = vgl::degrees_to_radians(w.latitude);
-    const double lon = vgl::degrees_to_radians(w.longitude);
-    const vgl_dvec3 eye = *vgl::ellipsoid_geodetic_to_ecef(e, {lat, lon, w.altitude});
-    const vgl_dvec3 up = normalize(eye);
-    const vgl_dvec3 north{
-        -std::sin(lat) * std::cos(lon), -std::sin(lat) * std::sin(lon), std::cos(lat)};
-    // Look north, tilted down by the pitch.
-    const double p = vgl::degrees_to_radians(w.pitch);
-    const vgl_dvec3 forward{north.x * std::cos(p) - up.x * std::sin(p),
-                            north.y * std::cos(p) - up.y * std::sin(p),
-                            north.z * std::cos(p) - up.z * std::sin(p)};
-    const vgl_dvec3 target{eye.x + forward.x, eye.y + forward.y, eye.z + forward.z};
-    const vgl_dvec3 camera_up = w.pitch > 89.0 ? north : up;
-
+    // Looking north, tilted down by the pitch.
+    const sample::camera c{w.latitude, w.longitude, w.altitude, 0.0, w.pitch};
     auto view = vgl::init<vgl_view>();
-    view.view_matrix = look_at(eye, target, camera_up);
-    view.projection_matrix = perspective(vgl::degrees_to_radians(60.0), 16.0 / 9.0, 1.0, 1e9);
+    view.view_matrix = sample::camera_view_matrix(c);
+    view.projection_matrix =
+        sample::perspective(vgl::degrees_to_radians(60.0), 16.0 / 9.0, 1.0, 1e9);
     view.viewport_width = 1920;
     view.viewport_height = 1080;
     return view;

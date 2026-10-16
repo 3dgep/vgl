@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Jeremiah van Oosten
+
+prefix=${pcfiledir}/@VGL_PC_RELATIVE_PREFIX@
+exec_prefix=${prefix}
+libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
+includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
+
+Name: vgl-gl
+Description: OpenGL 3.3 and OpenGL ES 3.0 backend for vgl
+URL: @PROJECT_HOMEPAGE_URL@
+Version: @PROJECT_VERSION@
+Requires: vgl = @PROJECT_VERSION@
+Cflags: -I${includedir}
+Libs: -L${libdir} -lvgl-gl

@@ -32,6 +32,12 @@ public:
     // memory may be null. size and alignment must match the allocation.
     void deallocate(void* memory, std::size_t size, std::size_t alignment) const noexcept;
 
+    // The interface it allocates through: the host's, or the C heap's.
+    [[nodiscard]] const vgl_allocator_interface& host_interface() const noexcept
+    {
+        return interface_;
+    }
+
     // Allocates and constructs a T. Returns null if allocation fails.
     template <typename T, typename... Args>
     [[nodiscard]] T* create(Args&&... args) const noexcept

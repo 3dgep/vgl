@@ -3,7 +3,7 @@
 //
 // The default thread pool (vgl/defaults.h): worker threads taking tasks from one queue.
 
-#include "defaults/defaults_memory.hpp"
+#include "common/host_memory.hpp"
 
 #include <vgl/defaults.h>
 
@@ -12,7 +12,7 @@
 #include <mutex>
 #include <thread>
 
-using vgl::defaults::memory;
+using vgl::common::memory;
 
 namespace
 {
@@ -141,14 +141,13 @@ vgl_thread_pool_create(const vgl_thread_pool_create_info* info_in, vgl_thread_po
     }
     *out_pool = nullptr;
     vgl_thread_pool_create_info info;
-    vgl_result r =
-        vgl::defaults::read_versioned(info_in, sizeof(vgl_thread_pool_create_info), info);
+    vgl_result r = vgl::common::read_versioned(info_in, sizeof(vgl_thread_pool_create_info), info);
     if (r != VGL_RESULT_SUCCESS)
     {
         return r;
     }
     memory m;
-    r = vgl::defaults::make_memory(info.allocator, m);
+    r = vgl::common::make_memory(info.allocator, m);
     if (r != VGL_RESULT_SUCCESS)
     {
         return r;

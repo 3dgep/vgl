@@ -65,7 +65,40 @@ VGL_API vgl_result vgl_context_texture_formats_set(vgl_context* context,
                                                    uint32_t format_count);
 
 /* ---------------------------------------------------------------------------------------- */
-/* Resources (section 4)                                                                    */
+/* Depth conventions (section 8)                                                            */
+/* ---------------------------------------------------------------------------------------- */
+
+/*
+ * How the globe's depth is written and compared. The host owns the depth buffer and the
+ * projection, and chooses the convention when it creates a backend; geometry it draws with
+ * the globe uses the same one, so that the two depth-test against each other.
+ */
+typedef enum vgl_depth_convention
+{
+    /*
+     * The default, and available everywhere. The shaders write log2(1 + w) / log2(1 + far) as
+     * window depth, for the camera distance w and the far distance given when drawing
+     * (VGL_LOGARITHMIC_DEPTH_FAR_DEFAULT unless set), so the projection's near and far planes
+     * do not matter. Depth is compared with LESS and cleared to 1.
+     */
+    VGL_DEPTH_CONVENTION_LOGARITHMIC = 0,
+    /*
+     * The host's projection maps the near plane to 1 and the far plane (ideally at infinity)
+     * to 0, in a depth range from 0 to 1. Depth is compared with GREATER and cleared to 0,
+     * ideally in a 32-bit floating-point buffer. OpenGL needs clip control for it.
+     */
+    VGL_DEPTH_CONVENTION_REVERSED_Z = 1,
+    /* The host's projection as it is, compared with LESS. Small scenes only: at planetary
+     * scale, distant terrain z-fights. */
+    VGL_DEPTH_CONVENTION_CONVENTIONAL = 2,
+    VGL_DEPTH_CONVENTION_MAX_ENUM = 0x7FFFFFFF
+} vgl_depth_convention;
+
+/* The far distance of the logarithmic convention when the host sets none, in metres. */
+#define VGL_LOGARITHMIC_DEPTH_FAR_DEFAULT 1.0e8
+
+/* ---------------------------------------------------------------------------------------- */
+/* Resources (section 4)                                                                  */
 /* ---------------------------------------------------------------------------------------- */
 
 typedef struct vgl_tile_id
