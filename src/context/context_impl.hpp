@@ -396,11 +396,11 @@ struct vgl_frame
 struct vgl_context
 {
     explicit vgl_context(const vgl::internal::allocator& a) noexcept
-        : memory(a), decompressor(a), outstanding(a), packs(a), pending(a), selected(a), wanted(a),
-          boxes(a), meshes(a), resources(a), index_lists(a), drawn(a), frame_destroys(a),
-          frame_index_lists(a), frame_meshes(a), frame_textures(a), frame_draw(a), frame_layers(a),
-          frame_offered(a), frame_selected(a), frame_drawn(a), frame_tiles(a), frame_ready(a),
-          frame_counts(a), frame_owner(a), frame_candidates(a)
+        : memory(a), decompressor(a), outstanding(a), packs(a), pending(a), selected(a),
+          prefetched(a), wanted(a), boxes(a), meshes(a), resources(a), index_lists(a), drawn(a),
+          frame_destroys(a), frame_index_lists(a), frame_meshes(a), frame_textures(a),
+          frame_draw(a), frame_layers(a), frame_offered(a), frame_selected(a), frame_drawn(a),
+          frame_tiles(a), frame_ready(a), frame_counts(a), frame_owner(a), frame_candidates(a)
     {
     }
 
@@ -428,6 +428,9 @@ struct vgl_context
     vgl_view host_view{}; // As the host set it, for vgl_context_view_get.
     vgl::internal::view_state view;
     vgl::internal::vector<vgl::internal::selected_tile> selected; // For the view, this frame.
+    // Coarser tiles whose meshes build, but which are not drawn yet: until they are ready, finer
+    // tiles inside them stand in, where the last frame drew finer terrain.
+    vgl::internal::vector<vgl::internal::selected_tile> prefetched;
     vgl::internal::vector<vgl::internal::load_request> wanted;
     vgl::internal::u64_map<vgl::internal::cached_box> boxes;  // By tile key.
     vgl::internal::u64_map<vgl::internal::mesh_state> meshes; // By tile key.

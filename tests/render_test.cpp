@@ -564,6 +564,60 @@ TEST_CASE(new_regions_are_covered_from_their_first_frame)
     CHECK(placeholders);
 }
 
+TEST_CASE(zooming_out_leaves_no_holes)
+{
+    // Climbing away while panning, with mesh tasks that run every third frame and one real mesh
+    // uploaded per frame, with and without a tight GPU budget: every selected tile is covered
+    // in every frame. A tile's real mesh finishing after its placeholder was created must not
+    // throw the placeholder away while the real mesh waits for its upload.
+    for (const std::uint64_t gpu_budget : {std::uint64_t{0}, std::uint64_t{1} << 20})
+    {
+        manual_tasks tasks;
+        fixture f(gpu_budget, 0, false, &tasks);
+        REQUIRE(f.ctx != nullptr);
+        fake_gpu gpu;
+        const position start = inside({3, 7, 3}, 0.5, 0.5);
+        f.look(start.lat, start.lon, 20000.0);
+        for (int i = 0; i < 200; ++i)
+        {
+            REQUIRE(vgl_context_update(f.ctx, nullptr) == VGL_RESULT_SUCCESS);
+            tasks.run_all();
+            gpu.frame(f.ctx);
+        }
+        vgl_frame_begin_info info{};
+        info.struct_size = sizeof(info);
+        info.upload_budget = 1;
+        double altitude = 20000.0;
+        for (int i = 0; i < 150; ++i)
+        {
+            // Tilted, looking north at a point twice the altitude ahead, as when panning back.
+            altitude *= 1.05;
+            const double lat = start.lat - 0.02 * i;
+            const vgl::internal::ellipsoid e;
+            const dvec3 eye = e.to_ecef(
+                {vgl::internal::radians(lat), vgl::internal::radians(start.lon), altitude});
+            const dvec3 ahead = e.to_ecef({vgl::internal::radians(lat + 2.0 * altitude / 111000.0),
+                                           vgl::internal::radians(start.lon),
+                                           0.0});
+            const vgl_view v =
+                make_view(look_at(eye, ahead, eye),
+                          perspective_gl(vgl::internal::radians(60.0), 16.0 / 9.0, 1.0, 1e9));
+            REQUIRE(vgl_context_view_set(f.ctx, &v) == VGL_RESULT_SUCCESS);
+            REQUIRE(vgl_context_update(f.ctx, nullptr) == VGL_RESULT_SUCCESS);
+            if (i % 3 == 2)
+            {
+                tasks.run_all();
+            }
+            gpu.frame(f.ctx, &info);
+            CHECK(disjoint(gpu.items));
+            for (const selected_tile& s : f.ctx->selected)
+            {
+                CHECK_NEAR(coverage(s.id, gpu.items), 1.0, 1e-12);
+            }
+        }
+    }
+}
+
 TEST_CASE(uploads_respect_the_upload_budget)
 {
     fixture f;

@@ -435,7 +435,20 @@ void install_mesh(vgl_context& ctx, mesh_job* job) noexcept
             fill_geoid(ctx, *installed);
             // The map may have moved the tile's state; find it again.
             mesh_state* m = ctx.meshes.find(tile_key(job->id));
-            if (m->next != 0)
+            const gpu_resource* waiting = m->next != 0 ? ctx.resources.find(m->next) : nullptr;
+            if (waiting != nullptr && waiting->current == gpu_resource::state::resident &&
+                !waiting->garbage)
+            {
+                // Created already, and drawn perhaps, as a placeholder is in the frame that
+                // creates it: it becomes the current mesh until this one is created, instead of
+                // leaving the tile with nothing to draw meanwhile.
+                if (m->current != 0)
+                {
+                    retire_resource(ctx, m->current);
+                }
+                m->current = m->next;
+            }
+            else if (m->next != 0)
             {
                 retire_resource(ctx, m->next); // Superseded before it was created.
             }
@@ -460,8 +473,14 @@ void handle_mesh_built(vgl_context& ctx, mesh_job* job) noexcept
 void build_meshes(vgl_context& ctx, std::chrono::steady_clock::time_point deadline) noexcept
 {
     bool started = false;
-    for (const selected_tile& s : ctx.selected)
+    // The selected tiles, then the coarser ones waiting to replace finer tiles, which need no
+    // placeholders: they are not drawn until their own meshes are ready.
+    const std::size_t total = ctx.selected.size() + ctx.prefetched.size();
+    for (std::size_t index = 0; index < total; ++index)
     {
+        const bool drawn = index < ctx.selected.size();
+        const selected_tile& s =
+            drawn ? ctx.selected[index] : ctx.prefetched[index - ctx.selected.size()];
         const std::uint64_t key = tile_key(s.id);
         mesh_state* m = ctx.meshes.find(key);
         if (m == nullptr)
@@ -484,7 +503,7 @@ void build_meshes(vgl_context& ctx, std::chrono::steady_clock::time_point deadli
         const gpu_resource* latest = latest_mesh(ctx, s.id);
         // A tile with no mesh at all gets a placeholder at once, whatever the time: it stands
         // in until its own mesh is built and created, instead of a hole (section 7.3).
-        if (latest == nullptr)
+        if (latest == nullptr && drawn)
         {
             if (mesh_job* stand_in = prepare(ctx, s, true); stand_in != nullptr)
             {

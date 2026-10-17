@@ -334,9 +334,11 @@ void choose_uploads(vgl_context& ctx, std::uint64_t budget) noexcept
     vector<std::uint64_t>& candidates = ctx.frame_candidates;
     candidates.clear();
     const std::size_t selected = ctx.has_view ? ctx.selected.size() : 0;
-    for (std::size_t i = 0; i < selected; ++i)
+    const std::size_t prefetched = ctx.has_view ? ctx.prefetched.size() : 0;
+    for (std::size_t i = 0; i < selected + prefetched; ++i)
     {
-        const mesh_state* m = ctx.meshes.find(tile_key(ctx.selected[i].id));
+        const tile_id& t = i < selected ? ctx.selected[i].id : ctx.prefetched[i - selected].id;
+        const mesh_state* m = ctx.meshes.find(tile_key(t));
         const gpu_resource* r =
             m != nullptr && m->next != 0 ? ctx.resources.find(m->next) : nullptr;
         if (is_live(r, gpu_resource::state::pending) && !candidates.push_back(m->next))
@@ -434,8 +436,14 @@ void choose_destroys(vgl_context& ctx) noexcept
             // Textures that selected tiles want stay for the same reason.
             const bool idle =
                 is_live(&r, gpu_resource::state::resident) && r.last_drawn < ctx.render_frame;
-            const bool evictable = (r.resource_kind == gpu_resource::kind::mesh &&
-                                    ctx.frame_selected.find(tile_key(r.tile)) == nullptr) ||
+            // So do the meshes of coarser tiles waiting to replace finer ones, which the last
+            // update used as it did the selected tiles'.
+            const mesh_state* m = r.resource_kind == gpu_resource::kind::mesh
+                                      ? ctx.meshes.find(tile_key(r.tile))
+                                      : nullptr;
+            const bool in_use = ctx.frame_selected.find(tile_key(r.tile)) != nullptr ||
+                                (m != nullptr && m->last_used + 1 == ctx.frame);
+            const bool evictable = (r.resource_kind == gpu_resource::kind::mesh && !in_use) ||
                                    (r.resource_kind == gpu_resource::kind::texture &&
                                     r.last_wanted < ctx.render_frame);
             if (idle && evictable)

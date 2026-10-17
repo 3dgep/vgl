@@ -81,7 +81,21 @@ public:
     void run() noexcept
     {
         ctx_.selected.clear();
+        ctx_.prefetched.clear();
         ctx_.wanted.clear();
+        // The tiles that the last frame drew finer terrain inside.
+        drawn_below_.clear();
+        for (const drawn_tile& d : ctx_.drawn)
+        {
+            for (std::uint32_t level = d.id.level; level-- > 0;)
+            {
+                const std::uint64_t key = tile_key(tile_ancestor(d.id, level));
+                if (drawn_below_.find(key) != nullptr || drawn_below_.insert(key, 1) == nullptr)
+                {
+                    break; // Its ancestors are in already, or out of memory.
+                }
+            }
+        }
         for (std::uint32_t x = 0; x < tile_columns(0); ++x)
         {
             visit({0, x, 0}, source{});
@@ -207,6 +221,16 @@ private:
             {t, s.id, s.pack != nullptr ? s.pack->id : 0, s.min_height, s.max_height}));
     }
 
+    // True if a tile has a mesh of its own data on the GPU, not a placeholder.
+    bool mesh_ready(const tile_id& t) const noexcept
+    {
+        const mesh_state* m = ctx_.meshes.find(tile_key(t));
+        const gpu_resource* r =
+            m != nullptr && m->current != 0 ? ctx_.resources.find(m->current) : nullptr;
+        return r != nullptr && r->current == gpu_resource::state::resident && !r->garbage &&
+               !r->placeholder;
+    }
+
     // The recursion is at most max_tile_level deep.
     // NOLINTNEXTLINE(misc-no-recursion)
     void visit(const tile_id& t, const source& parent) noexcept
@@ -248,8 +272,23 @@ private:
                                                 distance_to_box(ctx_.view.eye, b));
         // Refine only from loaded data, so that detail arrives level by level.
         const bool settled = d.tile != nullptr || !d.loading;
-        const bool leaf = error <= ctx_.view.max_error || !settled || d.children == 0 ||
-                          t.level == max_tile_level;
+        const bool can_refine = settled && d.children != 0 && t.level != max_tile_level;
+        // A coarser tile replaces the finer terrain that the last frame drew inside it only
+        // once its own mesh is ready. Until then its children are selected instead, which keep
+        // that finer terrain and fill the rest with placeholders, while its mesh builds: the
+        // finer tiles alone would leave holes where they do not cover it.
+        bool coarse_waits = false;
+        if (error <= ctx_.view.max_error && can_refine && !mesh_ready(t) &&
+            drawn_below_.find(tile_key(t)) != nullptr)
+        {
+            coarse_waits = true;
+            static_cast<void>(ctx_.prefetched.push_back({t,
+                                                         own.id,
+                                                         own.pack != nullptr ? own.pack->id : 0,
+                                                         own.min_height,
+                                                         own.max_height}));
+        }
+        const bool leaf = (error <= ctx_.view.max_error && !coarse_waits) || !can_refine;
         if (leaf && !probe(t, min_height, max_height))
         {
             return;
@@ -274,6 +313,7 @@ private:
     vgl_context& ctx_; // NOLINT(cppcoreguidelines-avoid-const-or-ref-data-members)
     horizon_occluder occluder_;
     vector<load_request> local_{ctx_.memory}; // Requests of the tile being visited.
+    u64_map<std::uint8_t> drawn_below_{ctx_.memory};
     cached_box scratch_;
 };
 

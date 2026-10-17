@@ -285,7 +285,13 @@ The pack format has its own version number, independent of the library version.
   creates it until its own mesh is ready. Meshes of tiles with nothing of their own to draw
   upload before finer meshes elsewhere, which rebuilding as data arrived could otherwise keep
   waiting for dozens of frames. A tile drawn in the last frame whose mesh was replaced in the
-  same frame stays with its new mesh, instead of leaving its children bare.
+  same frame stays with its new mesh, instead of leaving its children bare. A tile's real mesh
+  finishing after its placeholder was created no longer throws the placeholder away while the
+  real mesh waits for its upload, which left tile-sized holes while the camera climbed or
+  panned. Coarsening no longer leaves holes either: a coarser tile waiting for its mesh kept only
+  the last frame's finer tiles inside it, which often covered half or a quarter of it. Until its
+  mesh is resident, its children are selected instead, keeping the finer terrain and filling
+  the rest with placeholders, while its mesh builds and uploads, safe from eviction.
 - A finishing decode or mesh task could notify a condition variable of the context's shared
   state after `vgl_context_destroy` had freed it. ThreadSanitizer found it in the headless
   sample; the task now notifies while it holds the lock.
