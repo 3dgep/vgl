@@ -114,8 +114,10 @@ void fallbacks(vgl_context& ctx,
     }
 }
 
-// Makes the job for a selected tile, with its heights. Returns null if out of memory.
-mesh_job* prepare(vgl_context& ctx, const selected_tile& s) noexcept
+// Makes the job for a selected tile, with its heights. A placeholder has the smallest grid,
+// interpolated from the same heights, so that it is cheap enough to build at once. Returns null
+// if out of memory.
+mesh_job* prepare(vgl_context& ctx, const selected_tile& s, bool placeholder) noexcept
 {
     vgl_pack* p = s.pack_id != 0 ? pack_by_id(ctx, s.pack_id) : nullptr;
     tile_state* data = p != nullptr ? ready_tile(*p, s.source) : nullptr;
@@ -142,6 +144,10 @@ mesh_job* prepare(vgl_context& ctx, const selected_tile& s) noexcept
             static_cast<std::uint32_t>(std::ceil(tile_span(s.id.level) / ellipsoid_spacing)) + 1;
         grid = std::clamp(wanted, min_mesh_grid, max_ellipsoid_grid);
     }
+    if (placeholder)
+    {
+        grid = min_mesh_grid;
+    }
 
     auto* job = ctx.memory.create<mesh_job>();
     const std::size_t count = static_cast<std::size_t>(grid) * grid;
@@ -158,7 +164,7 @@ mesh_job* prepare(vgl_context& ctx, const selected_tile& s) noexcept
 
     const double step = tile_span(s.id.level) / (grid - 1);
     float* heights = job->heights.data();
-    const bool exact = p != nullptr && cells >= min_mesh_grid - 1;
+    const bool exact = !placeholder && p != nullptr && cells >= min_mesh_grid - 1;
     const std::uint32_t depth = s.id.level - s.source.level;
     const std::uint32_t ox = exact ? (s.id.x - (s.source.x << depth)) * cells : 0;
     const std::uint32_t oy = exact ? (s.id.y - (s.source.y << depth)) * cells : 0;
@@ -200,6 +206,7 @@ mesh_job* prepare(vgl_context& ctx, const selected_tile& s) noexcept
     job->source = p != nullptr ? s.source : s.id;
     job->pack_id = p != nullptr ? p->id : 0;
     job->grid = grid;
+    job->placeholder = placeholder;
     job->shape = ctx.shape;
     const double error = tile_geometric_error(ctx.shape, s.id.level, n);
     job->skirt_height = lowest - error;
@@ -395,12 +402,13 @@ void retire_resource(vgl_context& ctx, std::uint64_t id) noexcept
     }
 }
 
-void handle_mesh_built(vgl_context& ctx, mesh_job* job) noexcept
+namespace
 {
-    mesh_state* m = ctx.meshes.find(tile_key(job->id));
-    if (m != nullptr && m->building)
+
+// Makes a built mesh the tile's next one, superseding any next one not yet created.
+void install_mesh(vgl_context& ctx, mesh_job* job) noexcept
+{
     {
-        m->building = false;
         gpu_resource r;
         r.resource_kind = gpu_resource::kind::mesh;
         r.tile = job->id;
@@ -415,6 +423,7 @@ void handle_mesh_built(vgl_context& ctx, mesh_job* job) noexcept
         r.vertices = std::move(job->vertices);
         r.samples = std::move(job->samples);
         r.sample_grid = job->sample_grid;
+        r.placeholder = job->placeholder;
         // The index list first: it may take the next resource id.
         const bool has_list = ensure_index_list(ctx, job->grid);
         const std::uint64_t id = ctx.next_resource_id;
@@ -424,14 +433,26 @@ void handle_mesh_built(vgl_context& ctx, mesh_job* job) noexcept
             gpu_resource* installed = ctx.resources.find(id);
             ctx.cpu_used += installed->cpu_bytes();
             fill_geoid(ctx, *installed);
-            // The map may have moved m; find it again.
-            m = ctx.meshes.find(tile_key(job->id));
+            // The map may have moved the tile's state; find it again.
+            mesh_state* m = ctx.meshes.find(tile_key(job->id));
             if (m->next != 0)
             {
                 retire_resource(ctx, m->next); // Superseded before it was created.
             }
             m->next = id;
         }
+    }
+}
+
+} // namespace
+
+void handle_mesh_built(vgl_context& ctx, mesh_job* job) noexcept
+{
+    mesh_state* m = ctx.meshes.find(tile_key(job->id));
+    if (m != nullptr && m->building)
+    {
+        m->building = false;
+        install_mesh(ctx, job);
     }
     free_mesh_job(ctx.memory, job);
 }
@@ -461,13 +482,26 @@ void build_meshes(vgl_context& ctx, std::chrono::steady_clock::time_point deadli
             }
         }
         const gpu_resource* latest = latest_mesh(ctx, s.id);
-        const bool current =
-            latest != nullptr && latest->source == s.source && latest->pack_id == s.pack_id;
+        // A tile with no mesh at all gets a placeholder at once, whatever the time: it stands
+        // in until its own mesh is built and created, instead of a hole (section 7.3).
+        if (latest == nullptr)
+        {
+            if (mesh_job* stand_in = prepare(ctx, s, true); stand_in != nullptr)
+            {
+                stand_in->run();
+                install_mesh(ctx, stand_in);
+                free_mesh_job(ctx.memory, stand_in);
+            }
+            m = ctx.meshes.find(key); // The map may have moved it.
+            latest = latest_mesh(ctx, s.id);
+        }
+        const bool current = latest != nullptr && !latest->placeholder &&
+                             latest->source == s.source && latest->pack_id == s.pack_id;
         if (current || m->building || (started && std::chrono::steady_clock::now() >= deadline))
         {
             continue;
         }
-        mesh_job* job = prepare(ctx, s);
+        mesh_job* job = prepare(ctx, s, false);
         if (job == nullptr)
         {
             continue;

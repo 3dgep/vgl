@@ -188,16 +188,16 @@ typedef struct vgl_texture_data
 
 - The consumer applies the lists in a fixed order: destroys, index lists, meshes, textures. Memory is therefore freed before anything new is created, and a mesh's index list exists before the mesh. Separate lists also spare C consumers a switch over event types.
 - A mesh's index list is created in the same frame or an earlier one. If the consumer cannot create an index list, it cannot create the meshes that use it either, and reports both as failed.
-- A resource appears in the draw list only in frames after the one that created it, and never after its destroy.
+- A resource appears in the draw list from the frame that offers it for creation on, and never after its destroy. The consumer therefore applies the lists before it draws, and reads the draw list and layers after its creates: they carry the handles set in the frame (`vgl_frame_resource_handle_set`), including those of resources created in it. A draw item whose mesh or index list the consumer could not create in that frame is skipped. Drawing what a frame creates means a region is never empty while its first meshes upload: a newly selected tile's placeholder, offered first (section 4.3), is drawn in the very frame that creates it.
 - After `vgl_frame_end`, the core treats every create as done, unless the consumer called `vgl_frame_resource_failed`. A failed resource is offered again in a later frame, and the failure is logged.
 - Destroying the context destroys none of the consumer's objects; the consumer frees them itself.
 - Pointers in these structures are followed by `VGL_POINTER_PADDING`, so that every structure has the same layout, without implicit padding, on 32-bit and 64-bit targets (C API conventions, section 8.2).
 
 ### 4.3 Upload budget and the GPU budget
 
-- **Upload budget.** A frame offers resources to create up to `upload_budget` bytes, coarsest tiles first, so a large view change spreads its uploads over several frames instead of one long one.
+- **Upload budget.** A frame offers resources to create up to `upload_budget` bytes, so a large view change spreads its uploads over several frames instead of one long one. Placeholders come first, outside the budget: a few kilobytes each (design document, section 7.3). Then come the meshes of tiles that have nothing of their own to draw but a placeholder, so that a stream of finer data elsewhere cannot keep them waiting, and then the rest, coarsest tiles first.
 - **GPU budget.** `vgl_context_create_info` has a `gpu_budget` (0 selects 512 MiB). The core adds up the sizes of the resources it has asked the consumer to create. While the total exceeds the budget, it destroys meshes and textures not drawn in the current frame, least recently drawn first. Meshes of selected tiles, and the textures selected tiles want, are exempt even when they are not drawn yet: they are waiting for the rest of their region, and evicting them would keep it from ever arriving. Index lists are small, and stay until a reset. The consumer never decides what to evict; it only applies the destroy list.
-- **No holes.** A region keeps what it drew last frame until all the resources that replace it are resident, the same rule selection follows for loading (design document, section 7.3).
+- **No holes.** A region keeps what it drew last frame until all the resources that replace it are resident or created in the frame, the same rule selection follows for loading (design document, section 7.3); a tile drawn last frame whose mesh has since been replaced by a newer one of its own keeps drawing with that. A region that drew nothing last frame is drawn with its tiles' placeholders.
 
 ### 4.4 CPU copies and device loss
 

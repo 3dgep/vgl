@@ -286,7 +286,9 @@ VGL_API vgl_result vgl_frame_meshes_get(const vgl_frame* frame,
 VGL_API vgl_result vgl_frame_textures_get(const vgl_frame* frame,
                                           const vgl_texture_data** out_textures,
                                           uint32_t* out_count);
-/* Tiles to draw, nearest first, draw_item_size bytes apart. */
+/* Tiles to draw, nearest first, draw_item_size bytes apart. Read it after applying the
+ * frame's creates: items may draw resources created in this frame, and carry the handles set
+ * for them. Skip an item whose mesh or index list could not be created. */
 VGL_API vgl_result vgl_frame_draw_list_get(const vgl_frame* frame,
                                            const vgl_draw_item** out_items,
                                            uint32_t* out_count);

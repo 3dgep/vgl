@@ -237,6 +237,11 @@ The pack format has its own version number, independent of the library version.
   are unchanged.
 - **Breaking:** `vgl_mesh_data` has the mesh's samples appended, so consumers stepping through
   the list of meshes must be built against the new header.
+- **Breaking:** a frame's draw list may draw resources that the frame offers for creation
+  (render interface, section 4.2), so that placeholders cover a region from its first frame.
+  Consumers apply the resource lists before reading the draw list and layers, which then carry
+  the handles set in the frame, and skip items whose mesh or index list they could not create.
+  The OpenGL backend already did both.
 - **Breaking:** the C++ wrapper for `vgl/base.h` moved from `vgl/vgl.hpp` to `vgl/base.hpp`.
   `vgl/vgl.hpp` now includes every core wrapper header.
 - The allocator interface entry `free` in the C API conventions is now `deallocate`.
@@ -273,6 +278,14 @@ The pack format has its own version number, independent of the library version.
 
 ### Fixed
 
+- Regions could stay empty, showing space, while their meshes waited: after a jump, where tiles
+  came into view, and while slow reads (such as packs in WSL, read from Windows) kept data
+  arriving. A newly selected tile now gets a placeholder at once, a 9 × 9 mesh interpolated from
+  the same heights, uploaded first and outside the upload budget, and drawn in the frame that
+  creates it until its own mesh is ready. Meshes of tiles with nothing of their own to draw
+  upload before finer meshes elsewhere, which rebuilding as data arrived could otherwise keep
+  waiting for dozens of frames. A tile drawn in the last frame whose mesh was replaced in the
+  same frame stays with its new mesh, instead of leaving its children bare.
 - A finishing decode or mesh task could notify a condition variable of the context's shared
   state after `vgl_context_destroy` had freed it. ThreadSanitizer found it in the headless
   sample; the task now notifies while it holds the lock.

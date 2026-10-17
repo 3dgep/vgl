@@ -5,10 +5,14 @@
 // consumer destroys, creates and draws:
 //
 // 1. Tiles whose next mesh is resident switch to it, retiring the old one.
-// 2. The draw set: the selected tiles whose meshes are resident, except where a tile drawn in
-//    the last frame still covers a region whose replacements are not all resident yet.
-// 3. Creates: meshes of selected tiles waiting for upload, with the index lists they need,
-//    and the textures selected tiles want, coarsest first, within the upload budget.
+// 2. Creates: meshes of selected tiles waiting for upload, with the index lists they need,
+//    and the textures selected tiles want, within the upload budget: first placeholders, which
+//    are small and outside the budget, then the meshes of tiles that have nothing of their own
+//    to draw but a placeholder, then coarsest first.
+// 3. The draw set: the selected tiles whose meshes are resident or created in this frame,
+//    except where a tile drawn in the last frame still covers a region whose replacements are
+//    not all ready yet. A tile with only its placeholder is drawn with it where nothing else
+//    covers it.
 // 4. Destroys: retired resources, and resources neither drawn nor wanted now, least recently
 //    drawn first, while the GPU budget is exceeded.
 // 5. Draw items, nearest first, with model-view matrices composed in double precision, and
@@ -43,6 +47,33 @@ gpu_resource* index_list_of(vgl_context& ctx, const gpu_resource& mesh) noexcept
 {
     const std::uint64_t* id = ctx.index_lists.find(mesh.grid);
     return id != nullptr ? ctx.resources.find(*id) : nullptr;
+}
+
+// True if a mesh can be drawn in this frame: it and its index list are resident, or offered
+// for creation in this frame (render interface, section 4.2).
+bool drawable_now(vgl_context& ctx, std::uint64_t id) noexcept
+{
+    const gpu_resource* r = id != 0 ? ctx.resources.find(id) : nullptr;
+    const auto usable = [](const gpu_resource* x) {
+        return is_live(x, gpu_resource::state::resident) ||
+               is_live(x, gpu_resource::state::offered);
+    };
+    return usable(r) && usable(index_list_of(ctx, *r));
+}
+
+// The newest mesh a selected tile can draw in this frame, or 0.
+std::uint64_t newest_mesh(vgl_context& ctx, const tile_id& t) noexcept
+{
+    const mesh_state* m = ctx.meshes.find(tile_key(t));
+    if (m == nullptr)
+    {
+        return 0;
+    }
+    if (drawable_now(ctx, m->next))
+    {
+        return m->next;
+    }
+    return drawable_now(ctx, m->current) ? m->current : 0;
 }
 
 // True if a mesh can be drawn: it and its index list are resident.
@@ -82,7 +113,8 @@ bool decide_draw_set(vgl_context& ctx) noexcept
         return false;
     }
 
-    // Which selected tiles can be drawn with their own mesh.
+    // Which selected tiles can be drawn with their own mesh (1), rather than a placeholder or
+    // nothing (0). A tile that waits for the last frame's tiles inside it becomes 2.
     for (std::size_t i = 0; i < selected; ++i)
     {
         const tile_id& t = ctx.selected[i].id;
@@ -90,8 +122,8 @@ bool decide_draw_set(vgl_context& ctx) noexcept
         {
             return false;
         }
-        const mesh_state* m = ctx.meshes.find(tile_key(t));
-        ctx.frame_ready[i] = m != nullptr && drawable(ctx, m->current) ? 1 : 0;
+        const std::uint64_t mesh = newest_mesh(ctx, t);
+        ctx.frame_ready[i] = mesh != 0 && !ctx.resources.find(mesh)->placeholder ? 1 : 0;
         ctx.frame_owner[i] = none;
     }
     for (std::size_t j = 0; j < previous; ++j)
@@ -127,10 +159,16 @@ bool decide_draw_set(vgl_context& ctx) noexcept
     // Last-frame tiles stay while what replaces them is not all ready.
     for (std::size_t j = 0; j < previous; ++j)
     {
-        const drawn_tile& p = ctx.drawn[j];
+        drawn_tile p = ctx.drawn[j];
         if (!drawable(ctx, p.mesh))
         {
-            continue;
+            // A newer mesh of its own may have replaced it since (step 1): it stays with that.
+            const mesh_state* m = ctx.meshes.find(tile_key(p.id));
+            if (m == nullptr || !drawable(ctx, m->current))
+            {
+                continue;
+            }
+            p.mesh = m->current;
         }
         bool stays = false;
         const std::uint32_t* ancestor = nullptr;
@@ -141,10 +179,10 @@ bool decide_draw_set(vgl_context& ctx) noexcept
         if (ancestor != nullptr)
         {
             // Zooming out: it stays until the coarser tile is ready, which waits meanwhile.
-            stays = (ctx.frame_ready[*ancestor] & 1) == 0;
+            stays = ctx.frame_ready[*ancestor] != 1;
             if (stays)
             {
-                ctx.frame_ready[*ancestor] = 0;
+                ctx.frame_ready[*ancestor] = 2;
             }
         }
         else
@@ -159,18 +197,17 @@ bool decide_draw_set(vgl_context& ctx) noexcept
         }
     }
 
+    // The rest: ready, or else drawn with its placeholder. Both may have been offered in this
+    // very frame, so that a tile's first frame is not a hole (render interface, section 4.2).
     for (std::size_t i = 0; i < selected; ++i)
     {
         const std::uint32_t owner = ctx.frame_owner[i];
         const bool covered = owner != none && ctx.frame_counts[3 * owner + 2] != 0;
-        if (ctx.frame_ready[i] != 0 && !covered)
+        const std::uint64_t mesh =
+            ctx.frame_ready[i] != 2 && !covered ? newest_mesh(ctx, ctx.selected[i].id) : 0;
+        if (mesh != 0 && !ctx.frame_tiles.push_back({ctx.selected[i].id, mesh}))
         {
-            const tile_id& t = ctx.selected[i].id;
-            const mesh_state* m = ctx.meshes.find(tile_key(t));
-            if (!ctx.frame_tiles.push_back({t, m->current}))
-            {
-                return false;
-            }
+            return false;
         }
     }
     return true;
@@ -314,11 +351,31 @@ void choose_uploads(vgl_context& ctx, std::uint64_t budget) noexcept
             static_cast<void>(candidates.push_back(id));
         }
     });
-    // Coarsest first, then oldest.
+    // Placeholders first; then the meshes of tiles with nothing of their own to draw, so that a
+    // stream of finer data elsewhere cannot keep them waiting; then coarsest first, then oldest.
+    const auto urgent = [&](const gpu_resource& r) {
+        if (r.resource_kind != gpu_resource::kind::mesh)
+        {
+            return false;
+        }
+        const mesh_state* m = ctx.meshes.find(tile_key(r.tile));
+        return m == nullptr || !drawable(ctx, m->current) ||
+               ctx.resources.find(m->current)->placeholder;
+    };
     std::sort(candidates.begin(), candidates.end(), [&](std::uint64_t a, std::uint64_t b) {
-        const std::uint32_t la = ctx.resources.find(a)->tile.level;
-        const std::uint32_t lb = ctx.resources.find(b)->tile.level;
-        return la != lb ? la < lb : a < b;
+        const gpu_resource& ra = *ctx.resources.find(a);
+        const gpu_resource& rb = *ctx.resources.find(b);
+        if (ra.placeholder != rb.placeholder)
+        {
+            return ra.placeholder;
+        }
+        const bool ua = urgent(ra);
+        const bool ub = urgent(rb);
+        if (ua != ub)
+        {
+            return ua;
+        }
+        return ra.tile.level != rb.tile.level ? ra.tile.level < rb.tile.level : a < b;
     });
     std::uint64_t used = 0;
     bool any = false;
@@ -347,7 +404,7 @@ void choose_uploads(vgl_context& ctx, std::uint64_t budget) noexcept
         }
         const bool list_needed = list->current == gpu_resource::state::pending;
         const std::uint64_t cost = mesh->bytes + (list_needed ? list->bytes : 0);
-        if (any && used + cost > budget)
+        if (any && used + cost > budget && !mesh->placeholder)
         {
             break;
         }
@@ -638,6 +695,8 @@ extern "C" VGL_API vgl_result vgl_context_frame_begin(vgl_context* context,
         settings.draw_item_size == 0 ? sizeof(vgl_draw_item) : settings.draw_item_size;
 
     promote(*ctx);
+    mark_wanted(*ctx);
+    choose_uploads(*ctx, upload_budget);
     if (!decide_draw_set(*ctx))
     {
         // Draw what was drawn before, as far as it still exists.
@@ -651,8 +710,6 @@ extern "C" VGL_API vgl_result vgl_context_frame_begin(vgl_context* context,
         }
     }
     mark_drawn(*ctx);
-    mark_wanted(*ctx);
-    choose_uploads(*ctx, upload_budget);
     choose_destroys(*ctx);
     if (!write_draw_items(*ctx, view, eye))
     {
@@ -748,7 +805,23 @@ extern "C" VGL_API vgl_result vgl_frame_draw_list_get(const vgl_frame* frame,
     {
         return VGL_RESULT_INVALID_ARGUMENT;
     }
-    const vgl_context& ctx = *frame->context;
+    vgl_context& ctx = *frame->context;
+    // Handles set since the frame began, for resources created in it.
+    for (std::uint32_t k = 0; k < ctx.frame_draw_count; ++k)
+    {
+        std::byte* item = ctx.frame_draw.data() + std::size_t{k} * ctx.frame_draw_stride;
+        for (const auto& [id_at, handle_at] :
+             {std::pair{offsetof(vgl_draw_item, mesh), offsetof(vgl_draw_item, mesh_handle)},
+              std::pair{offsetof(vgl_draw_item, index_list),
+                        offsetof(vgl_draw_item, index_list_handle)}})
+        {
+            std::uint64_t id = 0;
+            std::memcpy(&id, item + id_at, sizeof(id));
+            const gpu_resource* r = ctx.resources.find(id);
+            const std::uint64_t handle = r != nullptr ? r->handle : 0;
+            std::memcpy(item + handle_at, &handle, sizeof(handle));
+        }
+    }
     *out_items = reinterpret_cast<const vgl_draw_item*>(ctx.frame_draw.data());
     *out_count = ctx.frame_draw_count;
     return VGL_RESULT_SUCCESS;

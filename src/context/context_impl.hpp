@@ -123,7 +123,8 @@ struct mesh_job : async_item
     std::uint32_t grid = 0;
     ellipsoid shape;
     double skirt_height = 0.0;
-    double tolerance = 0.0; // Of a coarser grid, in metres; 0 keeps every sample.
+    double tolerance = 0.0;   // Of a coarser grid, in metres; 0 keeps every sample.
+    bool placeholder = false; // A small stand-in, built at once, until the tile's mesh is ready.
     buffer<float> heights;
     buffer<dvec3> scratch;
     buffer<tile_vertex> vertices;
@@ -205,6 +206,7 @@ struct gpu_resource
     // south-east), once a geoid pack has a tile there.
     std::array<float, 4> geoid = {};
     bool has_geoid = false;
+    bool placeholder = false;     // A small stand-in until the tile's own mesh is ready.
     buffer<tile_vertex> vertices; // Until resident.
     buffer<tile_sample> samples;  // Until resident.
     std::uint32_t sample_grid = 0;

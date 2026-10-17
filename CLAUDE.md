@@ -27,7 +27,7 @@ Planning is complete, and milestone M0 (design document, section 14) is done: al
 - **Portability:** the runtime core uses only the C and C++ standard libraries: no operating system APIs, `std::filesystem` or `std::thread` (design document, section 4).
 - **License headers:** every source file starts with `SPDX-License-Identifier: MIT` and `Copyright (c) 2026 Jeremiah van Oosten`.
 - **Commits:** sign off every commit (`git commit -s`) for the Developer Certificate of Origin.
-- **Checks:** after a change, build and test on Windows only. Run the Linux builds (GCC and Clang) and clang-tidy only before a commit, to keep small changes quick.
+- **Checks:** after a change, build and test on Windows only, running the tests from the Release build (`ctest -C Release`), which is about four times faster than Debug. Run the Linux builds (GCC and Clang) and clang-tidy only before a commit, to keep small changes quick.
 - **Writing style:** never use em dashes in any text: code comments, documentation, commit messages or replies.
 
 ## Former open questions

@@ -54,12 +54,15 @@ struct fake_gpu
     std::map<std::uint64_t, image> images; // Of the resident textures.
     std::set<std::uint64_t> ever;          // Every id ever created, to check that none is reused.
     std::set<std::uint64_t> fail;          // Ids to report as failed, once.
+    std::set<std::uint64_t> failed_now;    // Ids reported as failed in this frame.
     bool set_handles = false;
 
     // Per frame.
     std::vector<vgl_draw_item> items;
     std::vector<vgl_draw_layer> layers;
     std::size_t meshes_created = 0;
+    std::size_t placeholders_created = 0; // Of the meshes, as the core marks them.
+    vgl_context* context = nullptr;       // Of the frame being applied, if frame() began it.
     std::size_t textures_created = 0;
     std::size_t index_lists_created = 0;
     std::size_t destroyed = 0;
@@ -71,6 +74,7 @@ struct fake_gpu
     void frame(vgl_context* ctx, const vgl_frame_begin_info* info = nullptr)
     {
         vgl_frame* f = nullptr;
+        context = ctx;
         REQUIRE(vgl_context_frame_begin(ctx, info, &f) == VGL_RESULT_SUCCESS);
         apply(f, info);
         CHECK_EQ(vgl_frame_end(f), VGL_RESULT_SUCCESS);
@@ -81,6 +85,8 @@ struct fake_gpu
         items.clear();
         layers.clear();
         meshes_created = 0;
+        placeholders_created = 0;
+        failed_now.clear();
         textures_created = 0;
         index_lists_created = 0;
         destroyed = 0;
@@ -108,6 +114,7 @@ struct fake_gpu
                 CHECK_EQ(vgl_frame_resource_failed(f, d.resource, VGL_RESULT_OUT_OF_MEMORY),
                          VGL_RESULT_SUCCESS);
                 ever.erase(d.resource);
+                failed_now.insert(d.resource);
                 continue;
             }
             resident[d.resource] = {
@@ -140,6 +147,7 @@ struct fake_gpu
                 CHECK_EQ(vgl_frame_resource_failed(f, d.resource, VGL_RESULT_OUT_OF_MEMORY),
                          VGL_RESULT_SUCCESS);
                 ever.erase(d.resource);
+                failed_now.insert(d.resource);
                 continue;
             }
             // Touch every byte, so that a sanitizer sees a bad pointer.
@@ -165,6 +173,9 @@ struct fake_gpu
                                     0,
                                     d.vertex_count};
             ++meshes_created;
+            const gpu_resource* r =
+                context != nullptr ? context->resources.find(d.resource) : nullptr;
+            placeholders_created += r != nullptr && r->placeholder ? 1 : 0;
             if (set_handles)
             {
                 CHECK_EQ(vgl_frame_resource_handle_set(f, d.resource, handle_of(d.resource)),
@@ -183,6 +194,7 @@ struct fake_gpu
                 CHECK_EQ(vgl_frame_resource_failed(f, d.resource, VGL_RESULT_OUT_OF_MEMORY),
                          VGL_RESULT_SUCCESS);
                 ever.erase(d.resource);
+                failed_now.insert(d.resource);
                 continue;
             }
             // A full chain of mip levels, each half the size of the one before.
@@ -228,8 +240,13 @@ struct fake_gpu
             std::memcpy(&item,
                         reinterpret_cast<const std::byte*>(draw) + k * stride,
                         std::min(stride, sizeof(vgl_draw_item)));
+            // Drawn only once created, in this frame or an earlier one; an item of a resource
+            // the consumer could not create in this frame is skipped.
+            if (failed_now.contains(item.mesh) || failed_now.contains(item.index_list))
+            {
+                continue;
+            }
             items.push_back(item);
-            // Drawn only once created, in this frame or an earlier one.
             const auto mesh = resident.find(item.mesh);
             const auto list = resident.find(item.index_list);
             REQUIRE(mesh != resident.end());
@@ -342,7 +359,8 @@ struct fixture
 
     explicit fixture(std::uint64_t gpu_budget = 0,
                      std::uint64_t cpu_budget = 0,
-                     bool with_imagery = false)
+                     bool with_imagery = false,
+                     manual_tasks* tasks = nullptr)
     {
         io.packs["mem://a"] = &pack;
         io.packs["mem://imagery"] = &imagery_pack;
@@ -351,6 +369,7 @@ struct fixture
         info.io = &io.table;
         info.gpu_budget = gpu_budget;
         info.cpu_budget = cpu_budget;
+        info.tasks = tasks != nullptr ? &tasks->table : nullptr;
         if (vgl_context_create(&info, &ctx) == VGL_RESULT_SUCCESS)
         {
             vgl_pack_create_info create{};
@@ -501,6 +520,50 @@ TEST_CASE(transitions_never_leave_holes_or_overlaps)
     }
 }
 
+TEST_CASE(new_regions_are_covered_from_their_first_frame)
+{
+    manual_tasks tasks;
+    fixture f(0, 0, false, &tasks);
+    REQUIRE(f.ctx != nullptr);
+    fake_gpu gpu;
+    // To a region never drawn, with mesh tasks that run only every tenth frame and one real
+    // mesh uploaded per frame: from the frame of the jump on, placeholders, drawn in the frame
+    // that creates them, cover every selected tile, without overlaps, until the tiles' own
+    // meshes arrive.
+    f.look(0.0, -30.0, 2e7);
+    for (int i = 0; i < 100; ++i)
+    {
+        REQUIRE(vgl_context_update(f.ctx, nullptr) == VGL_RESULT_SUCCESS);
+        tasks.run_all();
+        gpu.frame(f.ctx);
+    }
+    vgl_frame_begin_info info{};
+    info.struct_size = sizeof(info);
+    info.upload_budget = 1;
+    // The far side of the globe, hidden from the first view.
+    f.look(0.0, 150.0, 2e5);
+    bool placeholders = false;
+    for (int i = 0; i < 120; ++i)
+    {
+        REQUIRE(vgl_context_update(f.ctx, nullptr) == VGL_RESULT_SUCCESS);
+        if (i % 10 == 9)
+        {
+            tasks.run_all();
+        }
+        gpu.frame(f.ctx, &info);
+        CHECK(disjoint(gpu.items));
+        for (const selected_tile& s : f.ctx->selected)
+        {
+            CHECK_NEAR(coverage(s.id, gpu.items), 1.0, 1e-12);
+        }
+        for (const vgl_draw_item& item : gpu.items)
+        {
+            placeholders = placeholders || f.ctx->resources.find(item.mesh)->placeholder;
+        }
+    }
+    CHECK(placeholders);
+}
+
 TEST_CASE(uploads_respect_the_upload_budget)
 {
     fixture f;
@@ -509,14 +572,14 @@ TEST_CASE(uploads_respect_the_upload_budget)
     f.look(0.0, -30.0, 2e7);
     vgl_frame_begin_info info{};
     info.struct_size = sizeof(info);
-    info.upload_budget = 1; // One mesh per frame.
+    info.upload_budget = 1; // One mesh per frame, besides placeholders, which are outside it.
     std::size_t total = 0;
     for (int i = 0; i < 200; ++i)
     {
         REQUIRE(vgl_context_update(f.ctx, nullptr) == VGL_RESULT_SUCCESS);
         gpu.frame(f.ctx, &info);
-        CHECK(gpu.meshes_created <= 1);
-        total += gpu.meshes_created;
+        CHECK(gpu.meshes_created - gpu.placeholders_created <= 1);
+        total += gpu.meshes_created - gpu.placeholders_created;
     }
     CHECK(total >= f.ctx->selected.size());
     CHECK_EQ(gpu.items.size(), f.ctx->selected.size());
