@@ -258,6 +258,10 @@ Each selected tile gets a mesh, built from heights on a task thread (or in the u
 - **Indices.** Every tile with the same grid size shares one index list: triangles counter-clockwise seen from outside the ellipsoid, in right-handed ECEF.
 - **Memory.** Meshes and their samples count towards the CPU budget until they are uploaded, and are evicted least recently used, like decoded tiles; after upload, only the GPU copy remains (section 7.4). A tile keeps its previous mesh until the new one is built, so finer data replaces coarser without gaps.
 
+#### Picking
+
+`vgl_context_ray_query` intersects a ray with the terrain that height queries see (FR-07): the deepest loaded data of the highest-priority elevation pack with data, and the ellipsoid where there is none. It works from the decoded heights rather than the drawn meshes, which keep no CPU copy once uploaded and are coarser away from the camera; the hit may therefore lie off the drawn surface by about the screen-space error. The ray is clipped to the shells around the lowest and highest terrain, then marched: where it runs higher above the ellipsoid than any loaded height over the region of the finest tile around it, it skips ahead by that clearance, up to the region's edge, since a straight line's height above the ellipsoid changes by at most the distance along it; elsewhere it steps by half the finest sample spacing there, at most a kilometre. The first step that ends under the terrain is bisected to a centimetre. Ridges narrower than a sample may be missed. Like a height query, it starts the reads of finer data at the hit and reports `VGL_RESULT_NOT_READY` until they are done. The samples pick the terrain where a drag, scroll or double-click starts, so the point they grab stays under the cursor.
+
 ### 7.4 Tile lifecycle, cache and memory
 
 Each tile moves through a fixed state machine:

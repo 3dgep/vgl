@@ -835,6 +835,7 @@ int run_interactive(const options& o,
 
     sample::overlay ui;
     sample::globe_navigation nav;
+    nav.terrain(ctx.get()); // Grab the terrain under the cursor.
     window_state in;
     in.s = &s;
     in.ui = &ui;

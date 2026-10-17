@@ -351,7 +351,7 @@ VGL_API vgl_result vgl_pack_opacity_set(vgl_pack* pack, float opacity);
 VGL_API vgl_result vgl_pack_opacity_get(const vgl_pack* pack, float* out_opacity);
 
 /* ---------------------------------------------------------------------------------------- */
-/* Height queries                                                                           */
+/* Height and ray queries                                                                   */
 /* ---------------------------------------------------------------------------------------- */
 
 typedef enum vgl_height_reference
@@ -394,6 +394,51 @@ VGL_API vgl_result vgl_context_height_query(vgl_context* context,
                                             double longitude,
                                             vgl_height_reference reference,
                                             double* out_height);
+
+/* Where a ray meets the terrain. Set struct_size; the library writes the fields that fit
+ * within it. */
+typedef struct vgl_ray_hit
+{
+    uint32_t struct_size;
+    uint32_t reserved;
+    double distance;       /* Along the ray from its origin, in metres. */
+    vgl_dvec3 position;    /* ECEF, in metres. */
+    vgl_geodetic geodetic; /* The same position, with its height above the ellipsoid. */
+} vgl_ray_hit;
+
+/**
+ * Intersects a ray with the terrain (FR-07): picking. The terrain is the one height queries
+ * see, from the deepest data loaded so far, and the ellipsoid where no elevation pack has data.
+ * It may lie a little off the drawn terrain, whose tiles are coarser where they are far from
+ * the camera; under the cursor, by about the screen-space error. Ridges narrower than the
+ * finest loaded sample spacing may be missed. Like a height query, it starts reading the finer
+ * data the hit needs; call vgl_context_update to receive it, and query again.
+ *
+ * @param context    The context.
+ * @param origin     The ray's origin in ECEF, in metres. It may lie anywhere, even under the
+ *                   terrain, which then counts as hit at distance 0.
+ * @param direction  The ray's direction in ECEF; any length but 0.
+ * @param out_hit    Receives the nearest hit. Set its struct_size. Unchanged when there is no
+ *                   hit.
+ *
+ * @retval VGL_RESULT_SUCCESS            The ray meets the terrain, from the finest data the
+ *                                       packs have at the hit.
+ * @retval VGL_RESULT_NOT_READY          The ray meets the terrain, but finer data at the hit,
+ *                                       or a pack's manifest, is still loading; out_hit holds
+ *                                       the best current hit.
+ * @retval VGL_RESULT_NOT_FOUND          The ray misses the globe.
+ * @retval VGL_RESULT_OUT_OF_MEMORY      Starting a read of finer data failed; out_hit holds the
+ *                                       hit. The query may be repeated.
+ * @retval VGL_RESULT_INVALID_ARGUMENT   A pointer is null, out_hit's struct_size is too small,
+ *                                       or origin or direction is not finite or direction is 0.
+ *
+ * @par Thread safety
+ * Context-synchronized.
+ */
+VGL_API vgl_result vgl_context_ray_query(vgl_context* context,
+                                         const vgl_dvec3* origin,
+                                         const vgl_dvec3* direction,
+                                         vgl_ray_hit* out_hit);
 
 /* ---------------------------------------------------------------------------------------- */
 /* Attribution                                                                              */

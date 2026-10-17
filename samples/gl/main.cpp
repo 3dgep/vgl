@@ -1278,6 +1278,7 @@ int run_interactive(const options& o,
     // The window's callbacks first: Dear ImGui chains to them.
     sample::overlay ui;
     sample::globe_navigation nav;
+    nav.terrain(ctx.get()); // Grab the terrain under the cursor.
     sample::glfw_controls controls;
     controls.camera = &s.camera;
     controls.debug = &s.debug;

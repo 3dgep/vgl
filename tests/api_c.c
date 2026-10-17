@@ -42,6 +42,8 @@ static void check_types(void)
     CHECK(sizeof(vgl_log_level) == 4);
     CHECK(offsetof(vgl_view, view_matrix) == 8);
     CHECK(sizeof(vgl_view) == 8 + 2 * sizeof(vgl_dmat4) + 8 + 8);
+    CHECK(sizeof(vgl_ray_hit) == 64);
+    CHECK(offsetof(vgl_ray_hit, geodetic) == 40);
     /* Render interface structures: the same layout on 32-bit and 64-bit targets. */
     CHECK(sizeof(vgl_tile_id) == 16);
     CHECK(sizeof(vgl_index_list_data) == 24);
@@ -165,6 +167,14 @@ static void check_context(void)
     CHECK(failure == VGL_RESULT_NOT_FOUND);
     CHECK(vgl_context_height_query(context, 0.0, 0.0, VGL_HEIGHT_REFERENCE_ELLIPSOID, &height) ==
           VGL_RESULT_NOT_FOUND);
+    {
+        /* Without data, rays meet the ellipsoid. */
+        const vgl_dvec3 origin = {1.0e7, 0.0, 0.0};
+        const vgl_dvec3 direction = {-1.0, 0.0, 0.0};
+        vgl_ray_hit hit = {.struct_size = sizeof(hit)};
+        CHECK(vgl_context_ray_query(context, &origin, &direction, &hit) == VGL_RESULT_SUCCESS);
+        CHECK(hit.distance > 3.6e6 && hit.distance < 3.63e6);
+    }
 
     /* The context's allocator, and its log, for libraries working on its behalf. */
     CHECK(vgl_context_allocator_get(context, &allocator) == VGL_RESULT_SUCCESS);

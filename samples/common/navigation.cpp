@@ -223,6 +223,35 @@ bool globe_navigation::pick(const camera& c, double x, double y, vgl_dvec3& out)
     return true;
 }
 
+bool globe_navigation::grab(const camera& c, double x, double y, vgl_dvec3& out)
+{
+    if (terrain_ != nullptr)
+    {
+        const vgl_dvec3 eye = camera_eye(c);
+        const vgl_dvec3 dir = ray(c, x, y);
+        vgl_ray_hit hit{};
+        hit.struct_size = sizeof(hit);
+        const vgl_result r = vgl_context_ray_query(terrain_, &eye, &dir, &hit);
+        if (VGL_SUCCEEDED(r) && hit.distance > 0.0)
+        {
+            ground_ = std::min(hit.geodetic.height, c.altitude - 1.0);
+            out = hit.position;
+            return true;
+        }
+    }
+    return pick(c, x, y, out);
+}
+
+vgl_dvec3 globe_navigation::grab_anchor(const camera& c, double x, double y)
+{
+    vgl_dvec3 p{};
+    if (grab(c, x, y, p))
+    {
+        return p;
+    }
+    return anchor(c, x, y);
+}
+
 vgl_dvec3 globe_navigation::anchor(const camera& c, double x, double y) const
 {
     // The point under the cursor, or else the one at the centre, or else the one below.
@@ -590,7 +619,7 @@ void globe_navigation::press(drag mode, double x, double y, const camera& c)
     start_ = c;
     holding_ = false;
     vgl_dvec3 p{};
-    if (mode == drag::pan && !pick(c, x, y, p))
+    if (mode == drag::pan && !grab(c, x, y, p))
     {
         mode_ = drag::spin; // Grabbing space turns the globe like a disk instead.
     }
@@ -608,7 +637,7 @@ void globe_navigation::press(drag mode, double x, double y, const camera& c)
     if (mode == drag::orbit)
     {
         // Around the point under the cursor, which stays there; pressed over space, nothing.
-        if (!pick(c, x, y, pivot_))
+        if (!grab(c, x, y, pivot_))
         {
             mode_ = drag::none;
         }
@@ -620,7 +649,7 @@ void globe_navigation::press(drag mode, double x, double y, const camera& c)
     }
     if (mode == drag::zoom)
     {
-        pivot_ = anchor(c, x, y);
+        pivot_ = grab_anchor(c, x, y);
         focus_ = pivot_;
         has_focus_ = true;
         focus_since_ = 0.0;
@@ -783,7 +812,7 @@ void globe_navigation::start_throw(const camera& c)
 void globe_navigation::scroll(double steps, double x, double y, const camera& c)
 {
     settle();
-    zoom_point_ = anchor(c, x, y);
+    zoom_point_ = grab_anchor(c, x, y);
     focus_ = zoom_point_;
     has_focus_ = true;
     focus_since_ = 0.0;
@@ -794,7 +823,7 @@ void globe_navigation::double_click(double x, double y, const camera& c)
 {
     settle();
     vgl_dvec3 p{};
-    if (pick(c, x, y, p))
+    if (grab(c, x, y, p))
     {
         zoom_point_ = p;
         focus_ = p;

@@ -19,15 +19,19 @@
 //   arrows, WASD         move; with shift, turn and tilt around the point at the centre
 //   page up, page down   zoom
 //
-// Points under the cursor are found on the ellipsoid raised to the terrain's height under the
-// camera, which is close enough to grab at the sample's resolution. That height is taken when a
-// drag, throw, smooth zoom or key movement begins and held until it ends: the height under the
+// A movement that starts at the cursor, a drag, scroll or double-click, picks the terrain under
+// it (vgl_context_ray_query), and holds that point's height until the movement ends: the drag
+// then finds points on the ellipsoid raised to that height, so the point it grabbed stays under
+// the cursor. Without terrain picking, and for key movements, points are found on the ellipsoid
+// raised to the terrain's height under the camera, held the same way: the height under the
 // camera changes as it moves, and the point being held would otherwise slide with it.
 
 #ifndef VGL_SAMPLES_NAVIGATION_HPP
 #define VGL_SAMPLES_NAVIGATION_HPP
 
 #include "sample_camera.hpp"
+
+#include <vgl/context.h>
 
 #include <array>
 
@@ -66,6 +70,9 @@ public:
     // effect when no drag, throw, smooth zoom or key movement is under way.
     void ground(double height);
 
+    // Picks the terrain of a context where movements start at the cursor; null stops.
+    void terrain(vgl_context* context) { terrain_ = context; }
+
     void press(drag mode, double x, double y, const camera& c);
     void move(double x, double y, camera& c);
     void release();
@@ -90,6 +97,11 @@ public:
 
 private:
     [[nodiscard]] vgl_dvec3 anchor(const camera& c, double x, double y) const;
+    // The terrain under a cursor position, where a movement starts: it then holds the point's
+    // height. Without terrain picking, or where the ray meets no terrain, as pick does.
+    [[nodiscard]] bool grab(const camera& c, double x, double y, vgl_dvec3& out);
+    // As anchor, starting a movement at the terrain under the cursor.
+    [[nodiscard]] vgl_dvec3 grab_anchor(const camera& c, double x, double y);
     // The direction of the ray through a cursor position.
     [[nodiscard]] vgl_dvec3 ray(const camera& c, double x, double y) const;
     // Starts a pan that holds the point p, now under the cursor.
@@ -123,6 +135,7 @@ private:
     double width_ = 1.0;
     double height_ = 1.0;
     double field_of_view_ = 60.0;
+    vgl_context* terrain_ = nullptr;
     double ground_ = 0.0;        // The height that points are found at.
     double latest_ground_ = 0.0; // The height last reported, for when a movement ends.
 

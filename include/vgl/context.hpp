@@ -41,6 +41,16 @@ struct height_sample
     result status = result::not_ready;
 };
 
+// Where a ray meets the terrain, from context::ray_query. status is result::success when the
+// hit is final, or result::not_ready while finer data at it loads.
+struct ray_hit
+{
+    double distance = 0.0; // Along the ray, in metres.
+    vgl_dvec3 position{};  // ECEF.
+    vgl_geodetic geodetic{};
+    result status = result::not_ready;
+};
+
 struct pack_status
 {
     pack_state state = pack_state::loading;
@@ -163,6 +173,20 @@ public:
     [[nodiscard]] result update(const vgl_update_info* info = nullptr) noexcept
     {
         return static_cast<result>(vgl_context_update(handle_, info));
+    }
+
+    // Picking: where a ray in ECEF meets the terrain. A miss is result::not_found.
+    [[nodiscard]] expected<ray_hit> ray_query(const vgl_dvec3& origin,
+                                              const vgl_dvec3& direction) noexcept
+    {
+        auto h = init<vgl_ray_hit>();
+        const auto status =
+            static_cast<result>(vgl_context_ray_query(handle_, &origin, &direction, &h));
+        if (failed(status))
+        {
+            return unexpected(status);
+        }
+        return ray_hit{h.distance, h.position, h.geodetic, status};
     }
 
     // Latitude and longitude in radians.

@@ -538,6 +538,7 @@ int run_interactive(const options& o,
         Ogre::OverlayManager::getSingleton().addOverlay(imgui);
         sample::overlay ui;
         sample::globe_navigation nav;
+        nav.terrain(ctx.get()); // Grab the terrain under the cursor.
         sample::glfw_controls controls;
         controls.camera = &s.camera;
         controls.debug = &s.debug;

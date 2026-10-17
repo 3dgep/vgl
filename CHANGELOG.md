@@ -119,6 +119,11 @@ The pack format has its own version number, independent of the library version.
   backend, pixel for pixel but for anti-aliased wireframe lines on Direct3D 11. CI runs it on
   Linux with Mesa on full runs.
 - The samples in a GLFW window share their controls (`samples/common/glfw_controls.hpp`).
+- Picking (FR-07): `vgl_context_ray_query` intersects a ray in ECEF with the terrain that height
+  queries see, the ellipsoid where no pack has data, and returns the hit's distance, ECEF
+  position and geodetic position in a `vgl_ray_hit`, starting the reads of finer data there.
+  C++ wrapper: `vgl::context::ray_query`. The interactive samples grab, orbit and zoom around
+  the terrain under the cursor instead of the ellipsoid raised to the height under the camera.
 - Imagery layers under the host's control: `vgl_pack_opacity_set` and `vgl_pack_opacity_get`
   set the opacity a layer blends with, 0 hiding it (its imagery is then neither loaded, drawn
   nor credited), and `vgl_pack_priority_set` and `vgl_pack_priority_get` reorder packs at run

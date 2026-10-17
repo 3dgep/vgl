@@ -168,6 +168,33 @@ vgl_result query(vgl_context* ctx,
     return r;
 }
 
+// Ray queries until the result is final, updating in between.
+vgl_result ray(vgl_context* ctx, const dvec3& origin, const dvec3& direction, vgl_ray_hit& hit)
+{
+    const vgl_dvec3 o = origin.to_c();
+    const vgl_dvec3 d = direction.to_c();
+    vgl_result r = VGL_RESULT_NOT_READY;
+    for (int i = 0; i < 10000 && r == VGL_RESULT_NOT_READY; ++i)
+    {
+        hit.struct_size = sizeof(hit);
+        r = vgl_context_ray_query(ctx, &o, &d, &hit);
+        if (r == VGL_RESULT_NOT_READY)
+        {
+            CHECK_EQ(vgl_context_update(ctx, nullptr), VGL_RESULT_SUCCESS);
+        }
+    }
+    return r;
+}
+
+// The terrain height under a position, from a height query.
+double terrain_under(vgl_context* ctx, const geodetic& g)
+{
+    double h = 0.0;
+    const vgl_result r =
+        vgl_context_height_query(ctx, g.latitude, g.longitude, VGL_HEIGHT_REFERENCE_ELLIPSOID, &h);
+    return r == VGL_RESULT_NOT_FOUND ? 0.0 : h;
+}
+
 } // namespace
 
 TEST_CASE(context_create_validates_its_input)
@@ -386,6 +413,130 @@ TEST_CASE(higher_priority_packs_win)
     CHECK_EQ(vgl_pack_destroy(a), VGL_RESULT_SUCCESS);
     CHECK_EQ(vgl_pack_destroy(b), VGL_RESULT_SUCCESS);
     CHECK_EQ(vgl_pack_destroy(c), VGL_RESULT_SUCCESS);
+    CHECK_EQ(vgl_context_destroy(ctx), VGL_RESULT_SUCCESS);
+}
+
+TEST_CASE(rays_meet_the_ellipsoid_without_terrain)
+{
+    vgl_context_create_info info = context_info();
+    vgl_context* ctx = nullptr;
+    REQUIRE(vgl_context_create(&info, &ctx) == VGL_RESULT_SUCCESS);
+    const ellipsoid e;
+    const double a = e.semi_major_axis();
+    vgl_ray_hit hit{};
+    CHECK_EQ(ray(ctx, {2.0 * a, 0.0, 0.0}, {-3.0, 0.0, 0.0}, hit), VGL_RESULT_SUCCESS);
+    CHECK_NEAR(hit.distance, a, 0.01);
+    CHECK_NEAR(hit.position.x, a, 0.01);
+    CHECK_NEAR(hit.geodetic.latitude, 0.0, 1e-12);
+    CHECK_NEAR(hit.geodetic.longitude, 0.0, 1e-12);
+    CHECK_EQ(hit.geodetic.height, 0.0);
+
+    // Through the pole, from the side.
+    const dvec3 over_pole{0.0, -2.0 * a, e.semi_minor_axis()};
+    CHECK_EQ(ray(ctx, over_pole, {0.0, 1.0, -0.0001}, hit), VGL_RESULT_SUCCESS);
+    CHECK_NEAR(
+        length(dvec3::from_c(hit.position) - e.to_ecef(e.to_geodetic(dvec3::from_c(hit.position)))),
+        0.0,
+        1e-6);
+    CHECK(std::fabs(hit.geodetic.height) < 1e-6);
+
+    // Rays that miss, away from the globe or past it; the hit is left alone.
+    hit.distance = -1.0;
+    for (const dvec3 d : {dvec3{1.0, 0.0, 0.0}, dvec3{0.0, 1.0, 0.0}})
+    {
+        CHECK_EQ(ray(ctx, {2.0 * a, 0.0, 0.0}, d, hit), VGL_RESULT_NOT_FOUND);
+        CHECK_EQ(hit.distance, -1.0);
+    }
+    // From inside, the ray starts under the terrain.
+    CHECK_EQ(ray(ctx, {0.0, 0.0, 0.0}, {0.0, 0.0, 1.0}, hit), VGL_RESULT_SUCCESS);
+    CHECK_EQ(hit.distance, 0.0);
+
+    // Invalid arguments.
+    const vgl_dvec3 o{2.0 * a, 0.0, 0.0};
+    const vgl_dvec3 d{-1.0, 0.0, 0.0};
+    const vgl_dvec3 zero{0.0, 0.0, 0.0};
+    const vgl_dvec3 nan{std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0};
+    hit.struct_size = sizeof(hit);
+    CHECK_EQ(vgl_context_ray_query(nullptr, &o, &d, &hit), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_context_ray_query(ctx, nullptr, &d, &hit), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_context_ray_query(ctx, &o, nullptr, &hit), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_context_ray_query(ctx, &o, &d, nullptr), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_context_ray_query(ctx, &o, &zero, &hit), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_context_ray_query(ctx, &nan, &d, &hit), VGL_RESULT_INVALID_ARGUMENT);
+    hit.struct_size = 4;
+    CHECK_EQ(vgl_context_ray_query(ctx, &o, &d, &hit), VGL_RESULT_INVALID_ARGUMENT);
+
+    // An older, shorter structure gets the fields that fit.
+    vgl_ray_hit short_hit{};
+    short_hit.struct_size = offsetof(vgl_ray_hit, position);
+    short_hit.position.x = 7.0;
+    CHECK_EQ(vgl_context_ray_query(ctx, &o, &d, &short_hit), VGL_RESULT_SUCCESS);
+    CHECK_NEAR(short_hit.distance, a, 0.01);
+    CHECK_EQ(short_hit.position.x, 7.0);
+    CHECK_EQ(vgl_context_destroy(ctx), VGL_RESULT_SUCCESS);
+}
+
+TEST_CASE(rays_meet_the_loaded_terrain)
+{
+    const test_pack pack = make_pack();
+    memory_io io;
+    io.packs["mem://a"] = &pack;
+    vgl_context_create_info info = context_info();
+    info.io = &io.table;
+    vgl_context* ctx = nullptr;
+    REQUIRE(vgl_context_create(&info, &ctx) == VGL_RESULT_SUCCESS);
+    vgl_pack* p = add_pack(ctx, "mem://a");
+    const ellipsoid e;
+
+    // Straight down onto level-3 data: the hit is the height a query gives.
+    const tile_id deep{3, 6, 2};
+    const position at = inside(deep);
+    const geodetic above{to_radians(at.lat), to_radians(at.lon), 20000.0};
+    const dvec3 down = -ellipsoid::surface_normal(above.latitude, above.longitude);
+    vgl_ray_hit hit{};
+    CHECK_EQ(ray(ctx, e.to_ecef(above), down, hit), VGL_RESULT_SUCCESS);
+    const double expected = expected_height(pack, deep, at.lat, at.lon);
+    CHECK_NEAR(hit.geodetic.height, expected, 1e-6);
+    CHECK_NEAR(hit.distance, 20000.0 - expected, 0.02);
+    CHECK_NEAR(hit.geodetic.latitude, above.latitude, 1e-9);
+    CHECK_NEAR(hit.geodetic.longitude, above.longitude, 1e-9);
+
+    // Oblique rays, also over coarser data and the nodata row: each meets the terrain where it
+    // first gets under it.
+    const position from = inside({2, 3, 1}, 0.5, 0.5);
+    const dvec3 eye = e.to_ecef({to_radians(from.lat), to_radians(from.lon), 300000.0});
+    int hits = 0;
+    for (int i = 0; i < 24; ++i)
+    {
+        const double azimuth = i * (2.0 * pi / 24.0);
+        const double tilt = radians(20.0 + 2.5 * i); // From straight down.
+        const dmat4 enu = e.enu_to_ecef({to_radians(from.lat), to_radians(from.lon), 300000.0});
+        const dvec3 local{std::sin(tilt) * std::sin(azimuth),
+                          std::sin(tilt) * std::cos(azimuth),
+                          -std::cos(tilt)};
+        const dvec3 d = transform_vector(enu, local);
+        const vgl_result r = ray(ctx, eye, d, hit);
+        if (r == VGL_RESULT_NOT_FOUND)
+        {
+            continue;
+        }
+        REQUIRE(r == VGL_RESULT_SUCCESS);
+        ++hits;
+        const geodetic g = geodetic::from_c(hit.geodetic);
+        CHECK_NEAR(g.height, terrain_under(ctx, g), 1e-6);
+        // The ray reaches the terrain there, to within the bisection's centimetre.
+        const geodetic on_ray = e.to_geodetic(dvec3::from_c(hit.position));
+        CHECK_NEAR(on_ray.height, g.height, 0.02);
+        // And was above it all the way there.
+        for (int k = 0; k < 2000; ++k)
+        {
+            const double t = hit.distance * k / 2000.0;
+            const geodetic s = e.to_geodetic(eye + d * (1.0 / length(d)) * t);
+            CHECK(s.height > terrain_under(ctx, s));
+        }
+    }
+    CHECK(hits > 12);
+    CHECK_EQ(vgl_pack_destroy(p), VGL_RESULT_SUCCESS);
     CHECK_EQ(vgl_context_destroy(ctx), VGL_RESULT_SUCCESS);
 }
 
