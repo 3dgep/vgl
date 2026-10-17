@@ -20,7 +20,8 @@ inline constexpr const char* es_preamble = "#version 300 es\n"
 
 inline constexpr const char* logarithmic_define = "#define VGL_LOGARITHMIC_DEPTH 1\n";
 
-// The vertex layout of docs/render-interface.md, section 6.
+// The vertex layout of docs/render-interface.md, section 6. The vertices place the surface;
+// the fragment shader shades it from the mesh's samples, which may be finer.
 inline constexpr const char* terrain_vertex_shader = R"glsl(
 layout(location = 0) in vec3 a_position; // Relative to the tile's centre, along the ECEF axes.
 layout(location = 1) in float a_height;  // Above the ellipsoid, in metres.
@@ -35,9 +36,7 @@ uniform int u_sea;     // 1 raises terrain below mean sea level to it.
 uniform float u_min_height; // The mesh's lowest terrain height; its skirts hang below it.
 
 out vec3 v_position; // Camera space.
-out vec3 v_normal;   // Camera space.
 out vec3 v_up;       // The vertical, in camera space.
-out float v_height;  // Above mean sea level.
 out float v_skirt;   // Above 0 on the skirts, with the sea surface.
 out vec2 v_uv;
 
@@ -46,22 +45,11 @@ uniform float u_log_depth; // 2 / log2(far + 1)
 out float v_log_depth;     // 1 + the camera distance
 #endif
 
-vec3 decode_octahedral(vec2 e)
-{
-    vec3 n = vec3(e, 1.0 - abs(e.x) - abs(e.y));
-    if (n.z < 0.0)
-    {
-        vec2 s = vec2(e.x >= 0.0 ? 1.0 : -1.0, e.y >= 0.0 ? 1.0 : -1.0);
-        n.xy = (1.0 - abs(e.yx)) * s;
-    }
-    return normalize(n);
-}
-
 void main()
 {
     // Mean sea level under the vertex, from the geoid at the tile's corners.
     float geoid = mix(mix(u_geoid.x, u_geoid.y, a_uv.x), mix(u_geoid.z, u_geoid.w, a_uv.x), a_uv.y);
-    v_height = a_height - geoid;
+    float height = a_height - geoid;
     v_skirt = u_sea != 0 && a_height < u_min_height ? 1.0 : 0.0;
     vec3 up = normalize(u_centre + a_position);
     vec3 position = a_position;
@@ -71,13 +59,12 @@ void main()
         // raised surface and covers the cracks between tiles of different levels.
         position += up * max(geoid - u_min_height, 0.0);
     }
-    else if (u_sea != 0 && v_height < 0.0)
+    else if (u_sea != 0 && height < 0.0)
     {
-        position += up * -v_height; // Up to the sea surface.
+        position += up * -height; // Up to the sea surface.
     }
     vec4 p = u_model_view * vec4(position, 1.0);
     v_position = p.xyz;
-    v_normal = mat3(u_model_view) * decode_octahedral(a_normal);
     v_up = mat3(u_model_view) * up;
     v_uv = a_uv;
     gl_Position = u_projection * p;
@@ -92,12 +79,17 @@ void main()
 
 inline constexpr const char* terrain_fragment_shader = R"glsl(
 in vec3 v_position;
-in vec3 v_normal;
 in vec3 v_up;
-in float v_height; // Above mean sea level.
 in float v_skirt;
 in vec2 v_uv;
 uniform int u_sea;
+uniform mat4 u_model_view;
+uniform vec4 u_geoid;
+
+// The mesh's samples (docs/render-interface.md, section 6): per texel, the height above the
+// ellipsoid as float bits and the normal as two signed normalized 16-bit halves.
+uniform highp usampler2D u_samples;
+uniform float u_sample_cells; // Samples along a side, less one.
 
 uniform vec3 u_light; // Towards the light, in camera space; zero lights from the camera.
 
@@ -124,6 +116,43 @@ layout(location = 0) out vec4 o_color;
 uniform float u_log_depth;
 in float v_log_depth;
 #endif
+
+vec3 decode_octahedral(vec2 e)
+{
+    vec3 n = vec3(e, 1.0 - abs(e.x) - abs(e.y));
+    if (n.z < 0.0)
+    {
+        vec2 s = vec2(e.x >= 0.0 ? 1.0 : -1.0, e.y >= 0.0 ? 1.0 : -1.0);
+        n.xy = (1.0 - abs(e.yx)) * s;
+    }
+    return normalize(n);
+}
+
+// Two signed normalized 16-bit values, low half first, as unpackSnorm2x16 does, which GLSL
+// 3.30 lacks. Converting to int keeps the bits, and shifting a signed int right extends its sign.
+vec2 unpack_snorm16x2(uint v)
+{
+    return max(vec2(float(int(v << 16u) >> 16), float(int(v) >> 16)) / 32767.0, -1.0);
+}
+
+// The surface at the fragment, interpolated bilinearly between the four samples around it, by
+// hand: integer textures do not filter. The height is above the ellipsoid, and the normal is
+// along the ECEF axes and not normalized.
+void surface(out float height, out vec3 normal)
+{
+    vec2 g = clamp(v_uv, 0.0, 1.0) * u_sample_cells;
+    vec2 base = min(floor(g), vec2(u_sample_cells - 1.0));
+    vec2 f = g - base;
+    ivec2 c = ivec2(base);
+    uvec2 nw = texelFetch(u_samples, c, 0).xy;
+    uvec2 ne = texelFetch(u_samples, c + ivec2(1, 0), 0).xy;
+    uvec2 sw = texelFetch(u_samples, c + ivec2(0, 1), 0).xy;
+    uvec2 se = texelFetch(u_samples, c + ivec2(1, 1), 0).xy;
+    height = mix(mix(uintBitsToFloat(nw.x), uintBitsToFloat(ne.x), f.x),
+                 mix(uintBitsToFloat(sw.x), uintBitsToFloat(se.x), f.x), f.y);
+    normal = mix(mix(decode_octahedral(unpack_snorm16x2(nw.y)), decode_octahedral(unpack_snorm16x2(ne.y)), f.x),
+                 mix(decode_octahedral(unpack_snorm16x2(sw.y)), decode_octahedral(unpack_snorm16x2(se.y)), f.x), f.y);
+}
 
 // Colours by height, the conventional hypsometric tints: blues from the deep ocean floor to
 // the shelf, then lowland green, yellow, browns, grey rock and snow.
@@ -179,8 +208,7 @@ float grid_lines(float g, float w, float spacing)
 
 // The wireframe's lines along one coordinate: every cell's edge where they are at least four
 // pixels apart; where they crowd, every second, fourth, eighth line and so on, a power of two of
-// cells that keeps them that far apart, blending into the next as they crowd further. The
-// tile's edges are always drawn.
+// cells that keeps them that far apart, blending into the next as they crowd further.
 float wire_lines(float g, float w)
 {
     float top = log2(u_cells);
@@ -188,7 +216,7 @@ float wire_lines(float g, float w)
     float k = floor(level);
     float fine = grid_lines(g, w, exp2(k));
     float coarse = grid_lines(g, w, exp2(min(k + 1.0, top)));
-    return max(mix(fine, coarse, level - k), grid_lines(g, w, u_cells));
+    return mix(fine, coarse, level - k);
 }
 
 vec3 blend(vec3 below, sampler2D layer, vec4 uv, float opacity)
@@ -199,11 +227,16 @@ vec3 blend(vec3 below, sampler2D layer, vec4 uv, float opacity)
 
 void main()
 {
-    vec3 n = normalize(v_normal);
+    float height;
+    vec3 normal;
+    surface(height, normal);
+    // Above mean sea level, from the geoid at the tile's corners.
+    height -= mix(mix(u_geoid.x, u_geoid.y, v_uv.x), mix(u_geoid.z, u_geoid.w, v_uv.x), v_uv.y);
+    vec3 n = normalize(mat3(u_model_view) * normal);
     vec3 l = dot(u_light, u_light) > 0.0 ? u_light : normalize(-v_position);
     float diffuse = max(dot(n, l), 0.0);
     // The height colours show where no imagery covers the terrain.
-    vec3 albedo = height_color(v_height);
+    vec3 albedo = height_color(height);
     if (u_layer_count > 0 && (u_debug & 8) == 0)
     {
         albedo = blend(albedo, u_layer0, u_layer_uv[0], u_layer_opacity.x);
@@ -247,7 +280,7 @@ void main()
         // to the nearest line in pixels, so that lines keep their width at every distance and
         // are anti-aliased, and how closely lines crowd, so that they fade out before they turn
         // into noise (from 16 pixels apart down to 6), the major ones later than the minor.
-        float x = v_height / u_contour_interval;
+        float x = height / u_contour_interval;
         float dx = max(fwidth(x), 1e-6);
         float minor_pixels = abs(fract(x - 0.5) - 0.5) / dx;
         float minor = (1.0 - smoothstep(0.3, 1.0, minor_pixels)) * (1.0 - smoothstep(0.06, 0.16, dx));
@@ -261,7 +294,7 @@ void main()
     vec3 lit = albedo * (0.3 + 0.7 * diffuse);
     // Skirts take the colour of the edge above them, as without the sea, so that they do not
     // show as water where they fill a crack on land.
-    if (u_sea != 0 && v_height < 0.0 && v_skirt == 0.0)
+    if (u_sea != 0 && height < 0.0 && v_skirt == 0.0)
     {
         // Water: the imagery's ocean, or a deep blue, under a level surface with a glint of
         // the light.
@@ -281,8 +314,14 @@ void main()
         // constant but for rounding, draws none. Bright cyan: clear on dark and light ground.
         vec2 g = v_uv * u_cells;
         vec2 w = vec2(length(vec2(dFdx(g.x), dFdy(g.x))), length(vec2(dFdx(g.y), dFdy(g.y))));
-        vec2 on = vec2(wire_lines(g.x, w.x), wire_lines(g.y, w.y)) * step(1e-3 * vec2(w.y, w.x), w);
+        vec2 along = step(1e-3 * vec2(w.y, w.x), w);
+        vec2 on = vec2(wire_lines(g.x, w.x), wire_lines(g.y, w.y)) * along;
         o_color.rgb = mix(o_color.rgb, vec3(0.3, 1.0, 0.95), max(on.x, on.y));
+        // The tile's boundary in yellow: a pixel solid and a pixel fading inside each tile, so
+        // about two pixels where two tiles meet, from the distance to the edge in pixels.
+        vec2 pixels = min(g, u_cells - g) / max(w, vec2(1e-9));
+        vec2 edge = clamp(2.0 - pixels, 0.0, 1.0) * along;
+        o_color.rgb = mix(o_color.rgb, vec3(1.0, 0.85, 0.1), max(edge.x, edge.y));
     }
 #ifdef VGL_LOGARITHMIC_DEPTH
     gl_FragDepth = log2(v_log_depth) * u_log_depth * 0.5;

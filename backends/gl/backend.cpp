@@ -35,16 +35,21 @@ enum class resource_kind : std::uint8_t
 // Imagery layers a draw blends; a tile with more draws the top ones.
 constexpr std::uint32_t max_layers = 4;
 
+// Units 0 to 3 hold the layers, and the next one the mesh's samples.
+constexpr std::uint32_t samples_unit = max_layers;
+constexpr std::uint32_t texture_units = max_layers + 1;
+
 // The OpenGL objects of one render resource. Its address is the handle the context echoes in
 // draw items (vgl_frame_resource_handle_set).
 struct gl_resource
 {
     resource_kind kind = resource_kind::index_list;
-    GLuint buffer = 0;       // Indices or vertices.
-    GLuint vertex_array = 0; // Meshes: the vertex layout and the index list's buffer.
-    GLuint texture = 0;      // Textures.
-    std::uint32_t grid = 0;  // Meshes: vertices along a side of the grid, or 0 if unknown.
-    float min_height = 0.0f; // Meshes: the lowest terrain height; the skirts hang below it.
+    GLuint buffer = 0;             // Indices or vertices.
+    GLuint vertex_array = 0;       // Meshes: the vertex layout and the index list's buffer.
+    GLuint texture = 0;            // Textures, and meshes' samples.
+    std::uint32_t grid = 0;        // Meshes: vertices along a side of the grid, or 0 if unknown.
+    std::uint32_t sample_grid = 0; // Meshes: samples along a side.
+    float min_height = 0.0f;       // Meshes: the lowest terrain height; the skirts hang below it.
 };
 
 // The host's state that drawing changes (NFR-08; vgl/gl.h lists it).
@@ -66,8 +71,8 @@ struct saved_state
     GLint clip_origin = 0;
     GLint clip_depth_mode = 0;
     GLint active_texture = 0;
-    std::array<GLint, max_layers> textures = {}; // Units 0 to 3.
-    std::array<GLint, max_layers> samplers = {};
+    std::array<GLint, texture_units> textures = {};
+    std::array<GLint, texture_units> samplers = {};
     GLint unpack_buffer = 0;
     GLint unpack_alignment = 0;
     GLint unpack_row_length = 0;
@@ -111,6 +116,8 @@ struct vgl_gl_backend
     GLint u_geoid = -1;
     GLint u_centre = -1;
     GLint u_sea = -1;
+    GLint u_samples = -1;
+    GLint u_sample_cells = -1;
     std::array<GLint, max_layers> u_layers = {-1, -1, -1, -1};
 
     vgl::common::pointer_map<gl_resource> resources;
@@ -223,6 +230,8 @@ vgl_result build_program(vgl_gl_backend& b, const char* function)
     b.u_geoid = gl.GetUniformLocation(program, "u_geoid");
     b.u_centre = gl.GetUniformLocation(program, "u_centre");
     b.u_sea = gl.GetUniformLocation(program, "u_sea");
+    b.u_samples = gl.GetUniformLocation(program, "u_samples");
+    b.u_sample_cells = gl.GetUniformLocation(program, "u_sample_cells");
     const std::array<const char*, max_layers> names = {
         "u_layer0", "u_layer1", "u_layer2", "u_layer3"};
     for (std::uint32_t k = 0; k < max_layers; ++k)
@@ -344,7 +353,7 @@ saved_state save_state(const vgl_gl_backend& b)
         gl.GetIntegerv(GL_CLIP_DEPTH_MODE, &s.clip_depth_mode);
     }
     gl.GetIntegerv(GL_ACTIVE_TEXTURE, &s.active_texture);
-    for (std::uint32_t k = 0; k < max_layers; ++k)
+    for (std::uint32_t k = 0; k < texture_units; ++k)
     {
         gl.ActiveTexture(GL_TEXTURE0 + k);
         gl.GetIntegerv(GL_TEXTURE_BINDING_2D, &s.textures[k]);
@@ -397,7 +406,7 @@ void restore_state(const vgl_gl_backend& b, const saved_state& s)
     {
         gl.ClipControl(static_cast<GLenum>(s.clip_origin), static_cast<GLenum>(s.clip_depth_mode));
     }
-    for (std::uint32_t k = 0; k < max_layers; ++k)
+    for (std::uint32_t k = 0; k < texture_units; ++k)
     {
         gl.ActiveTexture(GL_TEXTURE0 + k);
         gl.BindTexture(GL_TEXTURE_2D, static_cast<GLuint>(s.textures[k]));
@@ -449,6 +458,11 @@ void create_mesh(vgl_gl_backend& b, vgl_frame* frame, const vgl_mesh_data& d)
         static_cast<void>(vgl_frame_resource_failed(frame, d.resource, VGL_RESULT_NOT_FOUND));
         return;
     }
+    if (d.samples == nullptr || d.sample_grid < 2 || d.sample_size != VGL_TERRAIN_SAMPLE_SIZE)
+    {
+        static_cast<void>(vgl_frame_resource_failed(frame, d.resource, VGL_RESULT_NOT_SUPPORTED));
+        return;
+    }
     auto* r = b.mem.create<gl_resource>();
     if (r == nullptr || !b.resources.insert(d.resource, r))
     {
@@ -488,6 +502,28 @@ void create_mesh(vgl_gl_backend& b, vgl_frame* frame, const vgl_mesh_data& d)
         gl.EnableVertexAttribArray(i);
     }
     gl.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, indices->buffer);
+
+    // The samples, as two 32-bit unsigned integers per texel: the height's bits and the
+    // normal's two halves, read back in the shader. Integer textures sample the nearest texel
+    // only, and the shader interpolates; nothing filters across levels.
+    r->sample_grid = d.sample_grid;
+    gl.GenTextures(1, &r->texture);
+    gl.ActiveTexture(GL_TEXTURE0 + samples_unit);
+    gl.BindTexture(GL_TEXTURE_2D, r->texture);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    const auto side = static_cast<GLsizei>(d.sample_grid);
+    gl.TexImage2D(GL_TEXTURE_2D,
+                  0,
+                  static_cast<GLint>(GL_RG32UI),
+                  side,
+                  side,
+                  0,
+                  GL_RG_INTEGER,
+                  GL_UNSIGNED_INT,
+                  d.samples);
     static_cast<void>(
         vgl_frame_resource_handle_set(frame, d.resource, reinterpret_cast<std::uintptr_t>(r)));
 }
@@ -576,6 +612,13 @@ void apply_resources(vgl_gl_backend& b, vgl_frame* frame)
         create_index_list(b, frame, index_lists[i]);
     }
 
+    // Rows are tightly packed in client memory, which the host's unpack state may not say.
+    b.gl.BindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    b.gl.PixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    b.gl.PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+    b.gl.PixelStorei(GL_UNPACK_SKIP_ROWS, 0);
+    b.gl.PixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
+
     const vgl_mesh_data* meshes = nullptr;
     static_cast<void>(vgl_frame_meshes_get(frame, &meshes, &count));
     for (std::uint32_t i = 0; i < count; ++i)
@@ -585,15 +628,6 @@ void apply_resources(vgl_gl_backend& b, vgl_frame* frame)
 
     const vgl_texture_data* textures = nullptr;
     static_cast<void>(vgl_frame_textures_get(frame, &textures, &count));
-    if (count != 0)
-    {
-        // Rows are tightly packed in client memory, which the host's unpack state may not say.
-        b.gl.BindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-        b.gl.PixelStorei(GL_UNPACK_ALIGNMENT, 4);
-        b.gl.PixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-        b.gl.PixelStorei(GL_UNPACK_SKIP_ROWS, 0);
-        b.gl.PixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
-    }
     for (std::uint32_t i = 0; i < count; ++i)
     {
         create_texture(b, frame, textures[i]);
@@ -690,8 +724,11 @@ void draw_items(const vgl_gl_backend& b,
         gl.Uniform1i(b.u_layers[k], static_cast<GLint>(k));
         gl.BindSampler(k, b.sampler);
     }
-    std::array<GLuint, max_layers> bound = {};
-    for (std::uint32_t k = 0; k < max_layers; ++k)
+    // The samples' texture has its own nearest filtering.
+    gl.Uniform1i(b.u_samples, static_cast<GLint>(samples_unit));
+    gl.BindSampler(samples_unit, 0);
+    std::array<GLuint, texture_units> bound = {};
+    for (std::uint32_t k = 0; k < texture_units; ++k)
     {
         gl.ActiveTexture(GL_TEXTURE0 + k);
         gl.BindTexture(GL_TEXTURE_2D, 0);
@@ -761,6 +798,13 @@ void draw_items(const vgl_gl_backend& b,
             continue;
         }
         gl.UniformMatrix4fv(b.u_model_view, 1, GL_FALSE, item.model_view);
+        if (bound[samples_unit] != mesh->texture)
+        {
+            gl.ActiveTexture(GL_TEXTURE0 + samples_unit);
+            gl.BindTexture(GL_TEXTURE_2D, mesh->texture);
+            bound[samples_unit] = mesh->texture;
+        }
+        gl.Uniform1f(b.u_sample_cells, static_cast<GLfloat>(mesh->sample_grid - 1));
         if (info.sea_surface != VGL_FALSE)
         {
             gl.Uniform1f(b.u_min_height, mesh->min_height);

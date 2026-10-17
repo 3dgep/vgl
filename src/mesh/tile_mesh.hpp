@@ -33,6 +33,15 @@ struct tile_vertex
 
 static_assert(sizeof(tile_vertex) == 24, "tile_vertex is 24 bytes");
 
+// The surface at one sample of a grid, for shading at full resolution.
+struct tile_sample
+{
+    float height;                       // Above the ellipsoid.
+    std::array<std::int16_t, 2> normal; // Octahedral encoding, as signed normalized.
+};
+
+static_assert(sizeof(tile_sample) == 8, "tile_sample is 8 bytes");
+
 // grid * grid vertices, then 4 * (grid - 1) skirt vertices.
 [[nodiscard]] constexpr std::size_t tile_mesh_vertex_count(std::uint32_t grid) noexcept
 {
@@ -50,6 +59,35 @@ static_assert(sizeof(tile_vertex) == 24, "tile_vertex is 24 bytes");
 // above: from the north-east corner westwards along the north edge, then south, east and
 // north. Skirt vertex k hangs below it.
 [[nodiscard]] std::uint32_t tile_mesh_boundary_vertex(std::uint32_t grid, std::uint32_t k) noexcept;
+
+// The positions of a tile's samples in ECEF. heights holds grid * grid heights, row by row from
+// the north, each row from the west, at the tile's grid-registered positions
+// (docs/pack-format.md, section 2.3), and out receives as many positions. Requires grid >= 2.
+void build_tile_positions(const ellipsoid& e,
+                          const tile_id& t,
+                          std::uint32_t grid,
+                          std::span<const float> heights,
+                          std::span<dvec3> out) noexcept;
+
+// The samples of a grid: heights, and normals from positions as from build_tile_positions,
+// the same as build_tile_vertices gives its grid vertices.
+void build_tile_samples(const tile_id& t,
+                        std::uint32_t grid,
+                        std::span<const float> heights,
+                        std::span<const dvec3> positions,
+                        std::span<tile_sample> out) noexcept;
+
+// The largest stride, a power of two, at which a mesh through every stride-th sample of a grid
+// stays within tolerance of every sample, in metres, with at least min_mesh_grid vertices per
+// side. positions holds the grid's sample positions, as from build_tile_positions. The
+// triangles are those of build_tile_indices. Returns 1 if no stride qualifies.
+[[nodiscard]] std::uint32_t
+tile_mesh_stride(std::uint32_t grid, std::span<const dvec3> positions, double tolerance) noexcept;
+
+// Keeps every stride-th row and column of a grid of heights, moving them to the front of
+// heights. Requires stride to divide grid - 1. Returns the grid of what is kept.
+std::uint32_t
+tile_heights_decimate(std::uint32_t grid, std::uint32_t stride, std::span<float> heights) noexcept;
 
 // Builds the vertices of a tile. heights holds grid * grid heights, row by row from the north,
 // each row from the west, at the tile's grid-registered positions (docs/pack-format.md,

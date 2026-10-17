@@ -183,3 +183,76 @@ TEST_CASE(pole_tiles_have_finite_normals)
     // The north row is the pole: its normals point north.
     CHECK(decode_octahedral(b.vertices[grid / 2].normal).z > 0.999);
 }
+
+TEST_CASE(samples_match_the_grid_vertices)
+{
+    const ellipsoid e;
+    const std::uint32_t grid = 17;
+    const tile_id t{8, 270, 60};
+    std::mt19937 rng(3);
+    std::uniform_real_distribution<float> d(0.0f, 900.0f);
+    std::vector<float> heights(static_cast<std::size_t>(grid) * grid);
+    for (float& h : heights)
+    {
+        h = d(rng);
+    }
+    const built b = build(t, grid, heights, -100.0);
+    std::vector<dvec3> positions(heights.size());
+    std::vector<tile_sample> samples(heights.size());
+    build_tile_positions(e, t, grid, heights, positions);
+    build_tile_samples(t, grid, heights, positions, samples);
+    for (std::size_t k = 0; k < samples.size(); ++k)
+    {
+        CHECK_EQ(samples[k].height, heights[k]);
+        CHECK_EQ(samples[k].normal[0], b.vertices[k].normal[0]);
+        CHECK_EQ(samples[k].normal[1], b.vertices[k].normal[1]);
+    }
+}
+
+TEST_CASE(smooth_tiles_coarsen_and_rough_ones_do_not)
+{
+    const ellipsoid e;
+    const std::uint32_t grid = 129;
+    const tile_id t{3, 5, 2};
+    std::vector<float> heights(static_cast<std::size_t>(grid) * grid, 0.0f);
+    std::vector<dvec3> positions(heights.size());
+    build_tile_positions(e, t, grid, heights, positions);
+    // On the ellipsoid, a cell of 16 samples (2.8 degrees) sags by about 3.8 km in the middle
+    // of its diagonal, and one of 8 samples by a quarter of that. A stride of 16 leaves the 9 x 9
+    // vertices of the smallest grid.
+    CHECK_EQ(tile_mesh_stride(grid, positions, 6000.0), 16u);
+    CHECK_EQ(tile_mesh_stride(grid, positions, 2000.0), 8u);
+    CHECK_EQ(tile_mesh_stride(grid, positions, 1.0), 1u);
+
+    // A peak between the vertices of every coarser grid keeps every sample.
+    heights[static_cast<std::size_t>(61) * grid + 37] = 3000.0f;
+    build_tile_positions(e, t, grid, heights, positions);
+    CHECK_EQ(tile_mesh_stride(grid, positions, 2000.0), 1u);
+
+    // A grid too small to coarsen.
+    const std::uint32_t small = 9;
+    std::vector<dvec3> few(static_cast<std::size_t>(small) * small);
+    build_tile_positions(e, t, small, std::vector<float>(few.size(), 0.0f), few);
+    CHECK_EQ(tile_mesh_stride(small, few, 1e6), 1u);
+}
+
+TEST_CASE(decimating_keeps_every_stride_th_row_and_column)
+{
+    const std::uint32_t grid = 17;
+    std::vector<float> heights(static_cast<std::size_t>(grid) * grid);
+    for (std::size_t k = 0; k < heights.size(); ++k)
+    {
+        heights[k] = static_cast<float>(k);
+    }
+    const std::vector<float> original = heights;
+    CHECK_EQ(tile_heights_decimate(grid, 4, heights), 5u);
+    for (std::uint32_t j = 0; j < 5; ++j)
+    {
+        for (std::uint32_t i = 0; i < 5; ++i)
+        {
+            CHECK_EQ(
+                heights[static_cast<std::size_t>(j) * 5 + i],
+                original[static_cast<std::size_t>(j) * 4 * grid + static_cast<std::size_t>(i) * 4]);
+        }
+    }
+}

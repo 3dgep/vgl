@@ -1080,18 +1080,23 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
             const vgl_context_statistics st = ctx.statistics_get();
             image pixels = read_image(gl, t);
             const double covered = coverage(pixels);
-            std::printf("%-13s %-20s %5d frames %5u tiles %6.1f MiB  %5.1f%% globe\n",
-                        depth_name(s.depth),
-                        p.name,
-                        frames,
-                        st.tiles_drawn,
-                        static_cast<double>(st.gpu_used) / (1024.0 * 1024.0),
-                        covered * 100.0);
+            std::printf(
+                "%-13s %-20s %5d frames %5u tiles %8llu triangles %6.1f MiB  %5.1f%% globe\n",
+                depth_name(s.depth),
+                p.name,
+                frames,
+                st.tiles_drawn,
+                static_cast<unsigned long long>(st.triangles_drawn),
+                static_cast<double>(st.gpu_used) / (1024.0 * 1024.0),
+                covered * 100.0);
             const std::string where = std::string(depth_name(s.depth)) + ", " + p.name;
             expect(quiet >= 5, "loading settles: " + where);
             expect(st.tiles_drawn > 0 && st.tiles_drawn == st.tiles_selected,
                    "every selected tile is drawn: " + where);
             expect(gl.GetError() == 0, "OpenGL reports no error: " + where);
+            // From orbit, tiles a pixel or two per sample apart draw coarser grids.
+            expect(std::strcmp(p.name, "orbit, Atlantic") != 0 || st.triangles_drawn < 20000,
+                   "the globe from orbit draws coarse meshes: " + where);
             expect(covered >= p.least_coverage && covered <= p.most_coverage,
                    "the globe covers its share of the view: " + where);
             // Every view looks at the globe in the middle, and past it in the top corners,
@@ -1159,7 +1164,7 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
                        height,
                        o.save + "/" + depth_name(s.depth) + "-debug.ppm");
         }
-        // The wireframe alone: the grid's cells over the imagery.
+        // The wireframe alone: the grid's cells and the tiles' boundaries over the imagery.
         s.debug.level_colors = s.debug.imagery_source = false;
         s.debug.height_colors = s.debug.contours = s.debug.sea = false;
         clear(gl, s, t);
@@ -1350,6 +1355,7 @@ void on_key(GLFWwindow* window, int key, int /*scancode*/, int action, int /*mod
     {
         d.sea = !d.sea;
     }
+
     else if (key == GLFW_KEY_N || key == GLFW_KEY_R)
     {
         in->nav->stop();

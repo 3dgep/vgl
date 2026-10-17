@@ -83,7 +83,9 @@ public:
         }
         for (const vgl_mesh_data& d : f.meshes())
         {
-            add(d.resource, std::uint64_t{d.vertex_count} * d.vertex_size);
+            add(d.resource,
+                std::uint64_t{d.vertex_count} * d.vertex_size +
+                    std::uint64_t{d.sample_grid} * d.sample_grid * d.sample_size);
         }
         for (const vgl_texture_data& d : f.textures())
         {

@@ -5,6 +5,7 @@
 // walking its tables: statistics are read once a frame at most, the tables are walked often.
 
 #include "context/context_impl.hpp"
+#include "mesh/tile_mesh.hpp"
 
 #include <algorithm>
 #include <cstring>
@@ -77,6 +78,15 @@ extern "C" VGL_API vgl_result vgl_context_statistics_get(const vgl_context* cont
         });
     }
     s.tiles_drawn = static_cast<std::uint32_t>(ctx.drawn.size());
+    for (const drawn_tile& d : ctx.drawn)
+    {
+        const gpu_resource* r = ctx.resources.find(d.mesh);
+        if (r != nullptr)
+        {
+            s.vertices_drawn += tile_mesh_vertex_count(r->grid);
+            s.triangles_drawn += tile_mesh_index_count(r->grid) / 3;
+        }
+    }
     s.resources_created = ctx.last_created;
     s.resources_destroyed = ctx.last_destroyed;
     s.bytes_created = ctx.last_bytes_created;

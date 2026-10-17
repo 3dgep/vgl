@@ -28,7 +28,7 @@
  * State (NFR-08). The backend saves the following state when it draws, and restores it before
  * returning: the current program, the vertex array binding, the GL_ARRAY_BUFFER,
  * GL_COPY_WRITE_BUFFER and GL_PIXEL_UNPACK_BUFFER bindings, the active texture unit, the 2D
- * texture and sampler bindings of units 0 to 3, the unpack alignment, row length and skips,
+ * texture and sampler bindings of units 0 to 4, the unpack alignment, row length and skips,
  * GL_DEPTH_TEST, the depth function and write mask, GL_CULL_FACE, the cull face mode, the front
  * face, GL_BLEND, primitive restart (where it exists) and, for the reversed-Z convention, the
  * clip control depth mode. It draws with the
@@ -180,8 +180,8 @@ typedef enum vgl_gl_debug_flag
 {
     /* The mesh's grid cells as bright cyan lines a pixel wide over the shading, without the
      * diagonals that split them into triangles. Where cells are closer than four pixels, every
-     * second, fourth, eighth line and so on, which keeps them that far apart; the tiles' edges
-     * always. */
+     * second, fourth, eighth line and so on, which keeps them that far apart. The tiles'
+     * boundaries are always drawn, in yellow and about two pixels wide. */
     VGL_GL_DEBUG_FLAG_WIREFRAME = 0x1,
     /* Each tile tinted by its level, with its borders outlined. */
     VGL_GL_DEBUG_FLAG_LEVEL_COLORS = 0x2,

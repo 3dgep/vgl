@@ -96,8 +96,8 @@ Up and Page Down zoom, and N, U and R turn north up, look straight down, or both
 to places.
 Its panel (F1) shows the runtime statistics and the
 debug views: wireframe (F2), colours by tile level (F3), the imagery source (F4), a frozen
-selection (F5) to inspect level of detail and culling from outside, the heightmap (F6) and
-contour lines (F7).
+selection (F5) to inspect level of detail and culling from outside, the heightmap (F6),
+contour lines (F7) and a sea surface (F8).
 
 ### Using vgl
 

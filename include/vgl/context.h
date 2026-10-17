@@ -413,6 +413,10 @@ typedef struct vgl_context_statistics
     /* Imagery textures. */
     uint32_t textures_decoding; /* Imagery tiles being decoded into textures. */
     uint32_t textures_waiting;  /* Wanted by selected tiles, and not created by the consumer. */
+
+    /* The last frame's meshes: vertices and triangles drawn, skirts included. */
+    uint64_t vertices_drawn;
+    uint64_t triangles_drawn;
 } vgl_context_statistics;
 
 /**

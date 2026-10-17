@@ -34,6 +34,17 @@ extern "C" {
 /* Normal in octahedral encoding: 2 x signed 16-bit normalized. */
 #define VGL_TERRAIN_VERTEX_NORMAL_OFFSET 20
 
+/*
+ * Terrain samples: VGL_TERRAIN_SAMPLE_SIZE bytes each, with these fields at these offsets. A
+ * mesh's samples are the surface it was built from, at full resolution where its grid is
+ * coarser, for shading. The layout is fixed for the major version.
+ */
+#define VGL_TERRAIN_SAMPLE_SIZE 8
+/* Height above the ellipsoid: float. */
+#define VGL_TERRAIN_SAMPLE_HEIGHT_OFFSET 0
+/* Normal in octahedral encoding: 2 x signed 16-bit normalized. */
+#define VGL_TERRAIN_SAMPLE_NORMAL_OFFSET 4
+
 typedef enum vgl_texture_format
 {
     VGL_TEXTURE_FORMAT_RGBA8 = 1, /* Always supported. */
@@ -137,6 +148,12 @@ typedef struct vgl_mesh_data
     vgl_dvec3 centre;
     double min_height;
     double max_height;
+    /* sample_grid x sample_grid samples of VGL_TERRAIN_SAMPLE_SIZE bytes, in rows from the
+     * north, each from the west, at texture coordinates (i, j) / (sample_grid - 1). */
+    const void* samples;
+    VGL_POINTER_PADDING(samples_padding)
+    uint32_t sample_grid;
+    uint32_t sample_size;
 } vgl_mesh_data;
 
 /* An imagery texture to create. Not produced yet: imagery comes later. */

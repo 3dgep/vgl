@@ -123,14 +123,18 @@ struct mesh_job : async_item
     std::uint32_t grid = 0;
     ellipsoid shape;
     double skirt_height = 0.0;
+    double tolerance = 0.0; // Of a coarser grid, in metres; 0 keeps every sample.
     buffer<float> heights;
     buffer<dvec3> scratch;
     buffer<tile_vertex> vertices;
+    buffer<tile_sample> samples; // At the grid's full resolution.
+    std::uint32_t sample_grid = 0;
     dvec3 centre;
     double min_height = 0.0;
     double max_height = 0.0;
 
-    // Builds the vertices, then frees the heights and scratch.
+    // Coarsens the grid within the tolerance, builds the vertices, then frees the heights and
+    // scratch.
     void run() noexcept;
 };
 
@@ -202,6 +206,8 @@ struct gpu_resource
     std::array<float, 4> geoid = {};
     bool has_geoid = false;
     buffer<tile_vertex> vertices; // Until resident.
+    buffer<tile_sample> samples;  // Until resident.
+    std::uint32_t sample_grid = 0;
 
     // Index lists.
     buffer<std::byte> indices; // Until resident.
@@ -217,13 +223,15 @@ struct gpu_resource
     // Bytes of CPU memory the resource holds.
     [[nodiscard]] std::uint64_t cpu_bytes() const noexcept
     {
-        return vertices.size() * sizeof(tile_vertex) + indices.size() + image.pixels.size();
+        return vertices.size() * sizeof(tile_vertex) + samples.size() * sizeof(tile_sample) +
+               indices.size() + image.pixels.size();
     }
 
     // Frees the CPU copy, once the consumer has the resource or will never get it.
     void free_cpu_copy() noexcept
     {
         vertices = buffer<tile_vertex>();
+        samples = buffer<tile_sample>();
         indices = buffer<std::byte>();
         image.pixels = buffer<std::uint8_t>();
     }

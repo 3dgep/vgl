@@ -43,7 +43,7 @@ static void check_types(void)
     /* Render interface structures: the same layout on 32-bit and 64-bit targets. */
     CHECK(sizeof(vgl_tile_id) == 16);
     CHECK(sizeof(vgl_index_list_data) == 24);
-    CHECK(sizeof(vgl_mesh_data) == 88);
+    CHECK(sizeof(vgl_mesh_data) == 104);
     CHECK(sizeof(vgl_texture_data) == 40);
     CHECK(sizeof(vgl_draw_layer) == 40);
     CHECK(sizeof(vgl_draw_item) == 192);

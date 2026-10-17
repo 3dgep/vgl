@@ -134,7 +134,7 @@ There are three kinds of resource:
 
 | Kind | Contents | Shared |
 |---|---|---|
-| Mesh | A tile's vertices (section 6) | No: one per tile and data source |
+| Mesh | A tile's vertices, and the samples it was built from (section 6) | No: one per tile and data source |
 | Index list | The triangle list of one grid size | Yes: by every mesh of that grid size |
 | Texture | One imagery tile, in a negotiated format (section 7) | Yes: by every tile drawn with that imagery tile, its own or an ancestor's |
 
@@ -166,6 +166,10 @@ typedef struct vgl_mesh_data
     vgl_dvec3 centre;                /* ECEF origin of the vertex positions */
     double min_height;               /* the terrain's range; the skirts hang below it */
     double max_height;
+    const void* samples;             /* sample_grid² samples of sample_size bytes */
+    VGL_POINTER_PADDING(samples_padding)
+    uint32_t sample_grid;
+    uint32_t sample_size;            /* VGL_TERRAIN_SAMPLE_SIZE */
 } vgl_mesh_data;
 
 typedef struct vgl_texture_data
@@ -197,7 +201,7 @@ typedef struct vgl_texture_data
 
 ### 4.4 CPU copies and device loss
 
-Once a mesh or texture has been uploaded, the core frees its CPU copy, and only its GPU copy counts, against the GPU budget. This is what keeps memory in check: today a mesh of 129 × 129 samples takes about 400 KB, so a view with 550 tiles fills the default CPU budget with meshes alone.
+Once a mesh or texture has been uploaded, the core frees its CPU copy, and only its GPU copy counts, against the GPU budget. This is what keeps memory in check: a mesh of 129 × 129 vertices takes about 400 KB with its samples, so a view with 550 tiles would fill the default CPU budget with meshes alone.
 
 The price is device loss. If the consumer loses its GPU objects (a lost Direct3D device, a destroyed OpenGL context, an Android app sent to the background), it calls:
 
@@ -274,6 +278,15 @@ Meshes use the layout the mesh builder already produces (design document, sectio
 The stride is 24 bytes. Every one of these formats exists in OpenGL ES 3.0 and Direct3D 11, and in recent classic Ogre releases as `VET_FLOAT3`, `VET_FLOAT1`, `VET_USHORT2_NORM` and `VET_SHORT2_NORM`; to be confirmed for the client's release (design document, section 16, question 1).
 
 A mesh is a square grid of *g* × *g* vertices, in rows from the north, with texture coordinates *i* / (*g* − 1) and *j* / (*g* − 1), followed by the 4 (*g* − 1) vertices of its skirts, which hang from the tile's edges with the texture coordinates of the edge vertices above them. Its vertex count, *g*² + 4 (*g* − 1), therefore gives *g*, which consumers that need the grid recover from it: the OpenGL backend's wireframe draws the cells' edges at multiples of 1 / (*g* − 1).
+
+**Samples.** A mesh's grid may be coarser than the data it was built from, where the coarser surface lies within a pixel or so of it (design document, section 7.3). Its samples are that data at full resolution: `sample_grid` × `sample_grid` of them, in rows from the north, each from the west, at texture coordinates *i* / (`sample_grid` − 1) and *j* / (`sample_grid` − 1), so that every vertex of the grid lies on a sample, at a whole stride (`sample_grid` − 1) / (*g* − 1). Each sample is 8 bytes:
+
+| Offset | Field | Format |
+|---|---|---|
+| 0 | Height above the ellipsoid | `float` |
+| 4 | Normal, octahedral encoding | 2 × signed 16-bit normalized |
+
+Consumers shade from the samples rather than from the vertices: height colours, contours, the boundary of a sea surface and lighting, interpolated bilinearly over the texture coordinates, keep the full detail however coarse the grid. The skirts' texture coordinates lie on the tile's edges, so they shade as the edge above them. A consumer that shades from the vertices sees coarser detail on coarse grids, but is otherwise correct. How a consumer stores the samples is its own choice: the OpenGL backend uploads them as they are, as a texture of two 32-bit unsigned integers per texel, and reads the height's bits and the normal's halves back in the shader.
 
 Index lists are 16-bit when the mesh has at most 65,536 vertices (grids up to 254 × 254 with their skirts, which covers the 129-sample tiles of the test bake), and 32-bit above that; the index list's data says which. Triangles are counter-clockwise seen from outside the ellipsoid, in right-handed ECEF. A consumer whose camera space is left-handed, as is common with Direct3D, sees them clockwise and sets its culling mode to match; the backend knows its convention, so the data does not need to say.
 
@@ -398,6 +411,10 @@ Implementing the OpenGL backend added what a consumer built on the public API ne
 - The depth conventions became an enumeration in `vgl/render.h`, with the logarithmic one as the default (section 8).
 - For the logarithmic convention, the host passes the far distance when it draws, instead of the frame reporting a coefficient: the host then knows it without asking, and it can change from frame to frame.
 - Destroying a built-in backend resets the context's resources (`vgl_context_resources_reset`), so that a consumer created later receives every resource again.
+
+Coarser meshes at globe scale added samples to meshes, without touching the decisions:
+
+- A tile that can refine takes a coarser grid where the coarser surface stays within half its geometric error (design document, section 7.3), which cut the triangles of a view from orbit fiftyfold. Interpolated from fewer vertices, height colours, the sea's coastline and lighting lost their detail, so each mesh carries its full-resolution samples, appended to `vgl_mesh_data` (section 6). They are part of the mesh rather than a texture resource of their own: a mesh and its samples are created, counted and destroyed together, and each consumer stores them as suits it. Before version 1.0, `vgl_mesh_data` grew without a size field for the consumer to state, as draw items have; the frame's lists of resources may get one when the interface is frozen.
 
 Imagery filled in what sections 5 and 7 had left open, again without touching the decisions:
 

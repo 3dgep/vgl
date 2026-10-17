@@ -251,6 +251,10 @@ void overlay::panel(const vgl_context_statistics& s, const panel_info& info, deb
         begin_table("work"))
     {
         row("Selected, drawn", "%u, %u", s.tiles_selected, s.tiles_drawn);
+        row("Vertices, triangles drawn",
+            "%llu, %llu",
+            static_cast<unsigned long long>(s.vertices_drawn),
+            static_cast<unsigned long long>(s.triangles_drawn));
         row("Packs loading, failed", "%u, %u", s.packs_loading, s.packs_failed);
         row("Reads outstanding", "%u", s.reads_outstanding);
         row("Tiles decoding, cached", "%u, %u", s.tiles_decoding, s.tiles_decoded);

@@ -942,6 +942,20 @@ TEST_CASE(selected_tiles_get_meshes_of_their_data)
         REQUIRE(m != nullptr);
         CHECK(m->source == t.source);
         CHECK(m->grid >= min_mesh_grid);
+        // The samples keep the full grid where the mesh is coarser, which takes every
+        // stride-th sample.
+        REQUIRE(m->sample_grid >= m->grid);
+        CHECK((m->sample_grid - 1) % (m->grid - 1) == 0);
+        CHECK_EQ(m->samples.size(), std::size_t{m->sample_grid} * m->sample_grid);
+        const std::uint32_t stride = (m->sample_grid - 1) / (m->grid - 1);
+        for (std::uint32_t k = 0; k < m->grid; k += 2)
+        {
+            CHECK_EQ(mesh_height(*m, k, m->grid - 1 - k),
+                     m->samples
+                         .data()[std::size_t{m->grid - 1 - k} * stride * m->sample_grid +
+                                 std::size_t{k} * stride]
+                         .height);
+        }
         if (!(t.source == t.id))
         {
             ++from_ancestor;
@@ -956,6 +970,21 @@ TEST_CASE(selected_tiles_get_meshes_of_their_data)
         }
     }
     CHECK(from_ancestor > 0);
+
+    // Tiles that can refine, drawn while their error is small, take coarser grids where the
+    // surface allows, and keep their samples. Tiles of the deepest level keep every sample.
+    v.max_screen_space_error = 200.0;
+    REQUIRE(vgl_context_view_set(ctx, &v) == VGL_RESULT_SUCCESS);
+    settle(ctx, io);
+    int coarser = 0;
+    for (const selected_tile& t : ctx->selected)
+    {
+        m = mesh_of(ctx, t.id);
+        REQUIRE(m != nullptr);
+        coarser += m->grid < m->sample_grid ? 1 : 0;
+        CHECK(m->grid == m->sample_grid || t.id.level < 3);
+    }
+    CHECK(coarser > 0);
 
     // The pack's meshes go with it.
     const std::uint32_t pack_id = p->id;

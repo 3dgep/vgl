@@ -203,8 +203,24 @@ The pack format has its own version number, independent of the library version.
   pure-C and headless samples draw Blue Marble; the OpenGL check adds a view of the Sahara that
   only imagery colours sand.
 
+- Coarser meshes at globe scale: a tile that can refine takes every second, fourth, eighth or
+  sixteenth sample where every sample stays within half its geometric error of the coarser
+  mesh, so within about a pixel. A view of the globe from orbit draws 4,500 triangles instead
+  of 237,000.
+- Meshes carry their full-resolution samples, a height and a normal each
+  (`vgl_mesh_data::samples`, `VGL_TERRAIN_SAMPLE_SIZE`; render interface specification,
+  section 6), and the OpenGL backend shades from them, so height colours, contours, the sea
+  surface's coastline and lighting keep their detail on coarser meshes. The backend uses
+  texture unit 4 for them, and restores it.
+- The OpenGL backend's wireframe draws the tiles' boundaries in yellow, about two pixels wide,
+  apart from the cyan grid cells.
+- Statistics of the last frame's meshes: `vertices_drawn` and `triangles_drawn`, appended to
+  `vgl_context_statistics`, shown in the OpenGL sample's overlay and printed by its check.
+
 ### Changed
 
+- **Breaking:** `vgl_mesh_data` has the mesh's samples appended, so consumers stepping through
+  the list of meshes must be built against the new header.
 - **Breaking:** the C++ wrapper for `vgl/base.h` moved from `vgl/vgl.hpp` to `vgl/base.hpp`.
   `vgl/vgl.hpp` now includes every core wrapper header.
 - The allocator interface entry `free` in the C API conventions is now `deallocate`.

@@ -26,6 +26,9 @@ namespace pk = pack;
 // Largest spacing of the bare ellipsoid's vertices, in degrees, and its largest grid.
 constexpr double ellipsoid_spacing = 1.5;
 constexpr std::uint32_t max_ellipsoid_grid = 129;
+// How far a tile's mesh may lie from its samples, as a share of its geometric error.
+constexpr double mesh_tolerance = 0.5;
+
 // Samples per side assumed for the geometric error of a tile without data.
 constexpr std::uint32_t default_tile_size = 129;
 
@@ -145,7 +148,8 @@ mesh_job* prepare(vgl_context& ctx, const selected_tile& s) noexcept
     vector<height_source> fill(ctx.memory);
     if (job == nullptr || !job->heights.allocate(ctx.memory, count) ||
         !job->scratch.allocate(ctx.memory, count) ||
-        !job->vertices.allocate(ctx.memory, tile_mesh_vertex_count(grid)))
+        !job->vertices.allocate(ctx.memory, tile_mesh_vertex_count(grid)) ||
+        !job->samples.allocate(ctx.memory, count))
     {
         ctx.memory.destroy(job);
         return nullptr;
@@ -197,7 +201,15 @@ mesh_job* prepare(vgl_context& ctx, const selected_tile& s) noexcept
     job->pack_id = p != nullptr ? p->id : 0;
     job->grid = grid;
     job->shape = ctx.shape;
-    job->skirt_height = lowest - tile_geometric_error(ctx.shape, s.id.level, n);
+    const double error = tile_geometric_error(ctx.shape, s.id.level, n);
+    job->skirt_height = lowest - error;
+    // A tile that can refine is drawn only while its geometric error is small on the screen,
+    // so a coarser grid within a part of that error looks the same. Tiles that cannot refine
+    // may be seen from any distance, and keep every sample.
+    if (exact && depth == 0 && data->header.child_mask != 0 && s.id.level < max_tile_level)
+    {
+        job->tolerance = mesh_tolerance * error;
+    }
     return job;
 }
 
@@ -221,12 +233,30 @@ void mesh_task(void* data) noexcept
 
 void mesh_job::run() noexcept
 {
+    // The samples keep the full grid for shading, however coarse the mesh.
+    build_tile_positions(shape, id, grid, heights.span(), scratch.span());
+    build_tile_samples(id, grid, heights.span(), scratch.span(), samples.span());
+    sample_grid = grid;
+    if (tolerance > 0.0)
+    {
+        const std::uint32_t stride = tile_mesh_stride(grid, scratch.span(), tolerance);
+        buffer<tile_vertex> fewer;
+        // Out of memory, the mesh keeps every sample.
+        if (stride > 1 &&
+            fewer.allocate(core->memory(), tile_mesh_vertex_count((grid - 1) / stride + 1)))
+        {
+            grid = tile_heights_decimate(grid, stride, heights.span());
+            vertices = std::move(fewer);
+        }
+    }
+    const std::size_t count = static_cast<std::size_t>(grid) * grid;
+    const std::span<const float> kept = heights.span().first(count);
     centre = build_tile_vertices(
-        shape, id, grid, heights.span(), skirt_height, scratch.span(), vertices.span());
+        shape, id, grid, kept, skirt_height, scratch.span().first(count), vertices.span());
     // The terrain's range; the skirts hang below it.
-    min_height = heights.data()[0];
-    max_height = heights.data()[0];
-    for (const float h : heights.span())
+    min_height = kept[0];
+    max_height = kept[0];
+    for (const float h : kept)
     {
         min_height = std::min(min_height, static_cast<double>(h));
         max_height = std::max(max_height, static_cast<double>(h));
@@ -380,8 +410,11 @@ void handle_mesh_built(vgl_context& ctx, mesh_job* job) noexcept
         r.centre = job->centre;
         r.min_height = job->min_height;
         r.max_height = job->max_height;
-        r.bytes = job->vertices.size() * sizeof(tile_vertex);
+        r.bytes =
+            job->vertices.size() * sizeof(tile_vertex) + job->samples.size() * sizeof(tile_sample);
         r.vertices = std::move(job->vertices);
+        r.samples = std::move(job->samples);
+        r.sample_grid = job->sample_grid;
         // The index list first: it may take the next resource id.
         const bool has_list = ensure_index_list(ctx, job->grid);
         const std::uint64_t id = ctx.next_resource_id;

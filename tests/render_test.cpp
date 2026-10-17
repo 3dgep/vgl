@@ -128,6 +128,8 @@ struct fake_gpu
             CHECK(ever.insert(d.resource).second);
             CHECK_EQ(d.vertex_size, static_cast<std::uint32_t>(VGL_TERRAIN_VERTEX_SIZE));
             CHECK(d.vertices != nullptr);
+            CHECK_EQ(d.sample_size, static_cast<std::uint32_t>(VGL_TERRAIN_SAMPLE_SIZE));
+            CHECK(d.samples != nullptr && d.sample_grid >= 9);
             // Its index list exists by now, unless the consumer failed to create it, in which
             // case it cannot create the mesh either.
             const auto list = resident.find(d.index_list);
@@ -148,8 +150,20 @@ struct fake_gpu
                 sum += bytes[b];
             }
             CHECK(sum > 0);
-            resident[d.resource] = {
-                false, std::uint64_t{d.vertex_count} * d.vertex_size, 0, 0, d.vertex_count};
+            const std::size_t sample_bytes =
+                std::size_t{d.sample_grid} * d.sample_grid * d.sample_size;
+            const auto* samples = static_cast<const unsigned char*>(d.samples);
+            sum = 0;
+            for (std::size_t b = 0; b < sample_bytes; ++b)
+            {
+                sum += samples[b];
+            }
+            CHECK(sum > 0);
+            resident[d.resource] = {false,
+                                    std::uint64_t{d.vertex_count} * d.vertex_size + sample_bytes,
+                                    0,
+                                    0,
+                                    d.vertex_count};
             ++meshes_created;
             if (set_handles)
             {

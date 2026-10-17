@@ -277,6 +277,9 @@ bool offer(vgl_context& ctx, std::uint64_t id, gpu_resource& r) noexcept
         d.centre = r.centre.to_c();
         d.min_height = r.min_height;
         d.max_height = r.max_height;
+        d.samples = r.samples.data();
+        d.sample_grid = r.sample_grid;
+        d.sample_size = sizeof(tile_sample);
         if (!ctx.frame_meshes.push_back(d))
         {
             ctx.frame_offered.pop_back();
