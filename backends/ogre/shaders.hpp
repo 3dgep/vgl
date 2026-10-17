@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Jeremiah van Oosten
 //
-// The terrain shaders, written with Ogre's unified shader macros (OgreUnifiedShader.h), so that
-// one source compiles as GLSL, GLSL ES, HLSL, Vulkan's GLSL and Metal (design document, section
-// 7.6). What the macros do not cover, reading the samples texel by texel and the depth output,
-// has a branch per language. The shading is the OpenGL backend's
+// The terrain and sky shaders, written with Ogre's unified shader macros (OgreUnifiedShader.h),
+// so that one source compiles as GLSL, GLSL ES, HLSL, Vulkan's GLSL and Metal (design document,
+// section 7.6). What the macros do not cover, reading the samples texel by texel and the depth
+// output, has a branch per language. The shading is the OpenGL backend's
 // (backends/gl/shaders.hpp), which documents it. The globe defines VGL_LOGARITHMIC_DEPTH for
-// the logarithmic depth convention.
+// the logarithmic depth convention, and puts the atmosphere's functions
+// (backends/common/atmosphere.glsl) where a fragment shader has the line //@vgl_atmosphere.
 
 #ifndef VGL_BACKENDS_OGRE_SHADERS_HPP
 #define VGL_BACKENDS_OGRE_SHADERS_HPP
@@ -71,6 +72,7 @@ MAIN_DECLARATION
 
 inline constexpr const char* terrain_fragment_shader = R"shader(
 #include <OgreUnifiedShader.h>
+//@vgl_atmosphere
 
 // The mesh's samples, as the globe converts them (globe.cpp): per texel, two floats, the
 // height above the ellipsoid and the octahedral normal's two components at 12 bits each, packed
@@ -102,7 +104,20 @@ OGRE_UNIFORMS(
     uniform vec4 u_layer_uv2;
     uniform vec4 u_layer_uv3;
     uniform vec4 u_layer_opacity;
+    // The atmosphere (atmosphere.glsl): camera space to its frame, a row in each, metres to
+    // kilometres included; the camera in it and its height above the ground; and the sun's
+    // direction there, with 1 in w when the atmosphere is drawn.
+    uniform vec4 u_to_planet0;
+    uniform vec4 u_to_planet1;
+    uniform vec4 u_to_planet2;
+    uniform vec4 u_camera;
+    uniform vec4 u_sun_planet;
 )
+
+vec3 to_planet(vec3 v)
+{
+    return vec3(dot(u_to_planet0.xyz, v), dot(u_to_planet1.xyz, v), dot(u_to_planet2.xyz, v));
+}
 
 vec3 decode_octahedral(vec2 e)
 {
@@ -266,7 +281,19 @@ MAIN_DECLARATION
         albedo = mix(albedo, vec3(0.22, 0.17, 0.12), minor * 0.55);
         albedo = mix(albedo, vec3(0.08, 0.05, 0.03), major * 0.85);
     }
-    vec3 lit = albedo * (0.3 + 0.7 * diffuse);
+    bool atmosphere = u_sun_planet.w > 0.5;
+    vec3 sunlight = vec3_splat(1.0);
+    float ambient = 1.0;
+    vec3 offset = to_planet(v_position);
+    if (atmosphere)
+    {
+        vec3 p = u_camera.xyz + offset;
+        float r = length(p);
+        float mu_s = dot(p, u_sun_planet.xyz) / r;
+        sunlight = vgl_sun_transmittance(r, mu_s) / vgl_zenith_transmittance;
+        ambient = vgl_daylight(mu_s);
+    }
+    vec3 lit = albedo * (0.3 * ambient + 0.7 * diffuse * sunlight);
     if (sea && height < 0.0 && v_skirt == 0.0)
     {
         vec3 water = layers > 0.5 && imagery ? mix(albedo, vec3(0.04, 0.16, 0.36), 0.35)
@@ -274,7 +301,16 @@ MAIN_DECLARATION
         vec3 n_sea = normalize(v_up);
         float d = max(dot(n_sea, l), 0.0);
         float glint = pow(max(dot(reflect(-l, n_sea), normalize(-v_position)), 0.0), 80.0);
-        lit = water * (0.35 + 0.65 * d) + vec3_splat(0.5) * glint;
+        lit = water * (0.35 * ambient + 0.65 * d * sunlight) + vec3_splat(0.5) * glint * sunlight;
+    }
+    if (atmosphere)
+    {
+        float distance = length(offset);
+        vec3 inscatter;
+        vec3 transmittance;
+        vgl_atmosphere(u_camera.xyz, u_camera.w, offset / max(distance, 1e-9), distance,
+                       u_sun_planet.xyz, 8, inscatter, transmittance);
+        lit = lit * transmittance + vgl_expose(inscatter * vgl_sky_brightness);
     }
     vec4 colour = vec4(lit, 1.0);
     if ((debug & 1) != 0 && cells > 0.0)
@@ -296,6 +332,62 @@ MAIN_DECLARATION
     gl_FragDepth = log2(v_log_depth) * u_frame.y * 0.5;
 #   endif
 #endif
+}
+)shader";
+
+// The sky (backends/gl/shaders.hpp): one triangle over the whole viewport at the far depth, from
+// three vertices in normalized device coordinates, so that it shows only where nothing was
+// drawn before it.
+inline constexpr const char* sky_vertex_shader = R"shader(
+#include <OgreUnifiedShader.h>
+
+OGRE_UNIFORMS(
+    uniform vec4 u_sky; // The far plane's depth in normalized device coordinates; unused.
+)
+
+MAIN_PARAMETERS
+IN(vec4 vertex, POSITION)
+OUT(vec2 v_ndc, TEXCOORD0)
+MAIN_DECLARATION
+{
+    v_ndc = vertex.xy;
+    gl_Position = vec4(vertex.xy, u_sky.x, 1.0);
+}
+)shader";
+
+inline constexpr const char* sky_fragment_shader = R"shader(
+#include <OgreUnifiedShader.h>
+//@vgl_atmosphere
+
+OGRE_UNIFORMS(
+    uniform mat4 u_inverse_projection; // Ogre's, flipped for render textures as it draws them.
+    uniform vec4 u_to_planet0;
+    uniform vec4 u_to_planet1;
+    uniform vec4 u_to_planet2;
+    uniform vec4 u_camera;
+    uniform vec4 u_sun_planet;
+)
+
+vec3 to_planet(vec3 v)
+{
+    return vec3(dot(u_to_planet0.xyz, v), dot(u_to_planet1.xyz, v), dot(u_to_planet2.xyz, v));
+}
+
+MAIN_PARAMETERS
+IN(vec2 v_ndc, TEXCOORD0)
+MAIN_DECLARATION
+{
+    // The view ray through the pixel, from a point on it in camera space, between the near and
+    // far planes in every depth convention.
+    vec4 q = mul(u_inverse_projection, vec4(v_ndc, 0.5, 1.0));
+    vec3 direction = normalize(to_planet(q.xyz / q.w));
+    vec3 inscatter;
+    vec3 transmittance;
+    vgl_atmosphere(u_camera.xyz, u_camera.w, direction, 1.0e9, u_sun_planet.xyz, 16, inscatter,
+                   transmittance);
+    float disc = smoothstep(0.999955, 0.999975, dot(direction, u_sun_planet.xyz));
+    vec3 colour = vgl_expose(inscatter * vgl_sky_brightness) + transmittance * disc;
+    gl_FragColor = vec4(colour, (transmittance.r + transmittance.g + transmittance.b) / 3.0);
 }
 )shader";
 

@@ -33,15 +33,25 @@ struct debug_settings
     bool height_colors = false;      // F6: colours by height instead of imagery.
     bool contours = false;           // F7.
     bool sea = false;                // F8: a sea surface over the ocean floor.
+    bool atmosphere = false;         // F9: the sky and haze; the interactive samples start with it.
     bool contour_auto = true;        // The interval follows the altitude.
     float contour_interval = 500.0f; // Metres.
     bool sunlight = true;            // L.
-    float max_error = 2.0f;          // Screen-space error in pixels.
+    // The sun's place: the time of day in hours (UTC) and the day of the year, from 1 on
+    // 1 January. The defaults put it over north Africa in early May, late in the morning there.
+    float time_of_day = 10.55f;
+    int day_of_year = 123;
+    float max_error = 2.0f; // Screen-space error in pixels.
 };
 
 // The debug views' flags, which the OpenGL and Direct3D 11 backends share (vgl_gl_debug_flag,
 // vgl_d3d11_debug_flag).
 std::uint32_t debug_flags(const debug_settings& d);
+
+// The direction towards the sun along the ECEF axes for the settings' time and day: over the
+// longitude where it is noon then, and the latitude of its declination that day. It leaves out
+// the equation of time, which moves the sun by up to 4 degrees of longitude.
+vgl_dvec3 sun_direction(const debug_settings& d);
 
 // An imagery layer the panel shows, with its opacity and order.
 struct layer_control

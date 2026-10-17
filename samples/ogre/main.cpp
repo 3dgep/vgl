@@ -261,11 +261,12 @@ vgl::ogre::globe_settings settings_for(const scene& s)
     g.view_matrix = sample::camera_view_matrix(s.camera);
     if (s.debug.sunlight)
     {
-        g.sun_direction = {1.0, 0.4, 0.3}; // Over the Atlantic, a little north.
+        g.sun_direction = sample::sun_direction(s.debug);
     }
     g.debug_flags = sample::debug_flags(s.debug);
     g.contour_interval = s.debug.contour_interval;
     g.sea_surface = s.debug.sea;
+    g.atmosphere = s.debug.atmosphere;
     return g;
 }
 
@@ -323,6 +324,7 @@ int run_check(const options& o, vgl::context& ctx)
                                                         VGL_DEPTH_CONVENTION_LOGARITHMIC,
                                                         VGL_DEPTH_CONVENTION_CONVENTIONAL};
     std::vector<std::vector<image>> images(conventions.size());
+    std::vector<std::vector<image>> atmosphere_images(conventions.size());
     for (std::size_t c = 0; c < conventions.size(); ++c)
     {
         GLFWwindow* window = window_create(width, height, false);
@@ -393,6 +395,21 @@ int run_check(const options& o, vgl::context& ctx)
                     sample::save_image(pixels, sample::image_path(o.save, s.depth, p.name));
                 }
                 images[c].push_back(std::move(pixels));
+
+                // With the atmosphere, the same with every convention.
+                scene air = s;
+                air.debug.atmosphere = true;
+                globe->settings_set(settings_for(air));
+                a.root->renderOneFrame();
+                image sky = read_image(target);
+                if (!o.save.empty())
+                {
+                    sample::save_image(
+                        sky,
+                        sample::image_path(
+                            o.save, s.depth, (std::string(p.name) + "-atmosphere").c_str()));
+                }
+                atmosphere_images[c].push_back(std::move(sky));
             }
             if (globe != nullptr)
             {
@@ -414,6 +431,7 @@ int run_check(const options& o, vgl::context& ctx)
         glfwDestroyWindow(window);
     }
     sample::compare_conventions(conventions, images);
+    sample::compare_conventions(conventions, atmosphere_images);
     std::printf("\n%s\n", sample::failures() == 0 ? "all checks passed" : "checks failed");
     return sample::failures() == 0 ? 0 : 1;
 }
@@ -516,6 +534,7 @@ int run_interactive(const options& o,
             return 1;
         }
         scene s;
+        s.debug.atmosphere = true;
         s.depth = o.depth;
         s.camera = places[0].camera;
         vgl::ogre::globe* globe = nullptr;

@@ -101,7 +101,8 @@ to places.
 Its panel (F1) shows the runtime statistics and the
 debug views: wireframe (F2), colours by tile level (F3), the imagery source (F4), a frozen
 selection (F5) to inspect level of detail and culling from outside, the heightmap (F6),
-contour lines (F7) and a sea surface (F8).
+contour lines (F7), a sea surface (F8) and the atmosphere (F9), with the sun set by the time
+of day and the day of the year.
 
 The samples find `samples/data` in the source tree by default; `--data <directory>` or the
 environment variable `VGL_SAMPLE_DATA` points them at a copy elsewhere, and `--pack <uri>`,

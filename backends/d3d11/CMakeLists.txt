@@ -35,7 +35,9 @@ foreach(variant
         "terrain_vs|vs_5_0|vs_main|"
         "terrain_vs_log|vs_5_0|vs_main|/DVGL_LOGARITHMIC_DEPTH=1"
         "terrain_ps|ps_5_0|ps_main|"
-        "terrain_ps_log|ps_5_0|ps_main|/DVGL_LOGARITHMIC_DEPTH=1")
+        "terrain_ps_log|ps_5_0|ps_main|/DVGL_LOGARITHMIC_DEPTH=1"
+        "sky_vs|vs_5_0|sky_vs_main|"
+        "sky_ps|ps_5_0|sky_ps_main|")
     string(REPLACE "|" ";" parts "${variant}")
     list(GET parts 0 name)
     list(GET parts 1 profile)
@@ -47,7 +49,7 @@ foreach(variant
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${vgl_shader_dir}"
         COMMAND "${VGL_FXC}" /nologo /T ${profile} /E ${entry} /O3 /WX ${defines}
                 /Vn g_${name} /Fh "${header}" "${CMAKE_CURRENT_SOURCE_DIR}/terrain.hlsl"
-        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/terrain.hlsl"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/terrain.hlsl" "${VGL_ATMOSPHERE_GLSL_FILE}"
         COMMENT "Compiling ${name} (${profile})"
         VERBATIM)
     list(APPEND vgl_shader_headers "${header}")
@@ -69,7 +71,7 @@ target_include_directories(vgl_d3d11
     PUBLIC
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
         "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
-    PRIVATE "${PROJECT_SOURCE_DIR}/src" "${vgl_shader_dir}")
+    PRIVATE "${PROJECT_SOURCE_DIR}/src" "${PROJECT_SOURCE_DIR}" "${vgl_shader_dir}")
 target_link_libraries(vgl_d3d11 PUBLIC vgl d3d11)
 
 # Without the min and max macros of windows.h, which d3d11.h includes.

@@ -22,7 +22,7 @@ target_include_directories(vgl_gl
     PUBLIC
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
         "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
-    PRIVATE "${PROJECT_SOURCE_DIR}/src")
+    PRIVATE "${PROJECT_SOURCE_DIR}/src" "${VGL_GENERATED_BACKEND_DIR}" "${PROJECT_SOURCE_DIR}")
 target_link_libraries(vgl_gl PUBLIC vgl)
 
 if(BUILD_SHARED_LIBS)

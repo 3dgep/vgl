@@ -119,6 +119,15 @@ The pack format has its own version number, independent of the library version.
   backend, pixel for pixel but for anti-aliased wireframe lines on Direct3D 11. CI runs it on
   Linux with Mesa on full runs.
 - The samples in a GLFW window share their controls (`samples/common/glfw_controls.hpp`).
+- Atmosphere, in every backend (`vgl_gl_draw_info::atmosphere`, `vgl_d3d11_draw_info::atmosphere`,
+  `vgl::ogre::globe_settings::atmosphere`): the sky where nothing was drawn, the glow around the
+  globe seen from space, the haze over the terrain and the sunlight reddened and dimmed on it,
+  from single scattering by air and haze and absorption by ozone, integrated per pixel. The
+  backends share one model (`backends/common/atmosphere.glsl`). The OpenGL backend now also
+  saves and restores the blend functions and equations. The interactive samples start with it,
+  and switch it with F9; their checks draw every place with it too, the same with every depth
+  convention. Their panel sets the sun by the time of day (UTC) and the day of the year, and
+  shows the solar time under the camera.
 - Picking (FR-07): `vgl_context_ray_query` intersects a ray in ECEF with the terrain that height
   queries see, the ellipsoid where no pack has data, and returns the hit's distance, ECEF
   position and geodetic position in a `vgl_ray_hit`, starting the reads of finer data there.

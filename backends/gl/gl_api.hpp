@@ -57,6 +57,16 @@ inline constexpr GLenum GL_DEPTH_TEST = 0x0B71;
 inline constexpr GLenum GL_DEPTH_WRITEMASK = 0x0B72;
 inline constexpr GLenum GL_DEPTH_FUNC = 0x0B74;
 inline constexpr GLenum GL_BLEND = 0x0BE2;
+inline constexpr GLenum GL_ZERO = 0;
+inline constexpr GLenum GL_ONE = 1;
+inline constexpr GLenum GL_SRC_ALPHA = 0x0302;
+inline constexpr GLenum GL_FUNC_ADD = 0x8006;
+inline constexpr GLenum GL_BLEND_EQUATION_RGB = 0x8009;
+inline constexpr GLenum GL_BLEND_EQUATION_ALPHA = 0x883D;
+inline constexpr GLenum GL_BLEND_DST_RGB = 0x80C8;
+inline constexpr GLenum GL_BLEND_SRC_RGB = 0x80C9;
+inline constexpr GLenum GL_BLEND_DST_ALPHA = 0x80CA;
+inline constexpr GLenum GL_BLEND_SRC_ALPHA = 0x80CB;
 inline constexpr GLenum GL_UNSIGNED_SHORT = 0x1403;
 inline constexpr GLenum GL_SHORT = 0x1402;
 inline constexpr GLenum GL_UNSIGNED_INT = 0x1405;
@@ -156,6 +166,14 @@ inline constexpr GLenum GL_ZERO_TO_ONE = 0x935F;
     X(void,                                                                                        \
       UniformMatrix4fv,                                                                            \
       (GLint location, GLsizei count, GLboolean transpose, const GLfloat* value))                  \
+    X(void,                                                                                        \
+      UniformMatrix3fv,                                                                            \
+      (GLint location, GLsizei count, GLboolean transpose, const GLfloat* value))                  \
+    X(void, BlendEquationSeparate, (GLenum mode_rgb, GLenum mode_alpha))                           \
+    X(void,                                                                                        \
+      BlendFuncSeparate,                                                                           \
+      (GLenum src_rgb, GLenum dst_rgb, GLenum src_alpha, GLenum dst_alpha))                        \
+    X(void, DrawArrays, (GLenum mode, GLint first, GLsizei count))                                 \
     X(void, GenBuffers, (GLsizei n, GLuint * buffers))                                             \
     X(void, DeleteBuffers, (GLsizei n, const GLuint* buffers))                                     \
     X(void, BindBuffer, (GLenum target, GLuint buffer))                                            \

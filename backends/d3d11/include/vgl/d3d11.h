@@ -148,6 +148,11 @@ typedef struct vgl_d3d11_draw_info
      * ellipsoid. */
     vgl_bool sea_surface;
     uint32_t reserved2;
+    /* VGL_TRUE draws the atmosphere, as vgl_gl_draw_info.atmosphere describes: the sky where
+     * nothing was drawn before it, at the far depth, blended over the render target there, and
+     * the haze and the sun's colour on the terrain. */
+    vgl_bool atmosphere;
+    uint32_t reserved3;
 } vgl_d3d11_draw_info;
 
 /* Debug views of vgl_d3d11_draw_info.debug_flags, the same as the OpenGL backend's

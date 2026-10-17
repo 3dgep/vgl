@@ -76,6 +76,20 @@ vgl_dvec3 transform(const vgl_dmat4& m, const vgl_dvec3& p, double& w)
 
 } // namespace
 
+vgl_dvec3 sun_direction(const debug_settings& d)
+{
+    constexpr double pi = 3.14159265358979323846;
+    // The declination, from about 10 days before the year begins, at the December solstice.
+    const double declination =
+        -23.44 * pi / 180.0 * std::cos(2.0 * pi * (d.day_of_year + 10) / 365.0);
+    // It is noon where the sun is over the meridian: at 0 degrees at 12:00 UTC, moving west
+    // by 15 degrees an hour.
+    const double longitude = -15.0 * (d.time_of_day - 12.0) * pi / 180.0;
+    return {std::cos(declination) * std::cos(longitude),
+            std::cos(declination) * std::sin(longitude),
+            std::sin(declination)};
+}
+
 std::vector<layer_control> layer_controls(const std::vector<pack_source>& sources,
                                           const std::vector<vgl::pack>& packs)
 {
@@ -319,6 +333,7 @@ void overlay::panel(const vgl_context_statistics& s, const panel_info& info, deb
         ImGui::Checkbox("Heightmap (F6)", &d.height_colors);
         ImGui::Checkbox("Contour lines (F7)", &d.contours);
         ImGui::Checkbox("Sea surface (F8)", &d.sea);
+        ImGui::Checkbox("Atmosphere (F9)", &d.atmosphere);
         if (d.contours)
         {
             ImGui::Checkbox("Interval from altitude", &d.contour_auto);
@@ -333,6 +348,16 @@ void overlay::panel(const vgl_context_statistics& s, const panel_info& info, deb
             ImGui::TextDisabled("heavier every 5th; heights above the ellipsoid");
         }
         ImGui::Checkbox("Sunlight (L)", &d.sunlight);
+        if (d.sunlight)
+        {
+            ImGui::SliderFloat("Time (UTC)", &d.time_of_day, 0.0f, 24.0f, "%.2f h");
+            ImGui::SliderInt("Day of year", &d.day_of_year, 1, 365);
+            // The local solar time under the camera, from its longitude.
+            const double local = std::fmod(d.time_of_day + info.live.longitude / 15.0 + 48.0, 24.0);
+            const int minutes = static_cast<int>(local * 60.0);
+            ImGui::TextDisabled(
+                "%02d:%02d solar time under the camera", minutes / 60, minutes % 60);
+        }
         ImGui::SliderFloat(
             "Max error", &d.max_error, 0.5f, 16.0f, "%.1f px", ImGuiSliderFlags_Logarithmic);
     }

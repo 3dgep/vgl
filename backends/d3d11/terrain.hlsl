@@ -1,10 +1,18 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Jeremiah van Oosten
 //
-// The terrain shaders for shader model 5.0, ported from the OpenGL backend's GLSL
+// The terrain and sky shaders for shader model 5.0, ported from the OpenGL backend's GLSL
 // (backends/gl/shaders.hpp), which documents the shading. They are compiled at build time with
 // fxc, with VGL_LOGARITHMIC_DEPTH defined for the logarithmic depth convention, and embedded in
-// the library (design document, section 7.6).
+// the library (design document, section 7.6). The atmosphere's functions are the ones every
+// backend shares, in GLSL, which these definitions turn into HLSL.
+
+#define vec2 float2
+#define vec3 float3
+#define vec4 float4
+#define mix lerp
+#define VGL_CONST static const
+#include "../common/atmosphere.glsl"
 
 // Per frame (backend.cpp, frame_constants).
 cbuffer frame_constants : register(b0)
@@ -16,7 +24,25 @@ cbuffer frame_constants : register(b0)
     int u_sea;         // 1 raises terrain below mean sea level to it.
     float u_contour_interval;
     float u_frame_pad;
+    // The atmosphere (atmosphere.glsl), when u_atmosphere is 1: camera space to its frame, a
+    // row in each float4, metres to kilometres included; the camera in it and its height above
+    // the ground; and the sun's direction there.
+    float4 u_to_planet[3];
+    float3 u_camera_km;
+    float u_camera_height;
+    float3 u_sun_planet;
+    int u_atmosphere;
+    // The sky: the inverse of the projection, and the far plane's depth.
+    float4x4 u_inverse_projection;
+    float u_far_depth;
+    float3 u_sky_pad;
 };
+
+// Camera space to the atmosphere's frame.
+float3 to_planet(float3 v)
+{
+    return float3(dot(u_to_planet[0].xyz, v), dot(u_to_planet[1].xyz, v), dot(u_to_planet[2].xyz, v));
+}
 
 // Per tile (backend.cpp, item_constants).
 cbuffer item_constants : register(b1)
@@ -266,7 +292,20 @@ pixel_output ps_main(varyings i)
         albedo = lerp(albedo, float3(0.22, 0.17, 0.12), minor * 0.55);
         albedo = lerp(albedo, float3(0.08, 0.05, 0.03), major * 0.85);
     }
-    float3 lit = albedo * (0.3 + 0.7 * diffuse);
+    // The sunlight and the ambient light, reddened and dimmed by the atmosphere
+    // (backends/gl/shaders.hpp).
+    float3 sunlight = float3(1.0, 1.0, 1.0);
+    float ambient = 1.0;
+    float3 offset = to_planet(i.position);
+    if (u_atmosphere != 0)
+    {
+        float3 p = u_camera_km + offset;
+        float r = length(p);
+        float mu_s = dot(p, u_sun_planet) / r;
+        sunlight = vgl_sun_transmittance(r, mu_s) / vgl_zenith_transmittance;
+        ambient = vgl_daylight(mu_s);
+    }
+    float3 lit = albedo * (0.3 * ambient + 0.7 * diffuse * sunlight);
     // Skirts take the colour of the edge above them, as without the sea.
     if (u_sea != 0 && height < 0.0 && i.skirt == 0.0)
     {
@@ -275,7 +314,17 @@ pixel_output ps_main(varyings i)
         float3 n_sea = normalize(i.up);
         float d = max(dot(n_sea, l), 0.0);
         float glint = pow(max(dot(reflect(-l, n_sea), normalize(-i.position)), 0.0), 80.0);
-        lit = water * (0.35 + 0.65 * d) + float3(0.5, 0.5, 0.5) * glint;
+        lit = water * (0.35 * ambient + 0.65 * d * sunlight) + float3(0.5, 0.5, 0.5) * glint * sunlight;
+    }
+    if (u_atmosphere != 0)
+    {
+        // The haze between the camera and the terrain.
+        float distance = length(offset);
+        float3 inscatter;
+        float3 transmittance;
+        vgl_atmosphere(u_camera_km, u_camera_height, offset / max(distance, 1e-9), distance,
+                       u_sun_planet, 8, inscatter, transmittance);
+        lit = lit * transmittance + vgl_expose(inscatter * vgl_sky_brightness);
     }
     pixel_output o;
     o.color = float4(lit, 1.0);
@@ -296,4 +345,34 @@ pixel_output ps_main(varyings i)
     o.depth = log2(i.log_depth) * u_log_depth * 0.5;
 #endif
     return o;
+}
+
+// The sky (backends/gl/shaders.hpp): one triangle over the whole viewport at the far depth, so
+// that it shows only where nothing was drawn before it.
+struct sky_varyings
+{
+    float4 clip : SV_Position;
+    float2 ndc : TEXCOORD0;
+};
+
+sky_varyings sky_vs_main(uint id : SV_VertexID)
+{
+    sky_varyings o;
+    o.ndc = float2(float((id << 1) & 2), float(id & 2)) * 2.0 - 1.0;
+    o.clip = float4(o.ndc, u_far_depth, 1.0);
+    return o;
+}
+
+float4 sky_ps_main(sky_varyings i) : SV_Target
+{
+    // The view ray through the pixel, from a point on it in camera space, half way in depth.
+    float4 q = mul(u_inverse_projection, float4(i.ndc, 0.5, 1.0));
+    float3 direction = normalize(to_planet(q.xyz / q.w));
+    float3 inscatter;
+    float3 transmittance;
+    vgl_atmosphere(u_camera_km, u_camera_height, direction, 1.0e9, u_sun_planet, 16, inscatter,
+                   transmittance);
+    float disc = smoothstep(0.999955, 0.999975, dot(direction, u_sun_planet));
+    float3 color = vgl_expose(inscatter * vgl_sky_brightness) + transmittance * disc;
+    return float4(color, (transmittance.r + transmittance.g + transmittance.b) / 3.0);
 }

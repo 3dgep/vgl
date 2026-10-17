@@ -30,8 +30,8 @@
  * GL_COPY_WRITE_BUFFER and GL_PIXEL_UNPACK_BUFFER bindings, the active texture unit, the 2D
  * texture and sampler bindings of units 0 to 4, the unpack alignment, row length and skips,
  * GL_DEPTH_TEST, the depth function and write mask, GL_CULL_FACE, the cull face mode, the front
- * face, GL_BLEND, primitive restart (where it exists) and, for the reversed-Z convention, the
- * clip control depth mode. It draws with the
+ * face, GL_BLEND, the blend functions and equations, primitive restart (where it exists) and,
+ * for the reversed-Z convention, the clip control depth mode. It draws with the
  * host's framebuffer, viewport, scissor, depth range, color and stencil state unchanged, so a
  * stencil test or color mask the host leaves enabled applies to the globe as well.
  */
@@ -173,6 +173,14 @@ typedef struct vgl_gl_draw_info
      * geoid pack (vgl_draw_item.has_geoid); without one, mean sea level is the ellipsoid. */
     vgl_bool sea_surface;
     uint32_t reserved2;
+    /* VGL_TRUE draws the atmosphere (design document, section 7.6): the sky, the glow around the
+     * globe seen from space, and the haze between the camera and the terrain, lit by the sun
+     * (sun_direction, or straight above the camera when that is zero), which then also reddens
+     * and dims the sunlight on the terrain and leaves the night side dark. The sky is drawn
+     * where nothing was drawn before it, at the far depth: blended over what the framebuffer
+     * holds there, which shows through where the sky is thin, as in space. */
+    vgl_bool atmosphere;
+    uint32_t reserved3;
 } vgl_gl_draw_info;
 
 /* Debug views of vgl_gl_draw_info.debug_flags, for inspecting level of detail and loading. */

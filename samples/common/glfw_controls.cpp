@@ -130,6 +130,9 @@ void on_key(GLFWwindow* window, int key, int /*scancode*/, int action, int /*mod
     case GLFW_KEY_F8:
         d.sea = !d.sea;
         break;
+    case GLFW_KEY_F9:
+        d.atmosphere = !d.atmosphere;
+        break;
     case GLFW_KEY_N:
     case GLFW_KEY_R:
         in.nav->stop();

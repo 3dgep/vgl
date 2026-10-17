@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Jeremiah van Oosten
 //
-// The terrain shaders, in the dialect shared by GLSL 3.30 and GLSL ES 3.00 (design document,
-// section 7.6). The backend puts a preamble in front of each: the version, the precision for
-// OpenGL ES, and VGL_LOGARITHMIC_DEPTH for the logarithmic depth convention.
+// The terrain and sky shaders, in the dialect shared by GLSL 3.30 and GLSL ES 3.00 (design
+// document, section 7.6). The backend puts a preamble in front of each: the version, the
+// precision for OpenGL ES, VGL_LOGARITHMIC_DEPTH for the logarithmic depth convention, and the
+// atmosphere's functions (backends/common/atmosphere.glsl).
 
 #ifndef VGL_BACKENDS_GL_SHADERS_HPP
 #define VGL_BACKENDS_GL_SHADERS_HPP
@@ -92,6 +93,15 @@ uniform highp usampler2D u_samples;
 uniform float u_sample_cells; // Samples along a side, less one.
 
 uniform vec3 u_light; // Towards the light, in camera space; zero lights from the camera.
+
+// The atmosphere (atmosphere.glsl), when u_atmosphere is 1: camera space to its frame, metres to
+// kilometres included, the camera in it and its height above the ground, and the sun's
+// direction there.
+uniform int u_atmosphere;
+uniform mat3 u_to_planet;
+uniform vec3 u_camera_km;
+uniform float u_camera_height;
+uniform vec3 u_sun_planet;
 
 // Up to four imagery layers, bottom first (docs/render-interface.md, section 5). Separate
 // samplers rather than an array: GLSL ES 3.00 indexes sampler arrays by constants only.
@@ -291,7 +301,20 @@ void main()
         albedo = mix(albedo, vec3(0.22, 0.17, 0.12), minor * 0.55);
         albedo = mix(albedo, vec3(0.08, 0.05, 0.03), major * 0.85);
     }
-    vec3 lit = albedo * (0.3 + 0.7 * diffuse);
+    // The sunlight and the ambient light: with the atmosphere, the sunlight that reaches the
+    // terrain, reddened and dimmed by its path, and the daylight left as the sun sets.
+    vec3 sunlight = vec3(1.0);
+    float ambient = 1.0;
+    vec3 offset = u_to_planet * v_position; // From the camera, in the atmosphere's frame.
+    if (u_atmosphere != 0)
+    {
+        vec3 p = u_camera_km + offset;
+        float r = length(p);
+        float mu_s = dot(p, u_sun_planet) / r;
+        sunlight = vgl_sun_transmittance(r, mu_s) / vgl_zenith_transmittance;
+        ambient = vgl_daylight(mu_s);
+    }
+    vec3 lit = albedo * (0.3 * ambient + 0.7 * diffuse * sunlight);
     // Skirts take the colour of the edge above them, as without the sea, so that they do not
     // show as water where they fill a crack on land.
     if (u_sea != 0 && height < 0.0 && v_skirt == 0.0)
@@ -303,7 +326,17 @@ void main()
         vec3 n_sea = normalize(v_up);
         float d = max(dot(n_sea, l), 0.0);
         float glint = pow(max(dot(reflect(-l, n_sea), normalize(-v_position)), 0.0), 80.0);
-        lit = water * (0.35 + 0.65 * d) + vec3(0.5) * glint;
+        lit = water * (0.35 * ambient + 0.65 * d * sunlight) + vec3(0.5) * glint * sunlight;
+    }
+    if (u_atmosphere != 0)
+    {
+        // The haze between the camera and the terrain.
+        float distance = length(offset);
+        vec3 inscatter;
+        vec3 transmittance;
+        vgl_atmosphere(u_camera_km, u_camera_height, offset / max(distance, 1e-9), distance,
+                       u_sun_planet, 8, inscatter, transmittance);
+        lit = lit * transmittance + vgl_expose(inscatter * vgl_sky_brightness);
     }
     o_color = vec4(lit, 1.0);
     if ((u_debug & 1) != 0 && u_cells > 0.0)
@@ -326,6 +359,47 @@ void main()
 #ifdef VGL_LOGARITHMIC_DEPTH
     gl_FragDepth = log2(v_log_depth) * u_log_depth * 0.5;
 #endif
+}
+)glsl";
+
+// The sky: one triangle over the whole viewport at the far depth, so that it shows only where
+// nothing was drawn before it.
+inline constexpr const char* sky_vertex_shader = R"glsl(
+uniform float u_far_depth; // The far plane's depth in normalized device coordinates.
+out vec2 v_ndc;
+
+void main()
+{
+    v_ndc = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)) * 2.0 - 1.0;
+    gl_Position = vec4(v_ndc, u_far_depth, 1.0);
+}
+)glsl";
+
+inline constexpr const char* sky_fragment_shader = R"glsl(
+in vec2 v_ndc;
+uniform mat4 u_inverse_projection;
+uniform mat3 u_to_planet;
+uniform vec3 u_camera_km;
+uniform float u_camera_height;
+uniform vec3 u_sun_planet;
+uniform float u_mid_depth; // A depth between the near and far planes.
+
+layout(location = 0) out vec4 o_color;
+
+void main()
+{
+    // The view ray through the pixel, from a point on it in camera space.
+    vec4 q = u_inverse_projection * vec4(v_ndc, u_mid_depth, 1.0);
+    vec3 direction = normalize(u_to_planet * (q.xyz / q.w));
+    vec3 inscatter;
+    vec3 transmittance;
+    vgl_atmosphere(u_camera_km, u_camera_height, direction, 1.0e9, u_sun_planet, 16, inscatter,
+                   transmittance);
+    // The sun's disc, half a degree across, softened over a pixel or so.
+    float disc = smoothstep(0.999955, 0.999975, dot(direction, u_sun_planet));
+    vec3 color = vgl_expose(inscatter * vgl_sky_brightness) + transmittance * disc;
+    // Over what the framebuffer holds, which shows through as far as the sky is clear.
+    o_color = vec4(color, (transmittance.r + transmittance.g + transmittance.b) / 3.0);
 }
 )glsl";
 

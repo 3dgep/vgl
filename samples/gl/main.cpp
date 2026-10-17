@@ -20,8 +20,8 @@
 // places, and L switches between sunlight and a headlight. A panel shows the context's statistics
 // and the debug views: F1 shows or hides it, F2 the wireframe, F3 colours by tile level, F4 the
 // imagery source, F5 freezes the selection, so that tiles are selected for the frozen camera while
-// you fly around it, F6 colours by height instead of imagery, F7 draws contour lines, and F8 a
-// sea surface over the ocean floor.
+// you fly around it, F6 colours by height instead of imagery, F7 draws contour lines, F8 a sea
+// surface over the ocean floor, and F9 the atmosphere.
 //
 // With --check, the sample runs hidden: it flies to a few views with each depth convention
 // the device supports, and checks what it draws, that the conventions agree, that OpenGL
@@ -97,6 +97,12 @@ constexpr GLenum GL_DEPTH_TEST = 0x0B71;
 constexpr GLenum GL_DEPTH_WRITEMASK = 0x0B72;
 constexpr GLenum GL_DEPTH_FUNC = 0x0B74;
 constexpr GLenum GL_BLEND = 0x0BE2;
+constexpr GLenum GL_SRC_ALPHA = 0x0302;
+constexpr GLenum GL_ONE_MINUS_SRC_ALPHA = 0x0303;
+constexpr GLenum GL_BLEND_DST_RGB = 0x80C8;
+constexpr GLenum GL_BLEND_SRC_RGB = 0x80C9;
+constexpr GLenum GL_BLEND_DST_ALPHA = 0x80CA;
+constexpr GLenum GL_BLEND_SRC_ALPHA = 0x80CB;
 constexpr GLenum GL_UNSIGNED_BYTE = 0x1401;
 constexpr GLenum GL_RGBA = 0x1908;
 constexpr GLenum GL_NEAREST = 0x2600;
@@ -132,6 +138,7 @@ struct host_gl
     void (*DepthMask)(GLboolean) = nullptr;
     void (*CullFace)(GLenum) = nullptr;
     void (*FrontFace)(GLenum) = nullptr;
+    void (*BlendFunc)(GLenum, GLenum) = nullptr;
     void (*Viewport)(GLint, GLint, GLsizei, GLsizei) = nullptr;
     void (*ClearColor)(float, float, float, float) = nullptr;
     void (*ClearDepthf)(float) = nullptr; // OpenGL ES and OpenGL 4.1
@@ -174,6 +181,7 @@ host_gl load_host_gl()
     load(gl.DepthMask, "glDepthMask");
     load(gl.CullFace, "glCullFace");
     load(gl.FrontFace, "glFrontFace");
+    load(gl.BlendFunc, "glBlendFunc");
     load(gl.Viewport, "glViewport");
     load(gl.ClearColor, "glClearColor");
     load(gl.ClearDepthf, "glClearDepthf");
@@ -321,11 +329,12 @@ vgl::result draw(vgl::gl_backend& backend, const scene& s, int width, int height
     info.projection_matrix = &projection;
     if (s.debug.sunlight)
     {
-        info.sun_direction = {1.0, 0.4, 0.3}; // Over the Atlantic, a little north.
+        info.sun_direction = sample::sun_direction(s.debug);
     }
     info.debug_flags = sample::debug_flags(s.debug);
     info.contour_interval = s.debug.contour_interval;
     info.sea_surface = s.debug.sea ? VGL_TRUE : VGL_FALSE;
+    info.atmosphere = s.debug.atmosphere ? VGL_TRUE : VGL_FALSE;
     return backend.draw(&info);
 }
 
@@ -352,6 +361,7 @@ void sentinel_state_set(const host_gl& gl, GLuint vertex_array)
 {
     gl.BindVertexArray(vertex_array);
     gl.Enable(GL_BLEND);
+    gl.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     gl.Disable(GL_DEPTH_TEST);
     gl.DepthFunc(GL_ALWAYS);
     gl.DepthMask(0);
@@ -370,6 +380,19 @@ void sentinel_state_check(const host_gl& gl, GLuint vertex_array, vgl_depth_conv
     gl.GetIntegerv(GL_ARRAY_BUFFER_BINDING, &v);
     expect(v == 0, "the array buffer binding is restored");
     expect(gl.IsEnabled(GL_BLEND) != 0, "blending is restored");
+    GLint src_rgb = 0;
+    GLint dst_rgb = 0;
+    GLint src_alpha = 0;
+    GLint dst_alpha = 0;
+    gl.GetIntegerv(GL_BLEND_SRC_RGB, &src_rgb);
+    gl.GetIntegerv(GL_BLEND_DST_RGB, &dst_rgb);
+    gl.GetIntegerv(GL_BLEND_SRC_ALPHA, &src_alpha);
+    gl.GetIntegerv(GL_BLEND_DST_ALPHA, &dst_alpha);
+    expect(static_cast<GLenum>(src_rgb) == GL_SRC_ALPHA &&
+               static_cast<GLenum>(dst_rgb) == GL_ONE_MINUS_SRC_ALPHA &&
+               static_cast<GLenum>(src_alpha) == GL_SRC_ALPHA &&
+               static_cast<GLenum>(dst_alpha) == GL_ONE_MINUS_SRC_ALPHA,
+           "the blend functions are restored");
     expect(gl.IsEnabled(GL_DEPTH_TEST) == 0, "the depth test is restored");
     expect(gl.IsEnabled(GL_CULL_FACE) == 0, "culling is restored");
     gl.GetIntegerv(GL_DEPTH_FUNC, &v);
@@ -1118,6 +1141,7 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
                                                           VGL_DEPTH_CONVENTION_REVERSED_Z,
                                                           VGL_DEPTH_CONVENTION_CONVENTIONAL};
     std::vector<std::vector<image>> images(conventions.size());
+    std::vector<std::vector<image>> atmosphere_images(conventions.size());
     for (std::size_t c = 0; c < conventions.size(); ++c)
     {
         scene s;
@@ -1198,6 +1222,28 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
                     sample::image_path(o.save, s.depth, (std::string(p.name) + "-sea").c_str()));
             }
             images[c].push_back(std::move(pixels));
+
+            // With the atmosphere: the sky where nothing was drawn, and the haze, the same with
+            // every convention, and the host's state as it was.
+            scene air = s;
+            air.debug.atmosphere = true;
+            clear(gl, air, t);
+            sentinel_state_set(gl, host_vertex_array);
+            expect(draw(*backend, air, width, height) == vgl::result::success,
+                   "vgl_gl_backend_draw succeeds with the atmosphere");
+            sentinel_state_check(gl, host_vertex_array, s.depth);
+            expect(gl.GetError() == 0,
+                   std::string("OpenGL reports no error with the atmosphere: ") +
+                       depth_name(s.depth) + ", " + p.name);
+            image sky = read_image(gl, t);
+            if (!o.save.empty())
+            {
+                sample::save_image(
+                    sky,
+                    sample::image_path(
+                        o.save, s.depth, (std::string(p.name) + "-atmosphere").c_str()));
+            }
+            atmosphere_images[c].push_back(std::move(sky));
         }
         // The debug views draw without OpenGL errors, and leave the host's state as it was.
         s.debug.wireframe = s.debug.level_colors = s.debug.imagery_source = true;
@@ -1241,6 +1287,7 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
     gl.DeleteVertexArrays(1, &host_vertex_array);
 
     sample::compare_conventions({conventions.begin(), conventions.end()}, images);
+    sample::compare_conventions({conventions.begin(), conventions.end()}, atmosphere_images);
     std::printf("\n%s\n", sample::failures() == 0 ? "all checks passed" : "checks failed");
     return sample::failures() == 0 ? 0 : 1;
 }
@@ -1256,6 +1303,7 @@ int run_interactive(const options& o,
                     const std::vector<sample::layer_control>& layers)
 {
     scene s;
+    s.debug.atmosphere = true;
     s.depth = o.depth;
     s.camera = places[0].camera;
     if (!depth_mode_set(gl, s.depth))

@@ -93,6 +93,10 @@ struct globe_settings
     double contour_interval = 0.0;
     // Terrain below mean sea level raised to it and shaded as water (vgl_gl_draw_info).
     bool sea_surface = false;
+    // The atmosphere (vgl_gl_draw_info.atmosphere): the sky, in the render queue group
+    // RENDER_QUEUE_SKIES_LATE, where nothing was drawn before it, at the far depth, and the haze
+    // and the sun's colour on the terrain.
+    bool atmosphere = false;
 };
 
 class globe final : public Ogre::MovableObject

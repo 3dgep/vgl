@@ -103,7 +103,7 @@ target_include_directories(vgl_ogre
     PUBLIC
         "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
         "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
-    PRIVATE "${PROJECT_SOURCE_DIR}/src")
+    PRIVATE "${PROJECT_SOURCE_DIR}/src" "${VGL_GENERATED_BACKEND_DIR}" "${PROJECT_SOURCE_DIR}")
 target_link_libraries(vgl_ogre PUBLIC vgl OgreMain)
 set_target_properties(vgl_ogre PROPERTIES OUTPUT_NAME vgl-ogre EXPORT_NAME ogre)
 vgl_target_options(vgl_ogre)

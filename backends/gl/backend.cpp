@@ -3,8 +3,11 @@
 //
 // The OpenGL backend (vgl/gl.h): a consumer of the render interface (docs/render-interface.md)
 // that turns each frame's resource lists into buffers, vertex arrays and textures, and its draw
-// list into one draw call per tile, with up to four imagery layers.
+// list into one draw call per tile, with up to four imagery layers, and the atmosphere's sky
+// after them.
 
+#include "atmosphere_shader.hpp"
+#include "backends/common/atmosphere_view.hpp"
 #include "common/host_memory.hpp"
 #include "common/pointer_map.hpp"
 #include "gl_api.hpp"
@@ -20,6 +23,7 @@
 #include <cstdio>
 
 using namespace vgl::gl;
+using vgl::backends::atmosphere_view;
 using vgl::common::memory;
 
 namespace
@@ -52,6 +56,16 @@ struct gl_resource
     float min_height = 0.0f;       // Meshes: the lowest terrain height; the skirts hang below it.
 };
 
+// Where a program takes the atmosphere's values (shaders.hpp).
+struct atmosphere_uniforms
+{
+    GLint enabled = -1;
+    GLint to_planet = -1;
+    GLint camera_km = -1;
+    GLint camera_height = -1;
+    GLint sun_planet = -1;
+};
+
 // The host's state that drawing changes (NFR-08; vgl/gl.h lists it).
 struct saved_state
 {
@@ -66,6 +80,12 @@ struct saved_state
     GLint cull_face_mode = 0;
     GLint front_face = 0;
     GLboolean blend = GL_FALSE;
+    GLint blend_src_rgb = 0;
+    GLint blend_dst_rgb = 0;
+    GLint blend_src_alpha = 0;
+    GLint blend_dst_alpha = 0;
+    GLint blend_equation_rgb = 0;
+    GLint blend_equation_alpha = 0;
     GLboolean primitive_restart = GL_FALSE;
     GLboolean primitive_restart_fixed_index = GL_FALSE;
     GLint clip_origin = 0;
@@ -119,6 +139,15 @@ struct vgl_gl_backend
     GLint u_samples = -1;
     GLint u_sample_cells = -1;
     std::array<GLint, max_layers> u_layers = {-1, -1, -1, -1};
+    atmosphere_uniforms u_terrain_atmosphere;
+
+    // The sky, drawn as one triangle without vertex buffers, from an empty vertex array.
+    GLuint sky_program = 0;
+    GLuint sky_vertex_array = 0;
+    atmosphere_uniforms u_sky_atmosphere;
+    GLint u_sky_inverse_projection = -1;
+    GLint u_sky_far_depth = -1;
+    GLint u_sky_mid_depth = -1;
 
     vgl::common::pointer_map<gl_resource> resources;
 };
@@ -151,9 +180,10 @@ void log(const vgl_gl_backend& b, vgl_log_level level, const char* format, ...) 
 GLuint compile_shader(const vgl_gl_backend& b, const char* function, GLenum type, const char* body)
 {
     const functions& gl = b.gl;
-    const std::array<const GLchar*, 3> sources{
+    const std::array<const GLchar*, 4> sources{
         b.dev.es ? es_preamble : desktop_preamble,
         b.depth == VGL_DEPTH_CONVENTION_LOGARITHMIC ? logarithmic_define : "",
+        type == GL_FRAGMENT_SHADER ? vgl::backends::atmosphere_shader : "",
         body,
     };
     const GLuint shader = gl.CreateShader(type);
@@ -177,19 +207,23 @@ GLuint compile_shader(const vgl_gl_backend& b, const char* function, GLenum type
     return shader;
 }
 
-vgl_result build_program(vgl_gl_backend& b, const char* function)
+// Compiles and links a program, or returns 0.
+GLuint link_program(const vgl_gl_backend& b,
+                    const char* function,
+                    const char* name,
+                    const char* vertex,
+                    const char* fragment)
 {
     const functions& gl = b.gl;
-    const GLuint vs = compile_shader(b, function, GL_VERTEX_SHADER, terrain_vertex_shader);
-    const GLuint fs =
-        vs == 0 ? 0 : compile_shader(b, function, GL_FRAGMENT_SHADER, terrain_fragment_shader);
+    const GLuint vs = compile_shader(b, function, GL_VERTEX_SHADER, vertex);
+    const GLuint fs = vs == 0 ? 0 : compile_shader(b, function, GL_FRAGMENT_SHADER, fragment);
     if (fs == 0)
     {
         if (vs != 0)
         {
             gl.DeleteShader(vs);
         }
-        return VGL_RESULT_BACKEND_ERROR;
+        return 0;
     }
     const GLuint program = gl.CreateProgram();
     gl.AttachShader(program, vs);
@@ -207,13 +241,48 @@ vgl_result build_program(vgl_gl_backend& b, const char* function)
         gl.GetProgramInfoLog(program, static_cast<GLsizei>(text.size()), nullptr, text.data());
         log(b,
             VGL_LOG_LEVEL_ERROR,
-            "%s: the terrain program failed to link: %s",
+            "%s: the %s program failed to link: %s",
             function,
+            name,
             text.data());
+        gl.DeleteProgram(program);
+        return 0;
+    }
+    return program;
+}
+
+atmosphere_uniforms atmosphere_locations(const functions& gl, GLuint program)
+{
+    return {gl.GetUniformLocation(program, "u_atmosphere"),
+            gl.GetUniformLocation(program, "u_to_planet"),
+            gl.GetUniformLocation(program, "u_camera_km"),
+            gl.GetUniformLocation(program, "u_camera_height"),
+            gl.GetUniformLocation(program, "u_sun_planet")};
+}
+
+vgl_result build_program(vgl_gl_backend& b, const char* function)
+{
+    const functions& gl = b.gl;
+    const GLuint program =
+        link_program(b, function, "terrain", terrain_vertex_shader, terrain_fragment_shader);
+    if (program == 0)
+    {
+        return VGL_RESULT_BACKEND_ERROR;
+    }
+    const GLuint sky = link_program(b, function, "sky", sky_vertex_shader, sky_fragment_shader);
+    if (sky == 0)
+    {
         gl.DeleteProgram(program);
         return VGL_RESULT_BACKEND_ERROR;
     }
     b.program = program;
+    b.sky_program = sky;
+    b.u_terrain_atmosphere = atmosphere_locations(gl, program);
+    b.u_sky_atmosphere = atmosphere_locations(gl, sky);
+    b.u_sky_inverse_projection = gl.GetUniformLocation(sky, "u_inverse_projection");
+    b.u_sky_far_depth = gl.GetUniformLocation(sky, "u_far_depth");
+    b.u_sky_mid_depth = gl.GetUniformLocation(sky, "u_mid_depth");
+    gl.GenVertexArrays(1, &b.sky_vertex_array);
     b.u_model_view = gl.GetUniformLocation(program, "u_model_view");
     b.u_projection = gl.GetUniformLocation(program, "u_projection");
     b.u_light = gl.GetUniformLocation(program, "u_light");
@@ -317,9 +386,13 @@ void stop(vgl_gl_backend& b, bool delete_objects)
     if (delete_objects && b.ready)
     {
         b.gl.DeleteProgram(b.program);
+        b.gl.DeleteProgram(b.sky_program);
+        b.gl.DeleteVertexArrays(1, &b.sky_vertex_array);
         b.gl.DeleteSamplers(1, &b.sampler);
     }
     b.program = 0;
+    b.sky_program = 0;
+    b.sky_vertex_array = 0;
     b.sampler = 0;
     b.ready = false;
 }
@@ -339,6 +412,12 @@ saved_state save_state(const vgl_gl_backend& b)
     gl.GetIntegerv(GL_CULL_FACE_MODE, &s.cull_face_mode);
     gl.GetIntegerv(GL_FRONT_FACE, &s.front_face);
     s.blend = gl.IsEnabled(GL_BLEND);
+    gl.GetIntegerv(GL_BLEND_SRC_RGB, &s.blend_src_rgb);
+    gl.GetIntegerv(GL_BLEND_DST_RGB, &s.blend_dst_rgb);
+    gl.GetIntegerv(GL_BLEND_SRC_ALPHA, &s.blend_src_alpha);
+    gl.GetIntegerv(GL_BLEND_DST_ALPHA, &s.blend_dst_alpha);
+    gl.GetIntegerv(GL_BLEND_EQUATION_RGB, &s.blend_equation_rgb);
+    gl.GetIntegerv(GL_BLEND_EQUATION_ALPHA, &s.blend_equation_alpha);
     if (b.dev.primitive_restart)
     {
         s.primitive_restart = gl.IsEnabled(GL_PRIMITIVE_RESTART);
@@ -393,6 +472,12 @@ void restore_state(const vgl_gl_backend& b, const saved_state& s)
     gl.CullFace(static_cast<GLenum>(s.cull_face_mode));
     gl.FrontFace(static_cast<GLenum>(s.front_face));
     set_enabled(gl, GL_BLEND, s.blend != GL_FALSE);
+    gl.BlendFuncSeparate(static_cast<GLenum>(s.blend_src_rgb),
+                         static_cast<GLenum>(s.blend_dst_rgb),
+                         static_cast<GLenum>(s.blend_src_alpha),
+                         static_cast<GLenum>(s.blend_dst_alpha));
+    gl.BlendEquationSeparate(static_cast<GLenum>(s.blend_equation_rgb),
+                             static_cast<GLenum>(s.blend_equation_alpha));
     if (b.dev.primitive_restart)
     {
         set_enabled(gl, GL_PRIMITIVE_RESTART, s.primitive_restart != GL_FALSE);
@@ -651,6 +736,49 @@ const gl_resource* from_handle(std::uint64_t handle)
     return reinterpret_cast<const gl_resource*>(address); // NOLINT(performance-no-int-to-ptr)
 }
 
+void set_atmosphere(const functions& gl,
+                    const atmosphere_uniforms& u,
+                    bool enabled,
+                    const atmosphere_view& a)
+{
+    gl.Uniform1i(u.enabled, enabled ? 1 : 0);
+    if (enabled)
+    {
+        gl.UniformMatrix3fv(u.to_planet, 1, GL_FALSE, a.to_planet.data());
+        gl.Uniform3f(u.camera_km, a.camera_km[0], a.camera_km[1], a.camera_km[2]);
+        gl.Uniform1f(u.camera_height, a.camera_height);
+        gl.Uniform3f(u.sun_planet, a.sun_planet[0], a.sun_planet[1], a.sun_planet[2]);
+    }
+}
+
+// The sky, after the terrain: one triangle at the far depth, where nothing was drawn, blended
+// over what the framebuffer holds by the atmosphere's transmittance.
+void draw_sky(const vgl_gl_backend& b, const vgl_dmat4& projection, const atmosphere_view& a)
+{
+    vgl_dmat4 inverse{};
+    if (!vgl::backends::invert(projection, inverse))
+    {
+        return;
+    }
+    const functions& gl = b.gl;
+    gl.UseProgram(b.sky_program);
+    set_atmosphere(gl, b.u_sky_atmosphere, true, a);
+    gl.UniformMatrix4fv(b.u_sky_inverse_projection, 1, GL_FALSE, to_float(inverse).data());
+    // The far plane is at depth 0 for reversed-Z, with clip control's [0, 1] depth, and at 1
+    // otherwise, in OpenGL's [-1, 1]; the logarithmic convention keeps the far plane at 1.
+    const bool reversed = b.depth == VGL_DEPTH_CONVENTION_REVERSED_Z;
+    gl.Uniform1f(b.u_sky_far_depth, reversed ? 0.0f : 1.0f);
+    gl.Uniform1f(b.u_sky_mid_depth, 0.5f);
+    gl.DepthFunc(reversed ? GL_GEQUAL : GL_LEQUAL);
+    gl.DepthMask(GL_FALSE);
+    gl.Disable(GL_CULL_FACE);
+    gl.Enable(GL_BLEND);
+    gl.BlendFuncSeparate(GL_ONE, GL_SRC_ALPHA, GL_ZERO, GL_ONE);
+    gl.BlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
+    gl.BindVertexArray(b.sky_vertex_array);
+    gl.DrawArrays(GL_TRIANGLES, 0, 3);
+}
+
 void draw_items(const vgl_gl_backend& b,
                 const vgl_frame* frame,
                 const vgl_gl_draw_info& info,
@@ -665,9 +793,19 @@ void draw_items(const vgl_gl_backend& b,
     gl.Uniform1f(b.u_contour_interval,
                  static_cast<GLfloat>(info.contour_interval > 0.0 ? info.contour_interval : 500.0));
 
+    // The atmosphere needs the camera and a sun: without one, it is above the camera.
+    const bool atmosphere = info.atmosphere != VGL_FALSE && view != nullptr;
+    atmosphere_view air;
+    vgl_dvec3 sun = info.sun_direction;
+    if (atmosphere)
+    {
+        air = vgl::backends::atmosphere_for(*view, sun);
+        sun = vgl::backends::atmosphere_sun(*view, sun);
+    }
+    set_atmosphere(gl, b.u_terrain_atmosphere, atmosphere, air);
+
     // The sun in camera space: only the view's rotation applies to a direction.
     std::array<double, 3> light{};
-    const vgl_dvec3 sun = info.sun_direction;
     if (view != nullptr && (sun.x != 0.0 || sun.y != 0.0 || sun.z != 0.0))
     {
         const double* m = view->m;
@@ -819,6 +957,10 @@ void draw_items(const vgl_gl_backend& b,
                         item.index_size == 2 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT,
                         nullptr);
     }
+    if (atmosphere)
+    {
+        draw_sky(b, projection, air);
+    }
 }
 
 bool finite(const vgl_dmat4* m)
@@ -956,7 +1098,7 @@ extern "C" VGL_GL_API vgl_result vgl_gl_backend_draw(vgl_gl_backend* backend,
         VGL_GL_DEBUG_FLAG_IMAGERY_SOURCE | VGL_GL_DEBUG_FLAG_HEIGHT_COLORS |
         VGL_GL_DEBUG_FLAG_CONTOURS;
     if ((info.debug_flags & ~known_flags) != 0 || info.reserved != 0 || info.reserved2 != 0 ||
-        !std::isfinite(info.contour_interval) || info.contour_interval < 0.0)
+        info.reserved3 != 0 || !std::isfinite(info.contour_interval) || info.contour_interval < 0.0)
     {
         log(b,
             VGL_LOG_LEVEL_ERROR,

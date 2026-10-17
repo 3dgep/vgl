@@ -6,12 +6,15 @@
 // and its draw list into one draw call per tile, with up to four imagery layers. The shaders
 // (terrain.hlsl) are compiled at build time.
 
+#include "backends/common/atmosphere_view.hpp"
 #include "common/host_memory.hpp"
 #include "common/pointer_map.hpp"
 
 #include <vgl/d3d11.h>
 
 // The compiled shaders, from terrain.hlsl (CMakeLists.txt).
+#include "sky_ps.h"
+#include "sky_vs.h"
 #include "terrain_ps.h"
 #include "terrain_ps_log.h"
 #include "terrain_vs.h"
@@ -68,8 +71,16 @@ struct frame_constants
     std::int32_t sea = 0;
     float contour_interval = 0.0f;
     float pad = 0.0f;
+    std::array<float, 12> to_planet = {}; // Three rows of four.
+    std::array<float, 3> camera_km = {};
+    float camera_height = 0.0f;
+    std::array<float, 3> sun_planet = {};
+    std::int32_t atmosphere = 0;
+    std::array<float, 16> inverse_projection = {};
+    float far_depth = 0.0f;
+    std::array<float, 3> sky_pad = {};
 };
-static_assert(sizeof(frame_constants) == 96, "frame_constants must match terrain.hlsl");
+static_assert(sizeof(frame_constants) == 256, "frame_constants must match terrain.hlsl");
 
 struct item_constants
 {
@@ -148,6 +159,13 @@ struct vgl_d3d11_backend
     ID3D11SamplerState* sampler = nullptr;
     std::array<ID3D11RasterizerState*, 2> rasterizers = {}; // As is, and mirrored.
     ID3D11DepthStencilState* depth_state = nullptr;
+    // The sky: its shaders, and drawing at the far depth without writing it, from both sides,
+    // blended over the render target.
+    ID3D11VertexShader* sky_vertex_shader = nullptr;
+    ID3D11PixelShader* sky_pixel_shader = nullptr;
+    ID3D11DepthStencilState* sky_depth_state = nullptr;
+    ID3D11RasterizerState* sky_rasterizer = nullptr;
+    ID3D11BlendState* sky_blend = nullptr;
 
     vgl::common::pointer_map<d3d_resource> resources;
 };
@@ -209,7 +227,15 @@ vgl_result build_pipeline(vgl_d3d11_backend& b, const char* function)
         failed(b,
                d->CreatePixelShader(ps, ps_size, nullptr, &b.pixel_shader),
                function,
-               "the pixel shader"))
+               "the pixel shader") ||
+        failed(b,
+               d->CreateVertexShader(g_sky_vs, sizeof(g_sky_vs), nullptr, &b.sky_vertex_shader),
+               function,
+               "the sky's vertex shader") ||
+        failed(b,
+               d->CreatePixelShader(g_sky_ps, sizeof(g_sky_ps), nullptr, &b.sky_pixel_shader),
+               function,
+               "the sky's pixel shader"))
     {
         return VGL_RESULT_BACKEND_ERROR;
     }
@@ -309,6 +335,37 @@ vgl_result build_pipeline(vgl_d3d11_backend& b, const char* function)
     {
         return VGL_RESULT_BACKEND_ERROR;
     }
+
+    // The sky passes the depth test only at the far depth, writes none, and is blended over the
+    // render target by the atmosphere's transmittance, which its alpha holds.
+    ds.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+    ds.DepthFunc = b.depth == VGL_DEPTH_CONVENTION_REVERSED_Z ? D3D11_COMPARISON_GREATER_EQUAL
+                                                              : D3D11_COMPARISON_LESS_EQUAL;
+    D3D11_RASTERIZER_DESC sky_r{};
+    sky_r.FillMode = D3D11_FILL_SOLID;
+    sky_r.CullMode = D3D11_CULL_NONE;
+    sky_r.DepthClipEnable = TRUE;
+    D3D11_BLEND_DESC blend{};
+    blend.RenderTarget[0].BlendEnable = TRUE;
+    blend.RenderTarget[0].SrcBlend = D3D11_BLEND_ONE;
+    blend.RenderTarget[0].DestBlend = D3D11_BLEND_SRC_ALPHA;
+    blend.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
+    blend.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ZERO;
+    blend.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ONE;
+    blend.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
+    blend.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+    if (failed(b,
+               d->CreateDepthStencilState(&ds, &b.sky_depth_state),
+               function,
+               "the sky's depth-stencil state") ||
+        failed(b,
+               d->CreateRasterizerState(&sky_r, &b.sky_rasterizer),
+               function,
+               "the sky's rasterizer state") ||
+        failed(b, d->CreateBlendState(&blend, &b.sky_blend), function, "the sky's blend state"))
+    {
+        return VGL_RESULT_BACKEND_ERROR;
+    }
     return VGL_RESULT_SUCCESS;
 }
 
@@ -328,6 +385,11 @@ void forget_resources(vgl_d3d11_backend& b)
 void stop(vgl_d3d11_backend& b)
 {
     forget_resources(b);
+    release(b.sky_blend);
+    release(b.sky_rasterizer);
+    release(b.sky_depth_state);
+    release(b.sky_pixel_shader);
+    release(b.sky_vertex_shader);
     release(b.depth_state);
     for (ID3D11RasterizerState*& r : b.rasterizers)
     {
@@ -697,8 +759,32 @@ void draw_items(const vgl_d3d11_backend& b,
     fc.sea = info.sea_surface != VGL_FALSE ? 1 : 0;
     fc.contour_interval =
         static_cast<float>(info.contour_interval > 0.0 ? info.contour_interval : 500.0);
+    // The atmosphere needs the camera and a sun: without one, it is above the camera.
+    const bool atmosphere = info.atmosphere != VGL_FALSE && view != nullptr;
+    vgl_dmat4 inverse{};
+    const bool sky = atmosphere && vgl::backends::invert(projection, inverse);
+    vgl_dvec3 sun = info.sun_direction;
+    if (atmosphere)
+    {
+        const vgl::backends::atmosphere_view air =
+            vgl::backends::atmosphere_for(*view, info.sun_direction);
+        sun = vgl::backends::atmosphere_sun(*view, sun);
+        for (std::size_t i = 0; i < 3; ++i)
+        {
+            for (std::size_t j = 0; j < 3; ++j)
+            {
+                fc.to_planet[i * 4 + j] = air.to_planet[j * 3 + i];
+            }
+        }
+        fc.camera_km = air.camera_km;
+        fc.camera_height = air.camera_height;
+        fc.sun_planet = air.sun_planet;
+        fc.atmosphere = 1;
+        fc.inverse_projection = to_float(inverse);
+        // The far plane's depth: 0 for reversed-Z, else 1, the logarithmic convention's too.
+        fc.far_depth = b.depth == VGL_DEPTH_CONVENTION_REVERSED_Z ? 0.0f : 1.0f;
+    }
     // The sun in camera space: only the view's rotation applies to a direction.
-    const vgl_dvec3 sun = info.sun_direction;
     if (view != nullptr && (sun.x != 0.0 || sun.y != 0.0 || sun.z != 0.0))
     {
         const double* m = view->m;
@@ -812,6 +898,17 @@ void draw_items(const vgl_d3d11_backend& b,
         ID3D11Buffer* vertices = mesh->buffer;
         dc->IASetVertexBuffers(0, 1, &vertices, &stride, &offset);
         dc->DrawIndexed(item.index_count, 0, 0);
+    }
+    if (sky)
+    {
+        // One triangle, without vertex buffers, where nothing was drawn.
+        dc->IASetInputLayout(nullptr);
+        dc->VSSetShader(b.sky_vertex_shader, nullptr, 0);
+        dc->PSSetShader(b.sky_pixel_shader, nullptr, 0);
+        dc->RSSetState(b.sky_rasterizer);
+        dc->OMSetDepthStencilState(b.sky_depth_state, 0);
+        dc->OMSetBlendState(b.sky_blend, nullptr, 0xFFFFFFFF);
+        dc->Draw(3, 0);
     }
 }
 
@@ -941,7 +1038,7 @@ extern "C" VGL_D3D11_API vgl_result vgl_d3d11_backend_draw(vgl_d3d11_backend* ba
         VGL_D3D11_DEBUG_FLAG_IMAGERY_SOURCE | VGL_D3D11_DEBUG_FLAG_HEIGHT_COLORS |
         VGL_D3D11_DEBUG_FLAG_CONTOURS;
     if ((info.debug_flags & ~known_flags) != 0 || info.reserved != 0 || info.reserved2 != 0 ||
-        !std::isfinite(info.contour_interval) || info.contour_interval < 0.0)
+        info.reserved3 != 0 || !std::isfinite(info.contour_interval) || info.contour_interval < 0.0)
     {
         log(b,
             VGL_LOG_LEVEL_ERROR,

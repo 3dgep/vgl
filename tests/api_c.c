@@ -58,7 +58,8 @@ static void check_types(void)
 #ifdef VGL_TEST_GL_HEADER
     /* The OpenGL backend's structures (vgl/gl.h). */
     CHECK(sizeof(vgl_gl_backend_create_info) == 24);
-    CHECK(sizeof(vgl_gl_draw_info) == 88);
+    CHECK(sizeof(vgl_gl_draw_info) == 96);
+    CHECK(offsetof(vgl_gl_draw_info, atmosphere) == 88);
     CHECK(offsetof(vgl_gl_draw_info, sun_direction) == 24);
 #endif
 }

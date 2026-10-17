@@ -5,6 +5,8 @@
 // that turns each frame's resource lists into Ogre buffers, textures and materials, and its draw
 // list into renderables in Ogre's render queue (design document, section 7.6).
 
+#include "atmosphere_shader.hpp"
+#include "backends/common/atmosphere_view.hpp"
 #include "common/host_memory.hpp"
 #include "common/pointer_map.hpp"
 #include "shaders.hpp"
@@ -39,6 +41,10 @@ enum custom : std::uint8_t
     custom_layer_opacity = 8,
     custom_light = 9,
     custom_frame = 10,
+    custom_to_planet = 11, // To 13.
+    custom_camera = 14,
+    custom_sun_planet = 15,
+    custom_sky = 16,
 };
 
 enum class resource_kind : std::uint8_t
@@ -90,6 +96,31 @@ public:
     }
 };
 
+// The sky: one triangle over the viewport, whose vertex shader places it itself, so that it
+// takes Ogre's projection only for the fragment shader to find the view rays.
+class sky_renderable final : public Ogre::Renderable
+{
+public:
+    Ogre::RenderOperation operation;
+    Ogre::MaterialPtr material;
+
+    [[nodiscard]] const Ogre::MaterialPtr& getMaterial() const override { return material; }
+    void getRenderOperation(Ogre::RenderOperation& op) override { op = operation; }
+    void getWorldTransforms(Ogre::Matrix4* xform) const override
+    {
+        *xform = Ogre::Matrix4::IDENTITY;
+    }
+    [[nodiscard]] Ogre::Real getSquaredViewDepth(const Ogre::Camera* /*camera*/) const override
+    {
+        return 0;
+    }
+    [[nodiscard]] const Ogre::LightList& getLights() const override
+    {
+        static const Ogre::LightList none;
+        return none;
+    }
+};
+
 } // namespace
 
 struct vgl::ogre::globe::state
@@ -107,6 +138,12 @@ struct vgl::ogre::globe::state
     Ogre::HighLevelGpuProgramPtr fragment_program;
     Ogre::MaterialPtr material; // The one every mesh's is cloned from.
     Ogre::TexturePtr blank;     // In texture units with nothing to sample.
+    Ogre::HighLevelGpuProgramPtr sky_vertex_program;
+    Ogre::HighLevelGpuProgramPtr sky_fragment_program;
+    Ogre::MaterialPtr sky_material;
+    Ogre::VertexData* sky_vertices = nullptr;
+    sky_renderable sky;
+    bool sky_shown = false; // The last frame drew the atmosphere.
     vgl::common::pointer_map<ogre_resource> resources;
     std::uint64_t next_name = 0;
 
@@ -153,19 +190,29 @@ const char* shading_language()
     return nullptr;
 }
 
-Ogre::HighLevelGpuProgramPtr
-make_program(state& s, const char* language, Ogre::GpuProgramType type, const char* source)
+// A program from a source of shaders.hpp, with the atmosphere's functions where it asks for them.
+Ogre::HighLevelGpuProgramPtr compile_program(
+    state& s, const char* language, Ogre::GpuProgramType type, const char* name, const char* source)
 {
     const bool vertex = type == Ogre::GPT_VERTEX_PROGRAM;
     const Ogre::HighLevelGpuProgramPtr p =
         Ogre::HighLevelGpuProgramManager::getSingleton().createProgram(
-            s.name + (vertex ? "/terrain_vs" : "/terrain_fs"), s.group, language, type);
+            s.name + "/" + name, s.group, language, type);
     // GLSL needs a version first, which the source cannot choose for itself: Ogre takes 1.10
     // otherwise, without integer textures or bit operations. Ogre replaces this directive with
     // the render system's own version, for OpenGL and OpenGL ES alike.
     const std::string lang(language);
     const bool glsl = lang == "glsl" || lang == "glsles" || lang == "glslang";
-    p->setSource(std::string(glsl ? "OGRE_NATIVE_GLSL_VERSION_DIRECTIVE\n" : "") + source);
+    std::string text = source;
+    const std::string marker = "//@vgl_atmosphere\n";
+    if (const std::size_t at = text.find(marker); at != std::string::npos)
+    {
+        text.replace(at,
+                     marker.size(),
+                     std::string("#define VGL_CONST STATIC const\n") +
+                         vgl::backends::atmosphere_shader);
+    }
+    p->setSource(std::string(glsl ? "OGRE_NATIVE_GLSL_VERSION_DIRECTIVE\n" : "") + text);
     if (std::string(language) == "hlsl")
     {
         p->setParameter("target", vertex ? "vs_4_0" : "ps_4_0");
@@ -178,11 +225,34 @@ make_program(state& s, const char* language, Ogre::GpuProgramType type, const ch
     p->load();
     if (p->hasCompileError())
     {
-        throw std::runtime_error(std::string("the ") + (vertex ? "vertex" : "fragment") +
-                                 " program failed to compile; Ogre's log has the error");
+        throw std::runtime_error(std::string("the program ") + name +
+                                 " failed to compile; Ogre's log has the error");
     }
+    p->getDefaultParameters()->setIgnoreMissingParams(true);
+    return p;
+}
+
+// The atmosphere's parameters, which the terrain's and the sky's fragment programs share.
+void atmosphere_constants(const Ogre::GpuProgramParametersSharedPtr& params)
+{
+    for (std::size_t k = 0; k < 3; ++k)
+    {
+        params->setNamedAutoConstant("u_to_planet" + std::to_string(k),
+                                     Ogre::GpuProgramParameters::ACT_CUSTOM,
+                                     static_cast<std::uint32_t>(custom_to_planet + k));
+    }
+    params->setNamedAutoConstant("u_camera", Ogre::GpuProgramParameters::ACT_CUSTOM, custom_camera);
+    params->setNamedAutoConstant(
+        "u_sun_planet", Ogre::GpuProgramParameters::ACT_CUSTOM, custom_sun_planet);
+}
+
+Ogre::HighLevelGpuProgramPtr
+make_program(state& s, const char* language, Ogre::GpuProgramType type, const char* source)
+{
+    const bool vertex = type == Ogre::GPT_VERTEX_PROGRAM;
+    const Ogre::HighLevelGpuProgramPtr p =
+        compile_program(s, language, type, vertex ? "terrain_vs" : "terrain_fs", source);
     Ogre::GpuProgramParametersSharedPtr params = p->getDefaultParameters();
-    params->setIgnoreMissingParams(true);
     params->setNamedAutoConstant("u_world_view", Ogre::GpuProgramParameters::ACT_WORLDVIEW_MATRIX);
     const auto custom_constant = [&](const char* name, std::size_t index) {
         params->setNamedAutoConstant(
@@ -205,6 +275,7 @@ make_program(state& s, const char* language, Ogre::GpuProgramType type, const ch
         custom_constant(("u_layer_uv" + std::to_string(k)).c_str(), custom_layer_uv + k);
     }
     custom_constant("u_layer_opacity", custom_layer_opacity);
+    atmosphere_constants(params);
     // GLSL before 4.2 binds samplers to units by uniforms; HLSL by register.
     params->setNamedConstant("u_samples", 0);
     for (int k = 0; k < static_cast<int>(max_layers); ++k)
@@ -258,6 +329,48 @@ void build_pipeline(state& s)
         layer->setTexture(s.blank);
     }
     s.material->load();
+
+    // The sky: its programs, its material, which draws at the far depth only, without writing
+    // it, from both sides, over the render target by the transmittance in its alpha; and its
+    // triangle over the viewport.
+    s.sky_vertex_program = compile_program(
+        s, language, Ogre::GPT_VERTEX_PROGRAM, "sky_vs", vgl::ogre::detail::sky_vertex_shader);
+    s.sky_vertex_program->getDefaultParameters()->setNamedAutoConstant(
+        "u_sky", Ogre::GpuProgramParameters::ACT_CUSTOM, custom_sky);
+    s.sky_fragment_program = compile_program(
+        s, language, Ogre::GPT_FRAGMENT_PROGRAM, "sky_fs", vgl::ogre::detail::sky_fragment_shader);
+    const Ogre::GpuProgramParametersSharedPtr sky = s.sky_fragment_program->getDefaultParameters();
+    sky->setNamedAutoConstant("u_inverse_projection",
+                              Ogre::GpuProgramParameters::ACT_INVERSE_PROJECTION_MATRIX);
+    atmosphere_constants(sky);
+    s.sky_material = Ogre::MaterialManager::getSingleton().create(s.name + "/sky", s.group);
+    Ogre::Pass* sky_pass = s.sky_material->getTechnique(0)->getPass(0);
+    sky_pass->setLightingEnabled(false);
+    sky_pass->setDepthCheckEnabled(true);
+    sky_pass->setDepthWriteEnabled(false);
+    // Ogre turns the comparison over itself for reversed-Z.
+    sky_pass->setDepthFunction(Ogre::CMPF_LESS_EQUAL);
+    sky_pass->setCullingMode(Ogre::CULL_NONE);
+    sky_pass->setSeparateSceneBlending(
+        Ogre::SBF_ONE, Ogre::SBF_SOURCE_ALPHA, Ogre::SBF_ZERO, Ogre::SBF_ONE);
+    sky_pass->setVertexProgram(s.sky_vertex_program->getName(), true);
+    sky_pass->setFragmentProgram(s.sky_fragment_program->getName(), true);
+    s.sky_material->load();
+
+    s.sky_vertices = OGRE_NEW Ogre::VertexData();
+    s.sky_vertices->vertexStart = 0;
+    s.sky_vertices->vertexCount = 3;
+    s.sky_vertices->vertexDeclaration->addElement(0, 0, Ogre::VET_FLOAT2, Ogre::VES_POSITION);
+    const Ogre::HardwareVertexBufferSharedPtr corners =
+        Ogre::HardwareBufferManager::getSingleton().createVertexBuffer(
+            2 * sizeof(float), 3, Ogre::HBU_GPU_ONLY);
+    const std::array<float, 6> ndc = {-1.0f, -1.0f, 3.0f, -1.0f, -1.0f, 3.0f};
+    corners->writeData(0, sizeof(ndc), ndc.data(), true);
+    s.sky_vertices->vertexBufferBinding->setBinding(0, corners);
+    s.sky.operation.operationType = Ogre::RenderOperation::OT_TRIANGLE_LIST;
+    s.sky.operation.vertexData = s.sky_vertices;
+    s.sky.operation.useIndexes = false;
+    s.sky.material = s.sky_material;
 }
 
 void release(ogre_resource& r) noexcept
@@ -597,9 +710,38 @@ Ogre::Vector4 vec4(const float* v)
 void fill_renderables(state& s, const vgl_frame* frame, const vgl_dmat4* view)
 {
     const globe_settings& g = s.settings;
+    // The atmosphere needs the camera and a sun: without one, it is above the camera.
+    const bool atmosphere = g.atmosphere && view != nullptr;
+    vgl_dvec3 sun = g.sun_direction;
+    std::array<Ogre::Vector4, 3> to_planet{};
+    Ogre::Vector4 camera(0.0f, 0.0f, 0.0f, 0.0f);
+    Ogre::Vector4 sun_planet(0.0f, 0.0f, 0.0f, 0.0f);
+    if (atmosphere)
+    {
+        const vgl::backends::atmosphere_view air = vgl::backends::atmosphere_for(*view, sun);
+        sun = vgl::backends::atmosphere_sun(*view, sun);
+        for (std::size_t i = 0; i < 3; ++i)
+        {
+            to_planet[i] =
+                Ogre::Vector4(air.to_planet[i], air.to_planet[3 + i], air.to_planet[6 + i], 0.0f);
+        }
+        camera =
+            Ogre::Vector4(air.camera_km[0], air.camera_km[1], air.camera_km[2], air.camera_height);
+        sun_planet = Ogre::Vector4(air.sun_planet[0], air.sun_planet[1], air.sun_planet[2], 1.0f);
+    }
+    s.sky_shown = atmosphere;
+    for (std::size_t i = 0; i < 3; ++i)
+    {
+        s.sky.setCustomParameter(custom_to_planet + i, to_planet[i]);
+    }
+    s.sky.setCustomParameter(custom_camera, camera);
+    s.sky.setCustomParameter(custom_sun_planet, sun_planet);
+    // The far plane's depth: 0 for reversed-Z, else 1, the logarithmic convention's too.
+    s.sky.setCustomParameter(
+        custom_sky,
+        Ogre::Vector4(s.depth == VGL_DEPTH_CONVENTION_REVERSED_Z ? 0.0f : 1.0f, 0.0f, 0.0f, 0.0f));
     // The sun in camera space: only the view's rotation applies to a direction.
     Ogre::Vector4 light(0.0f, 0.0f, 0.0f, static_cast<float>(g.debug_flags));
-    const vgl_dvec3 sun = g.sun_direction;
     if (view != nullptr && (sun.x != 0.0 || sun.y != 0.0 || sun.z != 0.0))
     {
         const double* m = &view->m[0];
@@ -707,6 +849,12 @@ void fill_renderables(state& s, const vgl_frame* frame, const vgl_dmat4* view)
             Ogre::Vector4(static_cast<float>(mesh->sample_grid - 1), 0.0f, 0.0f, 0.0f));
         r->setCustomParameter(custom_light, light);
         r->setCustomParameter(custom_frame, frame_values);
+        for (std::size_t k = 0; k < 3; ++k)
+        {
+            r->setCustomParameter(custom_to_planet + k, to_planet[k]);
+        }
+        r->setCustomParameter(custom_camera, camera);
+        r->setCustomParameter(custom_sun_planet, sun_planet);
     }
 }
 
@@ -727,6 +875,7 @@ void run_frame(state& s)
     info.upload_budget = s.settings.upload_budget;
     info.view_matrix = s.settings.has_view_matrix ? &s.settings.view_matrix : nullptr;
     vgl_frame* frame = nullptr;
+    s.sky_shown = false;
     if (vgl_context_frame_begin(s.context, &info, &frame) != VGL_RESULT_SUCCESS)
     {
         s.used = 0;
@@ -857,9 +1006,14 @@ globe::~globe()
     try
     {
         Ogre::MaterialManager::getSingleton().remove(s.material);
+        Ogre::MaterialManager::getSingleton().remove(s.sky_material);
         Ogre::TextureManager::getSingleton().remove(s.blank);
         Ogre::HighLevelGpuProgramManager::getSingleton().remove(s.vertex_program);
         Ogre::HighLevelGpuProgramManager::getSingleton().remove(s.fragment_program);
+        Ogre::HighLevelGpuProgramManager::getSingleton().remove(s.sky_vertex_program);
+        Ogre::HighLevelGpuProgramManager::getSingleton().remove(s.sky_fragment_program);
+        OGRE_DELETE s.sky_vertices;
+        s.sky_vertices = nullptr;
     }
     catch (...) // NOLINT(bugprone-empty-catch): nothing more to do while destroying.
     {
@@ -909,6 +1063,10 @@ void globe::_updateRenderQueue(Ogre::RenderQueue* queue)
     for (std::size_t i = 0; i < s.used; ++i)
     {
         queue->addRenderable(s.renderables[i], mRenderQueueID, mRenderQueuePriority);
+    }
+    if (s.sky_shown)
+    {
+        queue->addRenderable(&s.sky, Ogre::RENDER_QUEUE_SKIES_LATE, mRenderQueuePriority);
     }
 }
 
