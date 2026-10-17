@@ -120,6 +120,7 @@ struct mesh_job : async_item
     tile_id id;
     tile_id source;
     std::uint32_t pack_id = 0;
+    std::uint64_t generation = 0; // The context's terrain generation it was built in.
     std::uint32_t grid = 0;
     ellipsoid shape;
     double skirt_height = 0.0;
@@ -198,6 +199,7 @@ struct gpu_resource
     tile_id tile;
     tile_id source;
     std::uint32_t pack_id = 0;
+    std::uint64_t generation = 0; // Meshes: the terrain generation they were built in.
     std::uint32_t grid = 0;
     dvec3 centre;
     double min_height = 0.0;
@@ -369,6 +371,7 @@ struct vgl_pack
     std::uint32_t id = 0;
     std::int32_t priority = 0;
     std::uint64_t order = 0;
+    float opacity = 1.0f;            // Imagery packs: 0 hides the layer.
     vgl::internal::buffer<char> uri; // Null-terminated.
     vgl_pack_state state = VGL_PACK_STATE_LOADING;
     vgl_result failure = VGL_RESULT_SUCCESS;
@@ -421,6 +424,9 @@ struct vgl_context
     vgl_pack* geoid = nullptr;
     std::uint32_t next_pack_id = 1;
     std::uint64_t next_order = 1;
+    // Changes when the order of the elevation packs does, so that meshes built from the old
+    // order, whose nodata samples another pack filled, are built again.
+    std::uint64_t terrain_generation = 0;
     vgl::internal::vector<vgl::internal::decode_job*> pending; // Waiting for an update to decode.
     std::uint64_t frame = 1;
 

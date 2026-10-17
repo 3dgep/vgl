@@ -205,6 +205,7 @@ mesh_job* prepare(vgl_context& ctx, const selected_tile& s, bool placeholder) no
     job->id = s.id;
     job->source = p != nullptr ? s.source : s.id;
     job->pack_id = p != nullptr ? p->id : 0;
+    job->generation = ctx.terrain_generation;
     job->grid = grid;
     job->placeholder = placeholder;
     job->shape = ctx.shape;
@@ -414,6 +415,7 @@ void install_mesh(vgl_context& ctx, mesh_job* job) noexcept
         r.tile = job->id;
         r.source = job->source;
         r.pack_id = job->pack_id;
+        r.generation = job->generation;
         r.grid = job->grid;
         r.centre = job->centre;
         r.min_height = job->min_height;
@@ -515,7 +517,8 @@ void build_meshes(vgl_context& ctx, std::chrono::steady_clock::time_point deadli
             latest = latest_mesh(ctx, s.id);
         }
         const bool current = latest != nullptr && !latest->placeholder &&
-                             latest->source == s.source && latest->pack_id == s.pack_id;
+                             latest->source == s.source && latest->pack_id == s.pack_id &&
+                             latest->generation == ctx.terrain_generation;
         if (current || m->building || (started && std::chrono::steady_clock::now() >= deadline))
         {
             continue;

@@ -235,9 +235,10 @@ typedef enum vgl_pack_state
 } vgl_pack_state;
 
 /**
- * Adds a pack to a context, and starts reading its manifest (docs/pack-format.md). An
- * elevation pack takes part in height queries once it is ready. A geoid pack provides heights
- * above mean sea level; a context takes at most one. Imagery packs are not used yet.
+ * Adds a pack to a context, and starts reading its manifest (docs/pack-format.md). Once it is
+ * ready, an elevation pack shapes the terrain and takes part in height queries, and an imagery
+ * pack is an imagery layer, blended over the layers of lower priority. A geoid pack provides
+ * heights above mean sea level; a context takes at most one.
  *
  * @param context   The context.
  * @param info      The pack's location and priority.
@@ -286,6 +287,68 @@ VGL_API vgl_result vgl_pack_destroy(vgl_pack* pack);
 VGL_API vgl_result vgl_pack_state_get(const vgl_pack* pack,
                                       vgl_pack_state* out_state,
                                       vgl_result* out_failure);
+
+/**
+ * Changes a pack's priority, as set in vgl_pack_create_info. Among equal priorities, the pack
+ * created later still wins. For elevation packs, the terrain is built again in the new order,
+ * and drawn in the old one until it is. For imagery packs, the layers are drawn in the new
+ * order from the next frame. Ignored for a geoid pack.
+ *
+ * @param pack      The pack.
+ * @param priority  The new priority.
+ *
+ * @retval VGL_RESULT_SUCCESS           The priority was set.
+ * @retval VGL_RESULT_INVALID_ARGUMENT  pack is null.
+ *
+ * @par Thread safety
+ * Context-synchronized.
+ */
+VGL_API vgl_result vgl_pack_priority_set(vgl_pack* pack, int32_t priority);
+
+/**
+ * Gets a pack's priority.
+ *
+ * @param pack          The pack.
+ * @param out_priority  Receives the priority.
+ *
+ * @retval VGL_RESULT_SUCCESS           The priority was written.
+ * @retval VGL_RESULT_INVALID_ARGUMENT  pack or out_priority is null.
+ *
+ * @par Thread safety
+ * Context-synchronized.
+ */
+VGL_API vgl_result vgl_pack_priority_get(const vgl_pack* pack, int32_t* out_priority);
+
+/**
+ * Sets the opacity of an imagery pack's layer: it is blended over the layers below it by its
+ * imagery's alpha times the opacity (docs/render-interface.md, section 5). At 0 the layer is
+ * hidden: its imagery is neither loaded nor drawn, and its attribution is not reported. New
+ * packs have opacity 1. Ignored for elevation and geoid packs.
+ *
+ * @param pack     The pack.
+ * @param opacity  From 0 (hidden) to 1 (opaque).
+ *
+ * @retval VGL_RESULT_SUCCESS           The opacity was set.
+ * @retval VGL_RESULT_INVALID_ARGUMENT  pack is null, or opacity is not from 0 to 1.
+ *
+ * @par Thread safety
+ * Context-synchronized.
+ */
+VGL_API vgl_result vgl_pack_opacity_set(vgl_pack* pack, float opacity);
+
+/**
+ * Gets the opacity of a pack's layer.
+ *
+ * @param pack         The pack.
+ * @param out_opacity  Receives the opacity, from 0 to 1.
+ *
+ * @retval VGL_RESULT_SUCCESS           The opacity was written.
+ * @retval VGL_RESULT_INVALID_ARGUMENT  pack or out_opacity is null.
+ *
+ * @par Thread safety
+ * Context-synchronized.
+ */
+VGL_API vgl_result vgl_pack_opacity_get(const vgl_pack* pack, float* out_opacity);
 
 /* ---------------------------------------------------------------------------------------- */
 /* Height queries                                                                           */

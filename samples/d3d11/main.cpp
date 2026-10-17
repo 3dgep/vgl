@@ -783,7 +783,10 @@ bool swap_target_create(const gpu& g, HWND window, swap_target& st)
         g, st, std::max<int>(1, r.right - r.left), std::max<int>(1, r.bottom - r.top));
 }
 
-int run_interactive(const options& o, const gpu& g, vgl::context& ctx)
+int run_interactive(const options& o,
+                    const gpu& g,
+                    vgl::context& ctx,
+                    const std::vector<sample::layer_control>& layers)
 {
     const HINSTANCE instance = GetModuleHandleW(nullptr);
     WNDCLASSEXW wc{};
@@ -866,6 +869,7 @@ int run_interactive(const options& o, const gpu& g, vgl::context& ctx)
     ShowWindow(window, SW_SHOWDEFAULT);
 
     sample::panel_info panel;
+    panel.layers = layers;
     panel.api = "Direct3D 11";
     panel.device = g.adapter.c_str();
     panel.depth = depth_name(s.depth);
@@ -1135,7 +1139,8 @@ int main(int argc, char** argv)
     }
     std::printf("\n");
 
-    const int code = o.check ? run_check(o, g, *ctx) : run_interactive(o, g, *ctx);
+    const int code = o.check ? run_check(o, g, *ctx)
+                             : run_interactive(o, g, *ctx, sample::layer_controls(sources, packs));
 
     // Leave in order: the backend went with its run; then packs and context, the reader and
     // the pool, and last the device.

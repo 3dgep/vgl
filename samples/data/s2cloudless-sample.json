@@ -1,0 +1,30 @@
+{
+    // Sample detail imagery: Sentinel-2 cloudless 2016 by EOX over the region of the GLO-30
+    // sample (two level-7 tiles), from level 7 down to level 11, about 38 m per pixel north to
+    // south. It lies over the Blue Marble sample, so that the samples show two imagery layers,
+    // with an opacity and an order the host can change, as one base shard. The source is EOX's
+    // WMTS layer "s2cloudless" (the 2016 mosaic, CC BY 4.0) at zoom 11 of its WGS84 tile
+    // matrix set, which is this pack's tiling, saved as a GeoTIFF as described in
+    // samples/data/README.md.
+    "output": "sample-packs/s2cloudless-sognefjord",
+    "layer": "imagery",
+    "tile_size": 256,
+    "border": 1,
+    "min_level": 7,
+    "max_level": 11,
+    "shard_level": 12, // Above max_level: the whole pack is one base shard.
+    "region": [5.625, 60.46875, 8.4375, 61.875],
+    "jpeg_quality": 85,
+    "metadata": {
+        "name": "Sentinel-2 cloudless 2016, Sognefjord (sample, to level 11)",
+        "attribution": "Sentinel-2 cloudless by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2016)",
+        "source": "EOX WMTS layer s2cloudless (2016), WGS84 zoom 11"
+    },
+    "sources": [
+        {
+            "name": "Sentinel-2 cloudless 2016",
+            "files": "sources/s2cloudless/s2cloudless-2016-sognefjord.tif",
+            "resampling": "cubic"
+        }
+    ]
+}

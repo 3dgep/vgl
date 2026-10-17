@@ -10,6 +10,7 @@
 #define VGL_SAMPLES_OVERLAY_HPP
 
 #include "sample_camera.hpp"
+#include "sample_data.hpp"
 
 #include <vgl/vgl.hpp>
 
@@ -42,6 +43,17 @@ struct debug_settings
 // vgl_d3d11_debug_flag).
 std::uint32_t debug_flags(const debug_settings& d);
 
+// An imagery layer the panel shows, with its opacity and order.
+struct layer_control
+{
+    vgl_pack* pack = nullptr;
+    const char* name = "";
+};
+
+// The imagery layers among the packs added from sources, in the same order.
+std::vector<layer_control> layer_controls(const std::vector<pack_source>& sources,
+                                          const std::vector<vgl::pack>& packs);
+
 // What the panel shows besides the statistics.
 struct panel_info
 {
@@ -51,6 +63,7 @@ struct panel_info
     camera live;
     camera frozen;
     std::vector<const char*> credits;
+    std::vector<layer_control> layers; // Changed through the panel.
     // The point the mouse orbits or zooms around, in window coordinates, and how strongly to
     // show its reticle (0 for none).
     double focus_x = 0.0;
@@ -106,6 +119,7 @@ public:
 
 private:
     void panel(const vgl_context_statistics& s, const panel_info& info, debug_settings& d);
+    static void layers(const std::vector<layer_control>& layers);
     void frustum_lines(const vgl_dmat4& view,
                        const vgl_dmat4& projection,
                        const std::array<vgl_dvec3, 5>& frustum);

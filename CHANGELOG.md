@@ -119,6 +119,16 @@ The pack format has its own version number, independent of the library version.
   backend, pixel for pixel but for anti-aliased wireframe lines on Direct3D 11. CI runs it on
   Linux with Mesa on full runs.
 - The samples in a GLFW window share their controls (`samples/common/glfw_controls.hpp`).
+- Imagery layers under the host's control: `vgl_pack_opacity_set` and `vgl_pack_opacity_get`
+  set the opacity a layer blends with, 0 hiding it (its imagery is then neither loaded, drawn
+  nor credited), and `vgl_pack_priority_set` and `vgl_pack_priority_get` reorder packs at run
+  time: imagery layers from the next frame, and the terrain rebuilt in the new order while the
+  old meshes stay drawn. C++ wrapper: `vgl::pack::opacity_set`, `opacity_get`, `priority_set`
+  and `priority_get`.
+- Sample detail imagery: Sentinel-2 cloudless 2016 by EOX over the Sognefjord, levels 7 to 11
+  (`samples/data/packs/s2cloudless-sognefjord`, 12.5 MB), over Blue Marble. The interactive
+  samples' panel lists the imagery layers, top first, to hide, fade and reorder them. The 2016
+  mosaic's near-black fill over glaciers is kept as it is, and documented.
 - Direct3D 11 backend (`vgl/d3d11.h`, C++ wrapper `vgl/d3d11.hpp`, target `vgl::d3d11`):
   draws the globe with Direct3D 11 at feature level 11_0 on the host's device, with the OpenGL
   backend's shading and debug views and every depth convention, reversed-Z being the natural one

@@ -39,9 +39,11 @@ bool covers(const pk::layer_description& l, const tile_id& t) noexcept
            overlaps(r.west - 360.0, r.east - 360.0, l.west, l.east);
 }
 
+// A ready imagery pack whose layer is shown: a hidden one is neither loaded nor drawn.
 bool is_imagery(const vgl_pack& p) noexcept
 {
-    return p.state == VGL_PACK_STATE_READY && p.manifest.layer().type == pk::layer_type::imagery;
+    return p.state == VGL_PACK_STATE_READY && p.manifest.layer().type == pk::layer_type::imagery &&
+           p.opacity > 0.0f;
 }
 
 vgl_pack* pack_by_id(vgl_context& ctx, std::uint32_t id) noexcept

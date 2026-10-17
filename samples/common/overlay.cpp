@@ -76,6 +76,20 @@ vgl_dvec3 transform(const vgl_dmat4& m, const vgl_dvec3& p, double& w)
 
 } // namespace
 
+std::vector<layer_control> layer_controls(const std::vector<pack_source>& sources,
+                                          const std::vector<vgl::pack>& packs)
+{
+    std::vector<layer_control> layers;
+    for (std::size_t i = 0; i < sources.size() && i < packs.size(); ++i)
+    {
+        if (sources[i].layer_name != nullptr)
+        {
+            layers.push_back({packs[i].get(), sources[i].layer_name});
+        }
+    }
+    return layers;
+}
+
 std::uint32_t debug_flags(const debug_settings& d)
 {
     return (d.wireframe ? 0x1u : 0u) | (d.level_colors ? 0x2u : 0u) |
@@ -188,6 +202,71 @@ void overlay::reticle(double x, double y, double strength)
     }
 }
 
+// The layers top first, as they are drawn, each with its visibility and opacity, and buttons
+// that move it up or down. Moving a layer numbers the priorities again from 0 at the bottom.
+void overlay::layers(const std::vector<layer_control>& layers)
+{
+    struct entry
+    {
+        const layer_control* layer;
+        std::int32_t priority;
+        std::size_t index; // Among equal priorities, the later pack is on top.
+    };
+    std::vector<entry> order;
+    for (std::size_t i = 0; i < layers.size(); ++i)
+    {
+        std::int32_t priority = 0;
+        static_cast<void>(vgl_pack_priority_get(layers[i].pack, &priority));
+        order.push_back({&layers[i], priority, i});
+    }
+    std::sort(order.begin(), order.end(), [](const entry& a, const entry& b) {
+        return a.priority != b.priority ? a.priority > b.priority : a.index > b.index;
+    });
+    std::size_t move = order.size(); // The entry to swap with the one below it.
+    for (std::size_t k = 0; k < order.size(); ++k)
+    {
+        vgl_pack* pack = order[k].layer->pack;
+        ImGui::PushID(static_cast<int>(order[k].index));
+        float opacity = 0.0f;
+        static_cast<void>(vgl_pack_opacity_get(pack, &opacity));
+        bool visible = opacity > 0.0f;
+        if (ImGui::Checkbox("##visible", &visible))
+        {
+            static_cast<void>(vgl_pack_opacity_set(pack, visible ? 1.0f : 0.0f));
+        }
+        ImGui::SameLine();
+        ImGui::BeginDisabled(k == 0);
+        if (ImGui::ArrowButton("##up", ImGuiDir_Up))
+        {
+            move = k - 1;
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::BeginDisabled(k + 1 == order.size());
+        if (ImGui::ArrowButton("##down", ImGuiDir_Down))
+        {
+            move = k;
+        }
+        ImGui::EndDisabled();
+        ImGui::SameLine();
+        ImGui::TextUnformatted(order[k].layer->name);
+        if (ImGui::SliderFloat("Opacity", &opacity, 0.0f, 1.0f, "%.2f"))
+        {
+            static_cast<void>(vgl_pack_opacity_set(pack, opacity));
+        }
+        ImGui::PopID();
+    }
+    if (move + 1 < order.size())
+    {
+        std::swap(order[move], order[move + 1]);
+        for (std::size_t k = 0; k < order.size(); ++k)
+        {
+            const auto priority = static_cast<std::int32_t>(order.size() - 1 - k);
+            static_cast<void>(vgl_pack_priority_set(order[k].layer->pack, priority));
+        }
+    }
+}
+
 void overlay::render()
 {
     backend_.render(backend_.user_data);
@@ -256,6 +335,12 @@ void overlay::panel(const vgl_context_statistics& s, const panel_info& info, deb
         ImGui::Checkbox("Sunlight (L)", &d.sunlight);
         ImGui::SliderFloat(
             "Max error", &d.max_error, 0.5f, 16.0f, "%.1f px", ImGuiSliderFlags_Logarithmic);
+    }
+
+    if (!info.layers.empty() &&
+        ImGui::CollapsingHeader("Imagery layers", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+        layers(info.layers);
     }
 
     if (ImGui::CollapsingHeader("Memory", ImGuiTreeNodeFlags_DefaultOpen))

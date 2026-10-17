@@ -153,6 +153,14 @@ static void check_context(void)
     CHECK(reads == 1);
     CHECK(vgl_context_update(context, NULL) == VGL_RESULT_SUCCESS);
     CHECK(vgl_pack_state_get(pack, &state, &failure) == VGL_RESULT_SUCCESS);
+    {
+        float opacity = 0.0f;
+        int32_t priority = 1;
+        CHECK(vgl_pack_opacity_set(pack, 0.5f) == VGL_RESULT_SUCCESS);
+        CHECK(vgl_pack_opacity_get(pack, &opacity) == VGL_RESULT_SUCCESS && opacity == 0.5f);
+        CHECK(vgl_pack_priority_set(pack, 3) == VGL_RESULT_SUCCESS);
+        CHECK(vgl_pack_priority_get(pack, &priority) == VGL_RESULT_SUCCESS && priority == 3);
+    }
     CHECK(state == VGL_PACK_STATE_FAILED);
     CHECK(failure == VGL_RESULT_NOT_FOUND);
     CHECK(vgl_context_height_query(context, 0.0, 0.0, VGL_HEIGHT_REFERENCE_ELLIPSOID, &height) ==

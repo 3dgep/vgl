@@ -213,9 +213,11 @@ bool decide_draw_set(vgl_context& ctx) noexcept
     return true;
 }
 
+// A ready imagery pack whose layer is shown.
 bool is_imagery(const vgl_pack& p) noexcept
 {
-    return p.state == VGL_PACK_STATE_READY && p.manifest.layer().type == pack::layer_type::imagery;
+    return p.state == VGL_PACK_STATE_READY &&
+           p.manifest.layer().type == pack::layer_type::imagery && p.opacity > 0.0f;
 }
 
 // Marks what this frame draws: meshes, their index lists, and the textures of their layers.
@@ -539,7 +541,7 @@ bool write_layers(vgl_context& ctx, const tile_id& t, vgl_draw_item& item) noexc
         layer.uv_scale_offset[1] = static_cast<float>(scale * inner / side);
         layer.uv_scale_offset[2] = static_cast<float>((l.border + u * inner) / side);
         layer.uv_scale_offset[3] = static_cast<float>((l.border + v * inner) / side);
-        layer.opacity = 1.0f;
+        layer.opacity = p.opacity;
         if (!ctx.frame_layers.push_back(layer))
         {
             return false;

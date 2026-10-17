@@ -25,6 +25,7 @@ struct pack_source
 {
     std::string uri;
     std::int32_t priority = 0;
+    const char* layer_name = nullptr; // For an imagery pack, its name in the panel's layers.
 };
 
 // The value of an environment variable, or an empty string if it is not set.
@@ -59,13 +60,15 @@ inline std::string data_directory(const std::string& given, const char* built_in
     return from_environment.empty() ? built_in : from_environment;
 }
 
-// The sample set in a directory: GEBCO, the GLO-30 detail above it, the geoid and Blue Marble.
+// The sample set in a directory: GEBCO, the GLO-30 detail above it, the geoid, Blue Marble, and
+// the Sentinel-2 detail above it.
 inline std::vector<pack_source> sample_packs(const std::string& directory)
 {
     return {{directory + "/packs/gebco", 0},
             {directory + "/packs/glo30-sognefjord", 1},
             {directory + "/packs/egm2008", 0},
-            {directory + "/packs/bluemarble", 0}};
+            {directory + "/packs/bluemarble", 0, "Blue Marble"},
+            {directory + "/packs/s2cloudless-sognefjord", 1, "Sentinel-2, Sognefjord"}};
 }
 
 // The packs named with --pack, all at one priority, so that each wins over the ones before it

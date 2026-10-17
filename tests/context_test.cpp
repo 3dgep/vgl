@@ -375,6 +375,14 @@ TEST_CASE(higher_priority_packs_win)
     CHECK_EQ(query(ctx, at, h), VGL_RESULT_SUCCESS);
     CHECK_NEAR(h, expected_height(low, t, at.lat, at.lon), 1e-9);
 
+    // A new priority takes effect at once, and keeps the order among equal priorities.
+    REQUIRE(vgl_pack_priority_set(c, -1) == VGL_RESULT_SUCCESS);
+    CHECK_EQ(query(ctx, at, h), VGL_RESULT_SUCCESS);
+    CHECK_NEAR(h, expected_height(high, t, at.lat, at.lon), 1e-9);
+    REQUIRE(vgl_pack_priority_set(b, 1) == VGL_RESULT_SUCCESS);
+    CHECK_EQ(query(ctx, at, h), VGL_RESULT_SUCCESS);
+    CHECK_NEAR(h, expected_height(low, t, at.lat, at.lon), 1e-9);
+
     CHECK_EQ(vgl_pack_destroy(a), VGL_RESULT_SUCCESS);
     CHECK_EQ(vgl_pack_destroy(b), VGL_RESULT_SUCCESS);
     CHECK_EQ(vgl_pack_destroy(c), VGL_RESULT_SUCCESS);

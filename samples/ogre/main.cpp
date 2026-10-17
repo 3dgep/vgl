@@ -498,7 +498,9 @@ void presenter_resize(ogre_app& a, presenter& p, int width, int height)
     }
 }
 
-int run_interactive(const options& o, vgl::context& ctx)
+int run_interactive(const options& o,
+                    vgl::context& ctx,
+                    const std::vector<sample::layer_control>& layers)
 {
     GLFWwindow* window = window_create(1280, 720, true);
     if (window == nullptr)
@@ -561,6 +563,7 @@ int run_interactive(const options& o, vgl::context& ctx)
         }
 
         sample::panel_info panel;
+        panel.layers = layers;
         const std::string api =
             "Ogre " OGRE_VERSION_NAME ", " + a.root->getRenderSystem()->getName();
         panel.api = api.c_str();
@@ -815,7 +818,8 @@ int main(int argc, char** argv)
     }
     std::printf("\n");
 
-    const int code = o.check ? run_check(o, *ctx) : run_interactive(o, *ctx);
+    const int code = o.check ? run_check(o, *ctx)
+                             : run_interactive(o, *ctx, sample::layer_controls(sources, packs));
 
     packs.clear();
     ctx->reset();

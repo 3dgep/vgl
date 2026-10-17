@@ -1257,6 +1257,80 @@ extern "C" VGL_API vgl_result vgl_pack_state_get(const vgl_pack* pack,
     return VGL_RESULT_SUCCESS;
 }
 
+extern "C" VGL_API vgl_result vgl_pack_priority_set(vgl_pack* pack, std::int32_t priority)
+{
+    vgl_pack* const p = pack;
+    if (p == nullptr)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    if (p->priority == priority)
+    {
+        return VGL_RESULT_SUCCESS;
+    }
+    vgl_context& ctx = *p->context;
+    for (std::size_t i = 0; i < ctx.packs.size(); ++i)
+    {
+        if (ctx.packs[i] == p)
+        {
+            for (std::size_t j = i + 1; j < ctx.packs.size(); ++j)
+            {
+                ctx.packs[j - 1] = ctx.packs[j];
+            }
+            ctx.packs.pop_back();
+            break;
+        }
+    }
+    p->priority = priority;
+    // The list had room for the pack, so inserting it again does not allocate.
+    static_cast<void>(insert_pack(ctx, p));
+    if (p->state == VGL_PACK_STATE_READY && p->manifest.layer().type == pack::layer_type::elevation)
+    {
+        // Meshes draw from the highest-priority pack with data, and fill nodata from the
+        // others in order: build them again, drawing the old ones until the new are ready.
+        ++ctx.terrain_generation;
+    }
+    return VGL_RESULT_SUCCESS;
+}
+
+extern "C" VGL_API vgl_result vgl_pack_priority_get(const vgl_pack* pack,
+                                                    std::int32_t* out_priority)
+{
+    if (pack == nullptr || out_priority == nullptr)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    *out_priority = pack->priority;
+    return VGL_RESULT_SUCCESS;
+}
+
+extern "C" VGL_API vgl_result vgl_pack_opacity_set(vgl_pack* pack, float opacity)
+{
+    vgl_pack* const p = pack;
+    if (p == nullptr)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    if (std::isnan(opacity) || opacity < 0.0f || opacity > 1.0f)
+    {
+        p->context->log.log(VGL_LOG_LEVEL_ERROR,
+                            "vgl_pack_opacity_set: opacity must be from 0 to 1");
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    p->opacity = opacity;
+    return VGL_RESULT_SUCCESS;
+}
+
+extern "C" VGL_API vgl_result vgl_pack_opacity_get(const vgl_pack* pack, float* out_opacity)
+{
+    if (pack == nullptr || out_opacity == nullptr)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    *out_opacity = pack->opacity;
+    return VGL_RESULT_SUCCESS;
+}
+
 extern "C" VGL_API vgl_result vgl_context_height_query(vgl_context* context,
                                                        double latitude,
                                                        double longitude,

@@ -241,6 +241,40 @@ public:
         static_cast<void>(vgl_pack_destroy(std::exchange(handle_, handle)));
     }
 
+    // Changes the priority; see vgl_pack_priority_set.
+    [[nodiscard]] result priority_set(std::int32_t priority) noexcept
+    {
+        return static_cast<result>(vgl_pack_priority_set(handle_, priority));
+    }
+
+    [[nodiscard]] expected<std::int32_t> priority_get() const noexcept
+    {
+        std::int32_t priority = 0;
+        const auto r = static_cast<result>(vgl_pack_priority_get(handle_, &priority));
+        if (failed(r))
+        {
+            return unexpected(r);
+        }
+        return priority;
+    }
+
+    // Sets the opacity of an imagery layer, from 0 (hidden) to 1; see vgl_pack_opacity_set.
+    [[nodiscard]] result opacity_set(float opacity) noexcept
+    {
+        return static_cast<result>(vgl_pack_opacity_set(handle_, opacity));
+    }
+
+    [[nodiscard]] expected<float> opacity_get() const noexcept
+    {
+        float opacity = 0.0f;
+        const auto r = static_cast<result>(vgl_pack_opacity_get(handle_, &opacity));
+        if (failed(r))
+        {
+            return unexpected(r);
+        }
+        return opacity;
+    }
+
     [[nodiscard]] expected<pack_status> state_get() const noexcept
     {
         vgl_pack_state state{};

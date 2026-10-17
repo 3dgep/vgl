@@ -114,11 +114,13 @@ private:
         for (vgl_pack* p : ctx_.packs)
         {
             const pk::layer_type type = p->manifest.layer().type;
-            if (p->state != VGL_PACK_STATE_READY || type == pk::layer_type::geoid)
+            const bool imagery = type == pk::layer_type::imagery;
+            // A hidden imagery layer takes no part, as if it were not there.
+            if (p->state != VGL_PACK_STATE_READY || type == pk::layer_type::geoid ||
+                (imagery && p->opacity <= 0.0f))
             {
                 continue;
             }
-            const bool imagery = type == pk::layer_type::imagery;
             const pk::layer_description& l = p->manifest.layer();
             if (t.level > l.max_level || !covers(l, region))
             {

@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <limits>
 #include <map>
 #include <set>
 #include <string>
@@ -262,7 +263,8 @@ struct fake_gpu
                 REQUIRE(texture != resident.end());
                 CHECK(texture->second.texture);
                 CHECK_EQ(layer.texture_handle, set_handles ? handle_of(layer.texture) : 0u);
-                CHECK_EQ(layer.opacity, 1.0f);
+                // Hidden layers are left out.
+                CHECK(layer.opacity > 0.0f && layer.opacity <= 1.0f);
             }
         }
     }
@@ -1205,6 +1207,127 @@ TEST_CASE(imagery_is_credited_and_can_be_removed)
     CHECK(gpu.images.empty());
     lines = credits(f.ctx);
     CHECK(std::find(lines.begin(), lines.end(), "Test imagery") == lines.end());
+}
+
+namespace
+{
+
+// The pack whose texture a layer draws.
+std::uint32_t pack_of(const vgl_context* ctx, const vgl_draw_layer& layer)
+{
+    const gpu_resource* r = ctx->resources.find(layer.texture);
+    CHECK(r != nullptr);
+    return r != nullptr ? r->pack_id : 0;
+}
+
+} // namespace
+
+TEST_CASE(imagery_layers_follow_their_priority_and_opacity)
+{
+    fixture f(0, 0, true);
+    REQUIRE(f.ctx != nullptr && f.imagery != nullptr);
+    const test_pack second_pack = make_imagery_pack("Second imagery");
+    f.io.packs["mem://second"] = &second_pack;
+    vgl_pack_create_info create{};
+    create.struct_size = sizeof(create);
+    create.uri = "mem://second";
+    create.priority = 1;
+    vgl_pack* second = nullptr;
+    REQUIRE(vgl_pack_create(f.ctx, &create, &second) == VGL_RESULT_SUCCESS);
+    fake_gpu gpu;
+    const position p = inside({3, 6, 2}, 0.5, 0.5);
+    f.look(p.lat, p.lon, 50000.0);
+    settle(f.ctx, f.io, gpu);
+
+    // Each pack is a layer, the higher priority on top, opaque.
+    const auto layers_of = [&](const vgl_draw_item& item) {
+        return std::vector<vgl_draw_layer>(gpu.layers.begin() + item.first_layer,
+                                           gpu.layers.begin() + item.first_layer +
+                                               item.layer_count);
+    };
+    REQUIRE(!gpu.items.empty());
+    for (const vgl_draw_item& item : gpu.items)
+    {
+        const std::vector<vgl_draw_layer> layers = layers_of(item);
+        REQUIRE(layers.size() == 2u);
+        CHECK_EQ(pack_of(f.ctx, layers[0]), f.imagery->id);
+        CHECK_EQ(pack_of(f.ctx, layers[1]), second->id);
+        CHECK_EQ(layers[0].opacity, 1.0f);
+        CHECK_EQ(layers[1].opacity, 1.0f);
+    }
+
+    // Opacity goes to the layer; priority reorders the layers from the next frame.
+    float opacity = 0.0f;
+    std::int32_t priority = 0;
+    CHECK_EQ(vgl_pack_opacity_get(second, &opacity), VGL_RESULT_SUCCESS);
+    CHECK_EQ(opacity, 1.0f);
+    CHECK_EQ(vgl_pack_opacity_set(second, 0.25f), VGL_RESULT_SUCCESS);
+    CHECK_EQ(vgl_pack_priority_set(f.imagery, 2), VGL_RESULT_SUCCESS);
+    CHECK_EQ(vgl_pack_priority_get(f.imagery, &priority), VGL_RESULT_SUCCESS);
+    CHECK_EQ(priority, 2);
+    REQUIRE(vgl_context_update(f.ctx, nullptr) == VGL_RESULT_SUCCESS);
+    gpu.frame(f.ctx);
+    for (const vgl_draw_item& item : gpu.items)
+    {
+        const std::vector<vgl_draw_layer> layers = layers_of(item);
+        REQUIRE(layers.size() == 2u);
+        CHECK_EQ(pack_of(f.ctx, layers[0]), second->id);
+        CHECK_EQ(layers[0].opacity, 0.25f);
+        CHECK_EQ(pack_of(f.ctx, layers[1]), f.imagery->id);
+        CHECK_EQ(layers[1].opacity, 1.0f);
+    }
+
+    // A hidden layer is not drawn, and not credited.
+    CHECK_EQ(vgl_pack_opacity_set(f.imagery, 0.0f), VGL_RESULT_SUCCESS);
+    settle(f.ctx, f.io, gpu);
+    for (const vgl_draw_item& item : gpu.items)
+    {
+        const std::vector<vgl_draw_layer> layers = layers_of(item);
+        REQUIRE(layers.size() == 1u);
+        CHECK_EQ(pack_of(f.ctx, layers[0]), second->id);
+    }
+    const std::vector<std::string> lines = credits(f.ctx);
+    CHECK(std::find(lines.begin(), lines.end(), "Test imagery") == lines.end());
+    CHECK(std::find(lines.begin(), lines.end(), "Second imagery") != lines.end());
+
+    // Opacities out of range fail and change nothing.
+    for (const float bad : {-0.5f, 1.5f, std::numeric_limits<float>::quiet_NaN()})
+    {
+        CHECK_EQ(vgl_pack_opacity_set(second, bad), VGL_RESULT_INVALID_ARGUMENT);
+    }
+    CHECK_EQ(vgl_pack_opacity_get(second, &opacity), VGL_RESULT_SUCCESS);
+    CHECK_EQ(opacity, 0.25f);
+    CHECK_EQ(vgl_pack_opacity_set(nullptr, 0.5f), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_pack_opacity_get(second, nullptr), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_pack_priority_set(nullptr, 0), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_pack_priority_get(nullptr, &priority), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_pack_destroy(second), VGL_RESULT_SUCCESS);
+}
+
+TEST_CASE(a_new_terrain_order_builds_the_meshes_again)
+{
+    fixture f;
+    REQUIRE(f.ctx != nullptr);
+    fake_gpu gpu;
+    const position p = inside({3, 6, 2}, 0.5, 0.5);
+    f.look(p.lat, p.lon, 50000.0);
+    settle(f.ctx, f.io, gpu);
+    const std::uint64_t before = f.ctx->terrain_generation;
+    REQUIRE(vgl_pack_priority_set(f.p, 5) == VGL_RESULT_SUCCESS);
+    CHECK(f.ctx->terrain_generation != before);
+    // The old meshes are drawn until the new ones are created, so no frame is empty.
+    for (int i = 0; i < 4; ++i)
+    {
+        REQUIRE(vgl_context_update(f.ctx, nullptr) == VGL_RESULT_SUCCESS);
+        gpu.frame(f.ctx);
+        CHECK(!gpu.items.empty());
+    }
+    settle(f.ctx, f.io, gpu);
+    REQUIRE(!gpu.items.empty());
+    for (const vgl_draw_item& item : gpu.items)
+    {
+        CHECK_EQ(f.ctx->resources.find(item.mesh)->generation, f.ctx->terrain_generation);
+    }
 }
 
 TEST_CASE(draw_items_carry_the_geoid_at_their_corners)

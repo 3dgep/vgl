@@ -1249,7 +1249,11 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
 // Interactive
 // ---------------------------------------------------------------------------------------------
 
-int run_interactive(const options& o, GLFWwindow* window, const host_gl& gl, vgl::context& ctx)
+int run_interactive(const options& o,
+                    GLFWwindow* window,
+                    const host_gl& gl,
+                    vgl::context& ctx,
+                    const std::vector<sample::layer_control>& layers)
 {
     scene s;
     s.depth = o.depth;
@@ -1307,6 +1311,7 @@ int run_interactive(const options& o, GLFWwindow* window, const host_gl& gl, vgl
         return 1;
     }
     sample::panel_info panel;
+    panel.layers = layers;
     panel.api = reinterpret_cast<const char*>(gl.GetString(GL_VERSION));
     panel.device = reinterpret_cast<const char*>(gl.GetString(GL_RENDERER));
     panel.depth = depth_name(s.depth);
@@ -1607,7 +1612,9 @@ int main(int argc, char** argv)
     }
     std::printf("\n");
 
-    const int code = o.check ? run_check(o, gl, *ctx) : run_interactive(o, window, gl, *ctx);
+    const int code =
+        o.check ? run_check(o, gl, *ctx)
+                : run_interactive(o, window, gl, *ctx, sample::layer_controls(sources, packs));
 
     // Leave in order: the backend went with its run; then packs and context, the reader and
     // the pool, and last the window with its OpenGL context.
