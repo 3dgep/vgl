@@ -58,6 +58,11 @@ endif()
 # compiles as C++, and both link against the library itself.
 add_executable(vgl_test_api_c api_c.c)
 target_link_libraries(vgl_test_api_c PRIVATE vgl::vgl)
+# The OpenGL backend's header is checked too, when the backend is built.
+if(TARGET vgl_gl)
+    target_link_libraries(vgl_test_api_c PRIVATE vgl::gl)
+    target_compile_definitions(vgl_test_api_c PRIVATE VGL_TEST_GL_HEADER)
+endif()
 set_target_properties(vgl_test_api_c PROPERTIES C_STANDARD 99 C_STANDARD_REQUIRED ON)
 vgl_target_options(vgl_test_api_c)
 add_test(NAME api_c COMMAND vgl_test_api_c)

@@ -54,6 +54,8 @@ foreach(variant
 endforeach()
 
 add_library(vgl_d3d11
+    include/vgl/d3d11.h
+    include/vgl/d3d11.hpp
     backend.cpp
     terrain.hlsl
     ${vgl_shader_headers}
@@ -63,7 +65,11 @@ add_library(vgl::d3d11 ALIAS vgl_d3d11)
 # The HLSL is compiled by the commands above, not by Visual Studio's own rules.
 set_source_files_properties(terrain.hlsl PROPERTIES HEADER_FILE_ONLY TRUE)
 
-target_include_directories(vgl_d3d11 PRIVATE "${PROJECT_SOURCE_DIR}/src" "${vgl_shader_dir}")
+target_include_directories(vgl_d3d11
+    PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+    PRIVATE "${PROJECT_SOURCE_DIR}/src" "${vgl_shader_dir}")
 target_link_libraries(vgl_d3d11 PUBLIC vgl d3d11)
 
 # Without the min and max macros of windows.h, which d3d11.h includes.

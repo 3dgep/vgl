@@ -44,9 +44,9 @@ several commits, run `git rebase --signoff main` and force-push the branch.
 
 ### General
 
-- **Language:** C++20 for the implementation. Public headers in `include/vgl/*.h` are plain C
-  (C99) and must compile as both C and C++. The C++ wrapper in `include/vgl/*.hpp` is
-  header-only.
+- **Language:** C++20 for the implementation. Public headers in `include/vgl/*.h` (and a
+  backend's, in `backends/<backend>/include/vgl/*.h`) are plain C (C99) and must compile as both
+  C and C++. The C++ wrapper in the `*.hpp` headers beside them is header-only.
 - **Formatting** is enforced with [clang-format](.clang-format) (version 18). Run it on every file
   you change: `clang-format -i <files>`. CI fails on unformatted code.
 - **Static analysis** uses [clang-tidy](.clang-tidy). New code should not introduce warnings.

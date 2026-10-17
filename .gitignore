@@ -7,6 +7,9 @@
 # CMake user files
 CMakeUserPresets.json
 
+# Ogre's log, which the Ogre sample writes where it runs
+vgl-ogre.log
+
 # IDEs and editors
 /.vs/
 /.vscode/

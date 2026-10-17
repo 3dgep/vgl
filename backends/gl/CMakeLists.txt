@@ -8,6 +8,8 @@
 # shared vgl as well.
 
 add_library(vgl_gl
+    include/vgl/gl.h
+    include/vgl/gl.hpp
     backend.cpp
     gl_api.cpp
     gl_api.hpp
@@ -16,7 +18,11 @@ add_library(vgl_gl
     "${PROJECT_SOURCE_DIR}/src/common/pointer_map.hpp")
 add_library(vgl::gl ALIAS vgl_gl)
 
-target_include_directories(vgl_gl PRIVATE "${PROJECT_SOURCE_DIR}/src")
+target_include_directories(vgl_gl
+    PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+    PRIVATE "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(vgl_gl PUBLIC vgl)
 
 if(BUILD_SHARED_LIBS)

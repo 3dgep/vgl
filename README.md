@@ -78,20 +78,21 @@ cmake --workflow --preset linux-gcc-static-debug
 | `VGL_BUILD_DEFAULTS` | `ON` | Build the optional thread pool and filesystem reader |
 | `VGL_BACKEND_GL` | `ON` | Build the OpenGL / OpenGL ES backend |
 | `VGL_BACKEND_D3D11` | `ON` (Windows) | Build the Direct3D 11 backend |
-| `VGL_BACKEND_OGRE` | `OFF` | Build the Ogre backend (classic Ogre, 1.x) |
+| `VGL_BACKEND_OGRE` | `OFF` | Build the Ogre backend (classic Ogre 14): an installed Ogre, or else Ogre 14.6.1 downloaded and built statically |
 | `VGL_DISABLE_EXCEPTIONS` | `OFF` | Build the library without exceptions and RTTI |
 | `VGL_WARNINGS_AS_ERRORS` | `OFF` | Treat compiler warnings as errors |
 | `VGL_FETCH_DEPENDENCIES` | `ON` | Download Zstandard, and GLFW for the samples, when they are not installed |
 | `VGL_TEST_GL` | `OFF` | Run the OpenGL samples' checks as tests (needs a display) |
 | `VGL_INSTALL` | `ON` (top level) | Generate install rules |
 
-The Ogre backend is still an empty placeholder. The Direct3D 11 backend needs the Windows SDK's
-HLSL compiler, `fxc`, which compiles its shaders at build time.
+The Direct3D 11 backend needs the Windows SDK's HLSL compiler, `fxc`, which compiles its shaders
+at build time. The Ogre backend (`VGL_BACKEND_OGRE`) draws on Ogre's OpenGL 3+ and Direct3D 11
+render systems so far; building it the first time also builds Ogre, unless one is installed.
 
 The samples run on the sample data in `samples/data`: `vgl-headless` without a GPU, `vgl-gl`
 in a window (`--es` for OpenGL ES, `--depth reversed` for reversed-Z), `vgl-d3d11`, the same on
-Direct3D 11 (reversed-Z by default, `--warp` for the software rasterizer), and `vgl-c`, the
-OpenGL sample's core in C. `vgl-gl` navigates like Google Earth: drag to grab the globe (from space, to spin it like a
+Direct3D 11 (reversed-Z by default, `--warp` for the software rasterizer), `vgl-ogre`, the same in
+an Ogre scene (`--rs gl` or `--rs d3d11`), and `vgl-c`, the OpenGL sample's core in C. `vgl-gl` navigates like Google Earth: drag to grab the globe (from space, to spin it like a
 disk about its centre), scroll or double-click to
 zoom to the cursor, drag with Shift or the middle button to orbit and tilt, with Ctrl to look
 around, and with the right button to zoom; arrows or WASD move, Shift with them orbits, Page
@@ -130,9 +131,9 @@ cc main.c $(pkg-config --cflags --libs vgl)
 
 | Path | Contents |
 |---|---|
-| `include/vgl/` | Public C API headers and the header-only C++ wrapper |
+| `include/vgl/` | Public C API headers of the core and defaults, and the header-only C++ wrapper |
 | `src/` | Core modules: foundation, geodesy, tiling, cache, providers, decoders, mesh, render, defaults |
-| `backends/` | OpenGL / GLES, Direct3D 11 and Ogre backends |
+| `backends/` | OpenGL / GLES, Direct3D 11 and Ogre backends, each with its headers in `include/vgl/` |
 | `tools/baker/` | Offline baking tool |
 | `samples/` | Sample applications |
 | `tests/` | Tests |

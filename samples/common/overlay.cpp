@@ -88,20 +88,29 @@ overlay::~overlay()
     if (initialized_)
     {
         backend_.shutdown(backend_.user_data);
-        ImGui::DestroyContext();
+        if (!backend_.external_frames)
+        {
+            ImGui::DestroyContext();
+        }
     }
 }
 
 bool overlay::init(const backend& b)
 {
     IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
+    if (!b.external_frames)
+    {
+        ImGui::CreateContext();
+    }
     ImGui::GetIO().IniFilename = nullptr; // No imgui.ini next to the executable.
     ImGui::StyleColorsDark();
     ImGui::GetStyle().Alpha = 0.92f;
     if (!b.init(b.user_data))
     {
-        ImGui::DestroyContext();
+        if (!b.external_frames)
+        {
+            ImGui::DestroyContext();
+        }
         return false;
     }
     backend_ = b;
@@ -131,7 +140,10 @@ void overlay::frame(const vgl_context_statistics& s,
     next_ = (next_ + 1) % frame_ms_.size();
 
     backend_.new_frame(backend_.user_data);
-    ImGui::NewFrame();
+    if (!backend_.external_frames)
+    {
+        ImGui::NewFrame();
+    }
     if (settings.panel)
     {
         panel(s, info, settings);
@@ -144,7 +156,10 @@ void overlay::frame(const vgl_context_statistics& s,
     {
         reticle(info.focus_x, info.focus_y, info.focus_strength);
     }
-    ImGui::Render();
+    if (!backend_.external_frames)
+    {
+        ImGui::Render();
+    }
 }
 
 void overlay::reticle(double x, double y, double strength)

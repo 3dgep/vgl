@@ -46,12 +46,14 @@ Public C headers are written in C99 and must also compile without warnings as C+
 | `vgl/context.h` | Context, layers and packs, update, queries, statistics |
 | `vgl/render.h` | Render interface and visible-set description |
 | `vgl/defaults.h` | Optional thread pool and filesystem reader |
-| `vgl/backend_gl.h` | OpenGL / OpenGL ES backend |
-| `vgl/backend_d3d11.h` | Direct3D 11 backend |
-| `vgl/backend_ogre.hpp` | Ogre backend (C++ only, because Ogre is a C++ API) |
+| `vgl/gl.h` | OpenGL / OpenGL ES backend |
+| `vgl/d3d11.h` | Direct3D 11 backend |
+| `vgl/ogre.hpp` | Ogre backend (C++ only, because Ogre is a C++ API) |
 | `vgl/vgl.hpp`, `vgl/<module>.hpp` | Header-only C++ wrapper (section 16) |
 
 New modules get their own header and are added to `vgl/vgl.h`. Backend and defaults headers are not included by the umbrella header, because they are optional and separately linked.
+
+The core and defaults headers live in `include/vgl`. Each backend's headers, its C header and its C++ wrapper, live with the backend, in `backends/<backend>/include/vgl`: they are on the include path only of code that links the backend (`vgl::gl`, `vgl::d3d11`, `vgl::ogre`), and are installed only with it. The include path stays `<vgl/...>` either way.
 
 ### 2.3 Header rules
 

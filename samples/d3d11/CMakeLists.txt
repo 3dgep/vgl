@@ -11,7 +11,10 @@ if(NOT TARGET vgl_imgui_win32_dx11)
 endif()
 
 add_executable(vgl_d3d11_sample main.cpp)
-set_target_properties(vgl_d3d11_sample PROPERTIES OUTPUT_NAME vgl-d3d11)
+# The executable's import library takes another name than the backend's library: with the
+# same, MSBuild takes the backend's library for the executable's own output, and stops relinking
+# the executable when it changes.
+set_target_properties(vgl_d3d11_sample PROPERTIES OUTPUT_NAME vgl-d3d11 ARCHIVE_OUTPUT_NAME vgl-d3d11-sample)
 target_link_libraries(vgl_d3d11_sample PRIVATE
     vgl_sample_common vgl_sample_overlay vgl::vgl vgl::defaults vgl::d3d11 vgl_imgui_win32_dx11
     dxgi)

@@ -30,6 +30,7 @@
 // PPM files.
 
 #define GLFW_INCLUDE_NONE
+#include "glfw_controls.hpp"
 #include "navigation.hpp"
 #include "overlay.hpp"
 #include "sample_camera.hpp"
@@ -1248,155 +1249,6 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
 // Interactive
 // ---------------------------------------------------------------------------------------------
 
-struct input
-{
-    scene* s = nullptr;
-    sample::overlay* ui = nullptr;
-    sample::globe_navigation* nav = nullptr;
-    double last_click = -1.0; // When the left button was last pressed, for double-clicks.
-    double click_x = 0.0;
-    double click_y = 0.0;
-};
-
-void on_mouse_button(GLFWwindow* window, int button, int action, int mods)
-{
-    auto* in = static_cast<input*>(glfwGetWindowUserPointer(window));
-    double x = 0.0;
-    double y = 0.0;
-    glfwGetCursorPos(window, &x, &y);
-    if (action == GLFW_RELEASE)
-    {
-        in->nav->release();
-        return;
-    }
-    if (action != GLFW_PRESS || in->ui->wants_mouse())
-    {
-        return;
-    }
-    using drag = sample::globe_navigation::drag;
-    const sample::camera& c = in->s->camera;
-    if (button == GLFW_MOUSE_BUTTON_LEFT)
-    {
-        // A second press soon after the first, close to it, is a double-click.
-        const double now = glfwGetTime();
-        if (now - in->last_click < 0.3 && std::abs(x - in->click_x) < 4.0 &&
-            std::abs(y - in->click_y) < 4.0)
-        {
-            in->nav->double_click(x, y, c);
-            in->last_click = -1.0;
-            return;
-        }
-        in->last_click = now;
-        in->click_x = x;
-        in->click_y = y;
-        const drag mode = (mods & GLFW_MOD_SHIFT) != 0     ? drag::orbit
-                          : (mods & GLFW_MOD_CONTROL) != 0 ? drag::look
-                                                           : drag::pan;
-        in->nav->press(mode, x, y, c);
-    }
-    else if (button == GLFW_MOUSE_BUTTON_MIDDLE)
-    {
-        in->nav->press(drag::orbit, x, y, c);
-    }
-    else if (button == GLFW_MOUSE_BUTTON_RIGHT)
-    {
-        in->nav->press(drag::zoom, x, y, c);
-    }
-}
-
-void on_cursor(GLFWwindow* window, double x, double y)
-{
-    auto* in = static_cast<input*>(glfwGetWindowUserPointer(window));
-    in->nav->move(x, y, in->s->camera);
-}
-
-void on_scroll(GLFWwindow* window, double /*dx*/, double dy)
-{
-    auto* in = static_cast<input*>(glfwGetWindowUserPointer(window));
-    if (in->ui->wants_mouse())
-    {
-        return;
-    }
-    double x = 0.0;
-    double y = 0.0;
-    glfwGetCursorPos(window, &x, &y);
-    in->nav->scroll(dy, x, y, in->s->camera);
-}
-
-void on_key(GLFWwindow* window, int key, int /*scancode*/, int action, int /*mods*/)
-{
-    if (action != GLFW_PRESS)
-    {
-        return;
-    }
-    auto* in = static_cast<input*>(glfwGetWindowUserPointer(window));
-    if (in->ui->wants_keyboard())
-    {
-        return;
-    }
-    sample::debug_settings& d = in->s->debug;
-    if (key == GLFW_KEY_ESCAPE)
-    {
-        glfwSetWindowShouldClose(window, GLFW_TRUE);
-    }
-    else if (key == GLFW_KEY_L)
-    {
-        d.sunlight = !d.sunlight;
-    }
-    else if (key == GLFW_KEY_F1)
-    {
-        d.panel = !d.panel;
-    }
-    else if (key == GLFW_KEY_F2)
-    {
-        d.wireframe = !d.wireframe;
-    }
-    else if (key == GLFW_KEY_F3)
-    {
-        d.level_colors = !d.level_colors;
-    }
-    else if (key == GLFW_KEY_F4)
-    {
-        d.imagery_source = !d.imagery_source;
-    }
-    else if (key == GLFW_KEY_F5)
-    {
-        d.freeze = !d.freeze;
-    }
-    else if (key == GLFW_KEY_F6)
-    {
-        d.height_colors = !d.height_colors;
-    }
-    else if (key == GLFW_KEY_F7)
-    {
-        d.contours = !d.contours;
-    }
-    else if (key == GLFW_KEY_F8)
-    {
-        d.sea = !d.sea;
-    }
-
-    else if (key == GLFW_KEY_N || key == GLFW_KEY_R)
-    {
-        in->nav->stop();
-        in->s->camera.heading = 0.0; // North up.
-        if (key == GLFW_KEY_R)
-        {
-            in->s->camera.pitch = 90.0; // And looking straight down.
-        }
-    }
-    else if (key == GLFW_KEY_U)
-    {
-        in->nav->stop();
-        in->s->camera.pitch = 90.0;
-    }
-    else if (key >= GLFW_KEY_1 && key < GLFW_KEY_1 + static_cast<int>(places.size()))
-    {
-        in->nav->stop();
-        in->s->camera = places[static_cast<std::size_t>(key - GLFW_KEY_1)].camera;
-    }
-}
-
 int run_interactive(const options& o, GLFWwindow* window, const host_gl& gl, vgl::context& ctx)
 {
     scene s;
@@ -1422,15 +1274,12 @@ int run_interactive(const options& o, GLFWwindow* window, const host_gl& gl, vgl
     // The window's callbacks first: Dear ImGui chains to them.
     sample::overlay ui;
     sample::globe_navigation nav;
-    input in;
-    in.s = &s;
-    in.ui = &ui;
-    in.nav = &nav;
-    glfwSetWindowUserPointer(window, &in);
-    glfwSetMouseButtonCallback(window, on_mouse_button);
-    glfwSetCursorPosCallback(window, on_cursor);
-    glfwSetScrollCallback(window, on_scroll);
-    glfwSetKeyCallback(window, on_key);
+    sample::glfw_controls controls;
+    controls.camera = &s.camera;
+    controls.debug = &s.debug;
+    controls.ui = &ui;
+    controls.nav = &nav;
+    sample::controls_install(window, &controls);
     struct imgui_host
     {
         GLFWwindow* window;
@@ -1501,19 +1350,7 @@ int run_interactive(const options& o, GLFWwindow* window, const host_gl& gl, vgl
         int window_height = 0;
         glfwGetWindowSize(window, &window_width, &window_height);
         nav.viewport(window_width, window_height, field_of_view);
-        sample::navigation_keys keys;
-        if (!ui.wants_keyboard())
-        {
-            const auto held = [&](int key) { return glfwGetKey(window, key) == GLFW_PRESS; };
-            keys.left = held(GLFW_KEY_LEFT) || held(GLFW_KEY_A);
-            keys.right = held(GLFW_KEY_RIGHT) || held(GLFW_KEY_D);
-            keys.up = held(GLFW_KEY_UP) || held(GLFW_KEY_W);
-            keys.down = held(GLFW_KEY_DOWN) || held(GLFW_KEY_S);
-            keys.zoom_in = held(GLFW_KEY_PAGE_UP) || held(GLFW_KEY_EQUAL) || held(GLFW_KEY_KP_ADD);
-            keys.zoom_out =
-                held(GLFW_KEY_PAGE_DOWN) || held(GLFW_KEY_MINUS) || held(GLFW_KEY_KP_SUBTRACT);
-            keys.shift = held(GLFW_KEY_LEFT_SHIFT) || held(GLFW_KEY_RIGHT_SHIFT);
-        }
+        const sample::navigation_keys keys = sample::controls_keys(window, controls);
         // From one update to the next, so that the time spent updating and drawing counts too:
         // movements then keep their speed however long frames take.
         const auto navigated = std::chrono::steady_clock::now();

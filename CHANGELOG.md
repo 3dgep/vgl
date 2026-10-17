@@ -100,6 +100,25 @@ The pack format has its own version number, independent of the library version.
 - Context tests with synchronous, deferred and threaded hosts, allocation accounting, failure
   injection for every allocation, corrupt packs and the CPU budget; and tests of the defaults
   module on packs written to disk.
+- Ogre backend (`vgl/ogre.hpp`, target `vgl::ogre`) for classic Ogre 14: a `vgl::ogre::globe`,
+  an Ogre `MovableObject` that takes a frame from the context in `_updateRenderQueue`, keeps
+  each mesh in Ogre hardware buffers with a material of its own, and queues one renderable per
+  draw item with the item's `model_view` and an identity view, so that Ogre multiplies only its
+  projection. Its shaders are one source per stage in Ogre's unified shader macros, compiled as
+  GLSL on the OpenGL 3+ render system and as HLSL on Direct3D 11, with the other backends'
+  shading, debug views, sea surface and every depth convention (reversed-Z through the render
+  system's option). Ogre's Direct3D 11 render system has no integer textures, so the globe
+  uploads the samples as two floats each, the normal at 12 bits per component. It is a static
+  library that catches Ogre's exceptions at its interface. An installed Ogre is used, or else
+  Ogre 14.6.1 is downloaded at a pinned hash and built statically with only what the backend
+  and its sample need. The Ogre sample (`samples/ogre`, `vgl-ogre`) draws into a GLFW window
+  with the other samples' controls and panel, the panel drawn by Ogre's own Dear ImGui overlay,
+  and draws the globe into a render texture that the window shows: Ogre's windows keep a 24-bit
+  integer depth buffer even under reversed-Z, too coarse at planetary scale;
+  its check, on either render system and on Linux too, draws the same images as the OpenGL
+  backend, pixel for pixel but for anti-aliased wireframe lines on Direct3D 11. CI runs it on
+  Linux with Mesa on full runs.
+- The samples in a GLFW window share their controls (`samples/common/glfw_controls.hpp`).
 - Direct3D 11 backend (`vgl/d3d11.h`, C++ wrapper `vgl/d3d11.hpp`, target `vgl::d3d11`):
   draws the globe with Direct3D 11 at feature level 11_0 on the host's device, with the OpenGL
   backend's shading and debug views and every depth convention, reversed-Z being the natural one
@@ -244,6 +263,10 @@ The pack format has its own version number, independent of the library version.
 
 ### Changed
 
+- The backend headers (`vgl/gl.h`, `vgl/gl.hpp`, `vgl/d3d11.h`, `vgl/d3d11.hpp` and
+  `vgl/ogre.hpp`) moved from `include/vgl` to `backends/<backend>/include/vgl`. Their include
+  paths are unchanged, but they are found only by code that links their backend's target, and
+  are installed only with it.
 - The sample detail pack starts at level 7 instead of 6, so that it holds only its region: its
   level-6 tile covered twice the region, and showed level-6 detail south of it. Levels 7 to 11
   are unchanged.
@@ -290,6 +313,10 @@ The pack format has its own version number, independent of the library version.
 
 ### Fixed
 
+- The OpenGL and Direct3D 11 samples' executables were not relinked when their backend's library
+  changed, with Visual Studio: an executable's import library took the same name as the
+  backend's (`vgl-gl.lib`, `vgl-d3d11.lib`), which MSBuild then took for the executable's own
+  output. The samples' import libraries now have names of their own.
 - The installed CMake package exported the defaults module and the OpenGL backend as
   `vgl::vgl_defaults` and `vgl::vgl_gl`, while the build tree and the documentation name them
   `vgl::defaults` and `vgl::gl`. They, and the Direct3D 11 backend (`vgl::d3d11`), now have

@@ -30,14 +30,8 @@ add_subdirectory(headless)
 # sample-only dependency, downloaded at a pinned release with a checked hash. The samples are
 # for desktops, so Android and iOS build none.
 if(VGL_FETCH_DEPENDENCIES AND NOT ANDROID AND NOT IOS AND NOT TARGET vgl_imgui)
-    include(FetchContent)
-    FetchContent_Declare(vgl_imgui_source
-        URL "https://github.com/ocornut/imgui/archive/refs/tags/v1.92.9b.tar.gz"
-        URL_HASH SHA256=21d8a0a565e85dce943e375db00812c2f3f0ab21f3f0f7964e364a63422d7f99
-        SOURCE_SUBDIR do-not-build
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
-    FetchContent_MakeAvailable(vgl_imgui_source)
-    set(vgl_imgui_dir "${vgl_imgui_source_SOURCE_DIR}")
+    include(vgl_imgui)
+    vgl_imgui_fetch(vgl_imgui_source vgl_imgui_dir)
     add_library(vgl_imgui STATIC
         "${vgl_imgui_dir}/imgui.cpp"
         "${vgl_imgui_dir}/imgui_draw.cpp"
@@ -46,7 +40,7 @@ if(VGL_FETCH_DEPENDENCIES AND NOT ANDROID AND NOT IOS AND NOT TARGET vgl_imgui)
     target_include_directories(vgl_imgui SYSTEM PUBLIC "${vgl_imgui_dir}" "${vgl_imgui_dir}/backends")
     target_compile_features(vgl_imgui PUBLIC cxx_std_11)
     set_target_properties(vgl_imgui PROPERTIES FOLDER third_party POSITION_INDEPENDENT_CODE ON)
-    message(STATUS "vgl: using downloaded Dear ImGui 1.92.9b for the interactive samples")
+    message(STATUS "vgl: using downloaded Dear ImGui ${VGL_IMGUI_VERSION} for the interactive samples")
 
     add_library(vgl_sample_overlay STATIC common/overlay.cpp common/overlay.hpp)
     target_link_libraries(vgl_sample_overlay PUBLIC vgl_sample_common vgl_imgui)
@@ -111,12 +105,22 @@ if(TARGET vgl_gl AND NOT ANDROID AND NOT IOS)
         set_target_properties(vgl_imgui_glfw_gl3 PROPERTIES FOLDER third_party POSITION_INDEPENDENT_CODE ON)
     endif()
 
+    # The controls of the samples in a GLFW window.
+    if(TARGET glfw AND NOT TARGET vgl_sample_glfw)
+        add_library(vgl_sample_glfw STATIC common/glfw_controls.cpp common/glfw_controls.hpp)
+        target_link_libraries(vgl_sample_glfw PUBLIC vgl_sample_common glfw)
+        vgl_target_options(vgl_sample_glfw)
+    endif()
+
     if(TARGET glfw)
         # The check needs a display and a driver, which not every build machine
         # has, so it is a test only on request. CI runs it under Xvfb with Mesa.
         option(VGL_TEST_GL "Run the OpenGL samples' checks as tests (needs a display)" OFF)
         add_subdirectory(gl)
         add_subdirectory(c)
+        if(TARGET vgl_ogre)
+            add_subdirectory(ogre)
+        endif()
     else()
         message(STATUS "vgl: GLFW not found and VGL_FETCH_DEPENDENCIES is off; skipping the OpenGL sample")
     endif()

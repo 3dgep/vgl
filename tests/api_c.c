@@ -6,8 +6,10 @@
  * types follow docs/c-api.md.
  */
 #include <vgl/defaults.h>
-#include <vgl/gl.h>
 #include <vgl/vgl.h>
+#ifdef VGL_TEST_GL_HEADER
+#    include <vgl/gl.h>
+#endif
 
 #include <stdio.h>
 #include <string.h>
@@ -51,10 +53,12 @@ static void check_types(void)
     CHECK(offsetof(vgl_draw_item, model_view) == 64);
     CHECK(sizeof(vgl_frame_begin_info) == 24);
     CHECK(sizeof(vgl_depth_convention) == 4);
+#ifdef VGL_TEST_GL_HEADER
     /* The OpenGL backend's structures (vgl/gl.h). */
     CHECK(sizeof(vgl_gl_backend_create_info) == 24);
     CHECK(sizeof(vgl_gl_draw_info) == 88);
     CHECK(offsetof(vgl_gl_draw_info, sun_direction) == 24);
+#endif
 }
 
 static void check_results(void)

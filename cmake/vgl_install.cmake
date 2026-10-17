@@ -24,13 +24,16 @@ if(TARGET vgl_defaults)
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
 endif()
 
-# The OpenGL backend, as vgl::gl in the same package.
+# The OpenGL backend, as vgl::gl in the same package. Each backend's headers live with the
+# backend and are installed only with it.
 if(TARGET vgl_gl)
     install(TARGETS vgl_gl
         EXPORT vgl-targets
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
         LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+    install(DIRECTORY "${PROJECT_SOURCE_DIR}/backends/gl/include/vgl"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 endif()
 
 # The Direct3D 11 backend, as vgl::d3d11 in the same package. Windows has no pkg-config
@@ -41,6 +44,18 @@ if(TARGET vgl_d3d11)
         RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
         LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+    install(DIRECTORY "${PROJECT_SOURCE_DIR}/backends/d3d11/include/vgl"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+endif()
+
+# The Ogre backend, as vgl::ogre, only with an installed Ogre: a downloaded one is built into
+# vgl's build, not installed, so the package could not name it.
+if(TARGET vgl_ogre AND OGRE_FOUND)
+    install(TARGETS vgl_ogre
+        EXPORT vgl-targets
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+    install(DIRECTORY "${PROJECT_SOURCE_DIR}/backends/ogre/include/vgl"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 endif()
 
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/vgl"

@@ -70,9 +70,12 @@ public:
 
     // Dear ImGui's platform and renderer backends, as a sample sets them up. init runs with the
     // Dear ImGui context created; new_frame runs before each frame, render draws its data, and
-    // shutdown undoes init.
+    // shutdown undoes init. With external_frames, as with Ogre's Dear ImGui overlay, the
+    // backends own the context and the frames: the context exists before init, new_frame starts
+    // the frame, and the renderer ends it.
     struct backend
     {
+        bool external_frames = false;
         bool (*init)(void* user_data) = nullptr;
         void (*new_frame)(void* user_data) = nullptr;
         void (*render)(void* user_data) = nullptr;

@@ -32,9 +32,11 @@ Checks: >
 # pro-bounds-constant-array-index needs gsl::at, and GSL is not a dependency.
 # Literal suffixes are lowercase (1u, 0x10ull) throughout the code base.
 #
-# The C API (include/vgl/*.h) is plain C and uses C idioms such as typedef'd
-# structs and #define constants, so modernize checks are not applied to it.
-HeaderFilterRegex: '/(src|include/vgl/.*\.hpp|backends|tools|tests)/.*'
+# Only the implementation's headers are checked: those in src, tools and tests, and
+# a backend's own sources. The public headers (include/vgl, backends/*/include/vgl)
+# are not: the C API is plain C and uses C idioms such as typedef'd structs and
+# #define constants, so modernize checks do not apply to it.
+HeaderFilterRegex: '/((src|tools|tests)/.*|backends/[^/]+/[^/]+)$'
 WarningsAsErrors: ''
 FormatStyle: file
 CheckOptions:
