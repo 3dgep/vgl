@@ -219,6 +219,9 @@ The pack format has its own version number, independent of the library version.
 
 ### Changed
 
+- The sample detail pack starts at level 7 instead of 6, so that it holds only its region: its
+  level-6 tile covered twice the region, and showed level-6 detail south of it. Levels 7 to 11
+  are unchanged.
 - **Breaking:** `vgl_mesh_data` has the mesh's samples appended, so consumers stepping through
   the list of meshes must be built against the new header.
 - **Breaking:** the C++ wrapper for `vgl/base.h` moved from `vgl/vgl.hpp` to `vgl/base.hpp`.

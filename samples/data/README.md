@@ -6,7 +6,7 @@ Small packs that the samples and their tests use, so that they run offline and w
 |---|---|---|---|
 | `packs/gebco` | GEBCO 2026 grid: land and ocean floor, as ellipsoidal heights | 0 to 3 (about 20 km between samples) | 3.4 MB |
 | `packs/egm2008` | EGM2008 geoid, for heights above mean sea level | 0 to 2 (about 0.7° between samples) | 0.7 MB |
-| `packs/glo30-sognefjord` | Copernicus DEM GLO-30 over the Sognefjord, Jostedalsbreen and the western Jotunheimen (5.6 to 8.4 E, 60.5 to 61.9 N), as ellipsoidal heights, above GEBCO in the samples | 6 to 11 (about 76 m between samples) | 10.9 MB |
+| `packs/glo30-sognefjord` | Copernicus DEM GLO-30 over the Sognefjord, Jostedalsbreen and the western Jotunheimen (5.625 to 8.4375 E, 60.46875 to 61.875 N: two level-7 tiles), as ellipsoidal heights, above GEBCO in the samples | 7 to 11 (about 76 m between samples) | 10.9 MB |
 | `packs/bluemarble` | NASA Blue Marble: Next Generation, July, with topography and bathymetry: 256-pixel JPEG tiles with a 1-pixel border | 0 to 3 (about 10 km per pixel) | 1.6 MB |
 
 Each pack is one base shard. They are far too coarse for anything but samples and tests: the full datasets are described in `tools/baker/README.md` and `docs/test-bake.md`.

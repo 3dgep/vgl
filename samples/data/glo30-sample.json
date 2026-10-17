@@ -1,14 +1,17 @@
 {
     // Sample detail: Copernicus DEM GLO-30 over the Sognefjord, Jostedalsbreen and the western
-    // Jotunheimen (Galdhøpiggen, 2469 m), one level-6 tile, from level 6 down to level 11:
-    // about 76 m between samples north to south, and 37 m east to west at this latitude. It
-    // lies over the global GEBCO sample, so that the samples show real relief, contours and
-    // fjords somewhere, as one base shard. Bake it from the directory that holds the GLO-30
-    // tiles and the full geoid pack, as for tools/baker/examples/glo30-norway.json.
+    // Jotunheimen (Galdhøpiggen, 2469 m), two level-7 tiles (the northern half of a level-6
+    // tile), from level 7 down to level 11: about 76 m between samples north to south, and
+    // 37 m east to west at this latitude. Starting at level 7 keeps the pack to the region: a
+    // level-6 tile would hold the whole tile, so the half south of the region would show
+    // level-6 detail. It lies over the global GEBCO sample, so that the samples show real
+    // relief, contours and fjords somewhere, as one base shard. Bake it from the directory that
+    // holds the GLO-30 tiles and the full geoid pack, as for
+    // tools/baker/examples/glo30-norway.json.
     "output": "sample-packs/glo30-sognefjord",
     "layer": "elevation",
     "tile_size": 129,
-    "min_level": 6,
+    "min_level": 7,
     "max_level": 11,
     "shard_level": 12, // Above max_level: the whole pack is one base shard.
     "region": [5.625, 60.46875, 8.4375, 61.875],
