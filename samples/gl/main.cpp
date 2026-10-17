@@ -985,9 +985,215 @@ void navigation_check()
             nav.stop();
         }
 
-        // Pressed over space, the orbit does nothing.
+        // Pressed over space, a drag turns the globe like a disk about the line to the camera,
+        // following the cursor around it, which keeps the camera in place; once the cursor
+        // reaches the globe it grabs the point there, and leaving it again spins once more, as
+        // does a drag pressed over the globe that leaves it.
         c = start;
         vgl_dvec3 sky{};
+        if (!nav.pick(c, 5.0, 5.0, sky))
+        {
+            // The disk is the plane through the globe's centre that faces the screen. The point
+            // of the globe to hold is where the line from the cursor's place on the disk to the
+            // centre meets the ellipsoid, which may lie behind the horizon.
+            const vgl_dvec3 origin{0.0, 0.0, 0.0};
+            double cx = 0.0;
+            double cy = 0.0;
+            expect(project(c, origin, w, h, cx, cy), "the globe's centre is in front" + where);
+            const vgl_dmat4 v = sample::camera_view_matrix(c);
+            const double tangent = std::tan(vgl::degrees_to_radians(field_of_view) / 2.0);
+            const double sx = (2.0 * 5.0 / w - 1.0) * tangent * (w / h);
+            const double sy = (1.0 - 2.0 * 5.0 / h) * tangent;
+            const vgl_dvec3 d = sample::normalize({v.m[0] * sx + v.m[1] * sy - v.m[2],
+                                                   v.m[4] * sx + v.m[5] * sy - v.m[6],
+                                                   v.m[8] * sx + v.m[9] * sy - v.m[10]});
+            const vgl_dvec3 f{-v.m[2], -v.m[6], -v.m[10]};
+            const vgl_dvec3 viewer = sample::camera_eye(c);
+            const double along = -sample::dot(viewer, f) / sample::dot(d, f);
+            const vgl_dvec3 q{
+                viewer.x + d.x * along, viewer.y + d.y * along, viewer.z + d.z * along};
+            const double a = 6378137.0;
+            const double b = 6356752.314245;
+            const double onto =
+                1.0 / std::sqrt((q.x * q.x + q.y * q.y) / (a * a) + q.z * q.z / (b * b));
+            const vgl_dvec3 rim{q.x * onto, q.y * onto, q.z * onto};
+            // Along the top of the view, over space: the camera moves over the globe, still
+            // looking the same way, and the point stays on the line from the centre to the
+            // cursor, on the cursor's side.
+            nav.press(drag::pan, 5.0, 5.0, c);
+            double worst = 0.0;
+            for (int k = 1; k <= 20; ++k)
+            {
+                const double mx = 5.0 + 10.0 * k;
+                nav.move(mx, 5.0, c);
+                double rx = 0.0;
+                double ry = 0.0;
+                if (!project(c, rim, w, h, rx, ry))
+                {
+                    worst = 180.0;
+                    continue;
+                }
+                const double off = std::atan2((mx - cx) * (ry - cy) - (5.0 - cy) * (rx - cx),
+                                              (mx - cx) * (rx - cx) + (5.0 - cy) * (ry - cy));
+                worst = std::max(worst, std::abs(vgl::radians_to_degrees(off)));
+            }
+            const bool moved = std::abs(c.latitude - start.latitude) > 1e-6 ||
+                               std::abs(c.longitude - start.longitude) > 1e-6;
+            expect(moved && std::abs(c.altitude - start.altitude) < 1e-3 &&
+                       std::abs(c.pitch - start.pitch) < 0.5,
+                   "spinning from space carries the camera over the globe" + where);
+            expect(worst < 0.05,
+                   "spinning from space keeps the point on the line from the centre to the "
+                   "cursor (" +
+                       std::to_string(worst) + " degrees off)" + where);
+            // Onto the globe at the centre: it grabs the point there and pans.
+            nav.move(w / 2.0, h / 2.0, c);
+            vgl_dvec3 held{};
+            expect(nav.pick(c, w / 2.0, h / 2.0, held), "the centre is over the globe" + where);
+            nav.move(w / 2.0 + 40.0, h / 2.0 - 30.0, c);
+            double hx = 0.0;
+            double hy = 0.0;
+            expect(project(c, held, w, h, hx, hy) && near(hx, hy, w / 2.0 + 40.0, h / 2.0 - 30.0),
+                   "a spin grabs the globe where the cursor reaches it" + where);
+            // Off it again: spinning, at the height the pan left it.
+            const sample::camera panned = c;
+            nav.move(5.0, 5.0, c);
+            nav.move(5.0, 60.0, c);
+            nav.release();
+            expect((std::abs(c.latitude - panned.latitude) > 1e-6 ||
+                    std::abs(c.longitude - panned.longitude) > 1e-6) &&
+                       std::abs(c.altitude - panned.altitude) < 1e-3,
+                   "leaving the globe spins again" + where);
+            nav.stop();
+
+            // Pressed over the globe at the centre, then off it: the drag spins there too.
+            c = start;
+            nav.press(drag::pan, w / 2.0, h / 2.0, c);
+            nav.move(5.0, 5.0, c);
+            const sample::camera left = c;
+            nav.move(60.0, 5.0, c);
+            nav.release();
+            expect((std::abs(c.latitude - left.latitude) > 1e-6 ||
+                    std::abs(c.longitude - left.longitude) > 1e-6) &&
+                       std::abs(c.altitude - left.altitude) < 1e-3 &&
+                       std::abs(c.pitch - left.pitch) < 0.5,
+                   "a pan that leaves the globe spins" + where);
+            nav.stop();
+
+            // Out into space and back: the spin keeps the grabbed point on the line from the
+            // centre to the cursor, so that it comes back under the cursor.
+            c = start;
+            vgl_dvec3 taken{};
+            expect(nav.pick(c, w / 2.0, h / 2.0, taken), "the centre is over the globe" + where);
+            nav.press(drag::pan, w / 2.0, h / 2.0, c);
+            const std::array<std::array<double, 2>, 6> path{{{w / 2.0 - 100.0, h / 2.0 - 60.0},
+                                                             {5.0, 5.0},
+                                                             {300.0, 5.0},
+                                                             {700.0, 5.0},
+                                                             {w / 2.0 + 30.0, h / 2.0 - 40.0},
+                                                             {w / 2.0 + 10.0, h / 2.0 + 20.0}}};
+            for (const std::array<double, 2>& m : path)
+            {
+                nav.move(m[0], m[1], c);
+            }
+            nav.release();
+            double gx = 0.0;
+            double gy = 0.0;
+            expect(project(c, taken, w, h, gx, gy) && near(gx, gy, w / 2.0 + 10.0, h / 2.0 + 20.0),
+                   "a point grabbed, taken out into space and back, is under the cursor (at " +
+                       std::to_string(gx) + ", " + std::to_string(gy) + ")" + where);
+            nav.stop();
+
+            // Released while spinning, the globe carries on turning the same way, slowing down
+            // until it stops: the point held on the disk keeps circling the centre's image.
+            c = start;
+            const auto around = [&](double& angle) {
+                double rx = 0.0;
+                double ry = 0.0;
+                if (!project(c, rim, w, h, rx, ry))
+                {
+                    return false;
+                }
+                angle = std::atan2(ry - cy, rx - cx);
+                return true;
+            };
+            nav.press(drag::pan, 5.0, 5.0, c);
+            double before = 0.0;
+            bool seen = around(before);
+            for (int k = 1; k <= 20; ++k)
+            {
+                nav.move(5.0 + 10.0 * k, 5.0, c);
+                nav.update(0.01, {}, c);
+            }
+            double released = 0.0;
+            seen = around(released) && seen;
+            nav.release();
+            for (int k = 0; k < 10; ++k)
+            {
+                nav.update(0.01, {}, c);
+            }
+            double later = 0.0;
+            seen = around(later) && seen;
+            const double dragged = std::remainder(released - before, 2.0 * vgl::pi);
+            const double thrown = std::remainder(later - released, 2.0 * vgl::pi);
+            expect(seen && dragged * thrown > 0.0 && std::abs(c.altitude - start.altitude) < 1e-3,
+                   "a spin released while moving throws the globe the same way" + where);
+            for (int k = 0; k < 1000; ++k)
+            {
+                nav.update(0.01, {}, c);
+            }
+            const sample::camera settled = c;
+            nav.update(0.01, {}, c);
+            expect(c.latitude == settled.latitude && c.longitude == settled.longitude &&
+                       c.heading == settled.heading,
+                   "a thrown spin stops" + where);
+        }
+
+        // Looking straight down, orbiting sideways only turns the heading, steadily, around the
+        // centre and around points off it, both ways: the camera keeps looking down.
+        if (start.pitch >= 89.999)
+        {
+            for (const std::array<double, 2>& at :
+                 std::array<std::array<double, 2>, 4>{{{w / 2.0, h / 2.0},
+                                                       {w / 2.0 + 200.0, h / 2.0 - 120.0},
+                                                       {300.0, 500.0},
+                                                       {w / 2.0 + 1.0, h / 2.0}}})
+            {
+                for (const double step : {6.0, -6.0})
+                {
+                    c = start;
+                    vgl_dvec3 pivot{};
+                    if (!nav.pick(c, at[0], at[1], pivot))
+                    {
+                        continue; // Over space, where orbiting does nothing.
+                    }
+                    nav.press(drag::orbit, at[0], at[1], c);
+                    double lowest = c.pitch;
+                    double jump = 0.0;
+                    for (int k = 1; k <= 120; ++k)
+                    {
+                        const double before = c.heading;
+                        nav.move(at[0] + step * k, at[1], c);
+                        lowest = std::min(lowest, c.pitch);
+                        jump = std::max(jump, std::abs(std::remainder(c.heading - before, 360.0)));
+                    }
+                    nav.release();
+                    double px = 0.0;
+                    double py = 0.0;
+                    const bool held = project(c, pivot, w, h, px, py) && near(px, py, at[0], at[1]);
+                    expect(lowest > 89.0 && jump < 5.0 && held,
+                           "orbiting sideways while looking straight down keeps looking down (" +
+                               std::to_string(lowest) + " degrees at the least, heading jumps " +
+                               std::to_string(jump) + " degrees, around " +
+                               std::to_string(static_cast<int>(at[0])) + ", " +
+                               std::to_string(static_cast<int>(at[1])) + ")" + where);
+                    nav.stop();
+                }
+            }
+        }
+
+        // Pressed over space, the orbit does nothing.
+        c = start;
         if (!nav.pick(c, 5.0, 5.0, sky))
         {
             nav.press(drag::orbit, 5.0, 5.0, c);

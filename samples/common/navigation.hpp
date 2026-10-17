@@ -6,7 +6,11 @@
 // below, which do the following:
 //
 //   left drag            grab the globe: the point under the cursor stays under it, and
-//                        releasing while moving throws it
+//                        releasing while moving throws it; over space, turn the globe like a
+//                        disk facing the screen, about its centre, following the cursor
+//                        around it; the drag switches between the two wherever the cursor
+//                        crosses the globe's edge, and a spin released while moving throws
+//                        it too
 //   scroll, double-click zoom towards the point under the cursor
 //   shift + left drag,   orbit around the point under the cursor, which stays there: sideways
 //   middle drag          turns, up and down tilts; pressed over space, nothing
@@ -51,6 +55,7 @@ public:
         pan,   // Grab the globe.
         orbit, // Turn and tilt around the point at the centre.
         look,  // Turn the camera in place.
+        spin,  // Turn the globe like a disk; pressing to pan over space starts it.
         zoom,  // Zoom by dragging up and down.
     };
 
@@ -85,6 +90,18 @@ public:
 
 private:
     [[nodiscard]] vgl_dvec3 anchor(const camera& c, double x, double y) const;
+    // The direction of the ray through a cursor position.
+    [[nodiscard]] vgl_dvec3 ray(const camera& c, double x, double y) const;
+    // Starts a pan that holds the point p, now under the cursor.
+    void begin_pan(const camera& c, const vgl_dvec3& p);
+    // Starts a spin that holds the point p on the line from the globe's centre to the cursor.
+    void begin_spin(const camera& c, const vgl_dvec3& p);
+    // Where the ray through (x, y) meets the disk: the plane through the globe's centre square to
+    // the view. False when the centre is not in front of the camera.
+    [[nodiscard]] bool disk_point(const camera& c, double x, double y, vgl_dvec3& out) const;
+    // Turns the globe about the axis through its centre along the view, as a disk facing the
+    // screen, keeping the held point on the line from the centre to (x, y) on the screen.
+    void spin_to(camera& c, double x, double y);
     // Takes the latest ground height, unless a movement is holding the one it began with.
     void settle();
     // Records where the camera is during a pan.
@@ -112,25 +129,32 @@ private:
     drag mode_ = drag::none;
     double x_ = 0.0; // Cursor at the last move.
     double y_ = 0.0;
-    camera start_; // The camera when a pan began.
+    camera start_; // The camera when a pan or spin began.
     vgl_dvec3 grabbed_{};
+    bool holding_ = false;    // The drag has grabbed a point, which it holds while spinning.
+    vgl_dvec3 spin_point_{};  // The point that a spin holds on the line to the cursor.
+    double spin_angle_ = 0.0; // How far the spin has turned the globe, in radians.
     vgl_dvec3 pivot_{};
     double pivot_x_ = 0.0; // Where an orbit's pivot stays on the screen.
     double pivot_y_ = 0.0;
 
-    // Where the camera was during a pan, at each update, to measure how fast the globe turned
-    // when it was released: a ring of the latest positions, on a clock of the updates' times.
+    // Where the camera was during a pan, or how far a spin had turned, at each update, to
+    // measure how fast the globe turned when it was released: a ring of the latest positions, on
+    // a clock of the updates' times.
     struct pan_sample
     {
         double time = 0.0;
         vgl_dvec3 eye{};
+        double angle = 0.0;
     };
     std::array<pan_sample, 64> samples_{};
     std::size_t sample_count_ = 0;
     double clock_ = 0.0;
     vgl_dvec3 pan_eye_{};   // The camera's position after the latest move of a pan.
-    bool moved_ = false;    // A pan moved since the last update.
-    bool released_ = false; // A pan ended; the next update decides whether it throws.
+    bool moved_ = false;    // A pan or spin moved since the last update.
+    bool released_ = false; // A pan or spin ended; the next update decides whether it throws.
+    bool spun_ = false;     // What ended was a spin.
+    vgl_dvec3 spin_axis_{}; // The axis a spin turns the globe about: the view at its start.
 
     // A throw: the globe keeps turning about an axis through its centre, slowing down.
     bool throwing_ = false;

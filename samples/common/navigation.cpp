@@ -184,16 +184,21 @@ void globe_navigation::settle()
     }
 }
 
-bool globe_navigation::pick(const camera& c, double x, double y, vgl_dvec3& out) const
+vgl_dvec3 globe_navigation::ray(const camera& c, double x, double y) const
 {
-    // The ray through the cursor, from the camera's axes (the rows of its view matrix).
+    // From the camera's axes (the rows of its view matrix).
     const vgl_dmat4 v = camera_view_matrix(c);
     const double t = std::tan(vgl::degrees_to_radians(field_of_view_) / 2.0);
     const double sx = (2.0 * x / width_ - 1.0) * t * (width_ / height_);
     const double sy = (1.0 - 2.0 * y / height_) * t;
-    const vgl_dvec3 dir = normalize({v.m[0] * sx + v.m[1] * sy - v.m[2],
-                                     v.m[4] * sx + v.m[5] * sy - v.m[6],
-                                     v.m[8] * sx + v.m[9] * sy - v.m[10]});
+    return normalize({v.m[0] * sx + v.m[1] * sy - v.m[2],
+                      v.m[4] * sx + v.m[5] * sy - v.m[6],
+                      v.m[8] * sx + v.m[9] * sy - v.m[10]});
+}
+
+bool globe_navigation::pick(const camera& c, double x, double y, vgl_dvec3& out) const
+{
+    const vgl_dvec3 dir = ray(c, x, y);
     // The ellipsoid raised to the terrain, but never above the camera, scaled to a unit sphere.
     const double h = std::min(ground_, c.altitude - 1.0);
     const double a = semi_major + h;
@@ -338,10 +343,12 @@ void globe_navigation::orbit_by(camera& c, const vgl_dvec3& pivot, double yaw, d
         }
     }
     // Stopped at straight down, the heading comes from the image's up: the view's own direction
-    // has no horizontal part left to give it.
+    // has no horizontal part left to give it. So it does for a camera that looked straight down
+    // and only turned, whose view's horizontal part is rounding, which would turn it anywhere.
     camera straight_down = c;
     straight_down.pitch = 90.0;
-    const camera next = down ? camera_of(p, straight_down, true) : camera_of(p, c);
+    const camera next = down ? camera_of(p, straight_down, true)
+                             : camera_of(p, c, c.pitch >= 89.999 && tilt == 0.0);
     if (next.altitude >= ground_ + min_clearance)
     {
         c = next;
@@ -455,6 +462,124 @@ void globe_navigation::aim(camera& c, const vgl_dvec3& p, double x, double y) co
     }
 }
 
+void globe_navigation::begin_pan(const camera& c, const vgl_dvec3& p)
+{
+    mode_ = drag::pan;
+    start_ = c;
+    grabbed_ = p;
+    holding_ = true;
+    pan_eye_ = camera_eye(c);
+    moved_ = false;
+    sample_count_ = 0;
+    record();
+}
+
+void globe_navigation::begin_spin(const camera& c, const vgl_dvec3& p)
+{
+    mode_ = drag::spin;
+    start_ = c;
+    spin_point_ = p;
+    spin_angle_ = 0.0;
+    spin_axis_ = pose_of(c).forward;
+    pan_eye_ = camera_eye(c);
+    moved_ = false;
+    sample_count_ = 0;
+    record();
+}
+
+bool globe_navigation::disk_point(const camera& c, double x, double y, vgl_dvec3& out) const
+{
+    const pose p = pose_of(c);
+    const vgl_dvec3 axis = normalize(p.forward);
+    const double ahead = -dot(p.eye, axis); // How far in front of the camera the centre is.
+    const vgl_dvec3 d = ray(c, x, y);
+    const double along = dot(d, axis);
+    if (ahead <= 0.0 || along <= 1e-9)
+    {
+        return false;
+    }
+    out = add(p.eye, scale(d, ahead / along));
+    return true;
+}
+
+void globe_navigation::spin_to(camera& c, double x, double y)
+{
+    // The globe turns about the axis through its centre along the view, as a disk facing the
+    // screen, by the angle that keeps the held point on the line from the centre to the cursor
+    // on the screen: a grabbed point then comes back under the cursor when it returns to the
+    // globe. Turning about that axis, the point keeps its depth, so its image circles the
+    // axis's image at that depth: a + b cos(angle) + e sin(angle), relative to the centre's
+    // image. From the camera at the start, so that the globe follows the cursor exactly however
+    // the drag goes.
+    const vgl_dmat4 v = camera_view_matrix(start_);
+    const vgl_dvec3 right{v.m[0], v.m[4], v.m[8]};
+    const vgl_dvec3 up{v.m[1], v.m[5], v.m[9]};
+    const vgl_dvec3 axis{-v.m[2], -v.m[6], -v.m[10]};
+    const vgl_dvec3 eye = camera_eye(start_);
+    const double ahead = -dot(eye, axis); // How far in front of the camera the centre is.
+    const vgl_dvec3 along = scale(axis, dot(spin_point_, axis));
+    const vgl_dvec3 across = add(spin_point_, scale(along, -1.0));
+    const vgl_dvec3 rel = add(along, scale(eye, -1.0));
+    const double depth = dot(rel, axis);
+    if (ahead <= 0.0 || depth <= 1e-9)
+    {
+        return; // The centre or the point is behind the camera.
+    }
+    const double cx = -dot(eye, right) / ahead;
+    const double cy = -dot(eye, up) / ahead;
+    // The cursor on the image plane at unit depth, as the rays are built.
+    const double t = std::tan(vgl::degrees_to_radians(field_of_view_) / 2.0);
+    const double dx = (2.0 * x / width_ - 1.0) * t * (width_ / height_) - cx;
+    const double dy = (1.0 - 2.0 * y / height_) * t - cy;
+    if (std::hypot(dx, dy) < 1e-12)
+    {
+        return; // At the centre's image, where the line has no direction.
+    }
+    const vgl_dvec3 turned = cross(axis, across);
+    const double ax = dot(rel, right) / depth - cx;
+    const double ay = dot(rel, up) / depth - cy;
+    const double bx = dot(across, right) / depth;
+    const double by = dot(across, up) / depth;
+    const double ex = dot(turned, right) / depth;
+    const double ey = dot(turned, up) / depth;
+    // On the line: square to (-dy, dx) it has no part, A + B cos + C sin = 0.
+    const double a = -dy * ax + dx * ay;
+    const double b = -dy * bx + dx * by;
+    const double e = -dy * ex + dx * ey;
+    const double r = std::hypot(b, e);
+    if (r < 1e-15)
+    {
+        return; // On the axis, where turning does not move it.
+    }
+    // Of the two angles, one on the cursor's side of the centre, the nearer to the last;
+    // where the line misses the point's circle, the angle that brings it closest.
+    const double phi = std::atan2(e, b);
+    const double delta = std::acos(std::clamp(-a / r, -1.0, 1.0));
+    double best = spin_angle_;
+    double best_score = 1e300;
+    for (const double candidate : {phi + delta, phi - delta})
+    {
+        const double angle = spin_angle_ + std::remainder(candidate - spin_angle_, 2.0 * vgl::pi);
+        const double px = ax + bx * std::cos(angle) + ex * std::sin(angle);
+        const double py = ay + by * std::cos(angle) + ey * std::sin(angle);
+        const double score = std::abs(angle - spin_angle_) + (px * dx + py * dy < 0.0 ? 10.0 : 0.0);
+        if (score < best_score)
+        {
+            best_score = score;
+            best = angle;
+        }
+    }
+    spin_angle_ = best;
+    // Turning the camera back about the axis by the angle turns the globe forward by it: the
+    // camera moves over the globe, still looking the same way. On a sphere, its horizon would
+    // stay level; on the ellipsoid it is levelled, and keeps its height.
+    camera next = camera_of(rotated(pose_of(start_), axis, -spin_angle_), start_, true);
+    next.altitude = start_.altitude;
+    c = next;
+    pan_eye_ = camera_eye(c);
+    moved_ = true;
+}
+
 void globe_navigation::press(drag mode, double x, double y, const camera& c)
 {
     stop();
@@ -463,16 +588,22 @@ void globe_navigation::press(drag mode, double x, double y, const camera& c)
     x_ = x;
     y_ = y;
     start_ = c;
-    if (mode == drag::pan && !pick(c, x, y, grabbed_))
+    holding_ = false;
+    vgl_dvec3 p{};
+    if (mode == drag::pan && !pick(c, x, y, p))
     {
-        mode_ = drag::look; // Grabbing the sky turns the camera instead.
+        mode_ = drag::spin; // Grabbing space turns the globe like a disk instead.
     }
     if (mode_ == drag::pan)
     {
-        pan_eye_ = camera_eye(c);
-        moved_ = false;
-        sample_count_ = 0;
-        record();
+        begin_pan(c, p);
+    }
+    if (mode_ == drag::spin)
+    {
+        // Until the drag grabs a point, it holds the one where the line from the cursor's place
+        // on the disk to the centre meets the globe: the disk turns under the cursor.
+        vgl_dvec3 on_disk{};
+        begin_spin(c, disk_point(c, x, y, on_disk) ? on_disk : vgl_dvec3{});
     }
     if (mode == drag::orbit)
     {
@@ -506,11 +637,37 @@ void globe_navigation::move(double x, double y, camera& c)
     {
     case drag::none:
         return;
+    case drag::spin:
+    {
+        // Once the cursor reaches the globe, it grabs the point it held, which the spin kept on
+        // the line to the cursor, or else the point there.
+        spin_to(c, x, y);
+        vgl_dvec3 p{};
+        if (pick(c, x, y, p))
+        {
+            begin_pan(c, holding_ ? grabbed_ : p);
+            bring(c, grabbed_, x, y);
+            pan_eye_ = camera_eye(c);
+        }
+        return;
+    }
     case drag::pan:
     {
-        // From the camera at the start, so that the grabbed point stays exactly under the
-        // cursor however the drag goes.
         vgl_dvec3 under{};
+        // Once the cursor leaves the globe, it spins.
+        if (!pick(c, x, y, under))
+        {
+            begin_spin(c, grabbed_);
+            spin_to(c, x, y);
+            return;
+        }
+        // From the camera at the start, so that the grabbed point stays exactly under the
+        // cursor however the drag goes; if the globe has turned the cursor's place on it out
+        // of that camera's view, from the camera now.
+        if (!pick(start_, x, y, under))
+        {
+            start_ = c;
+        }
         if (pick(start_, x, y, under))
         {
             camera moved = start_;
@@ -525,8 +682,19 @@ void globe_navigation::move(double x, double y, camera& c)
         orbit_by(
             c, pivot_, vgl::degrees_to_radians(-dx * 0.25), vgl::degrees_to_radians(-dy * 0.25));
         // Turning about a point off the centre would roll the camera, which has no roll: aim it
-        // to keep the point under the cursor.
-        aim(c, pivot_, pivot_x_, pivot_y_);
+        // to keep the point under the cursor. Looking straight down, the heading and pitch
+        // cannot both move the point (aiming would tilt the camera anywhere): turn the globe to
+        // bring it back instead, at the same height, as zooming does.
+        if (c.pitch >= 89.999)
+        {
+            const double altitude = c.altitude;
+            bring(c, pivot_, pivot_x_, pivot_y_);
+            c.altitude = altitude;
+        }
+        else
+        {
+            aim(c, pivot_, pivot_x_, pivot_y_);
+        }
         return;
     case drag::look:
         c.heading = std::remainder(c.heading + dx * 0.15, 360.0);
@@ -540,16 +708,17 @@ void globe_navigation::move(double x, double y, camera& c)
 
 void globe_navigation::release()
 {
-    // A pan released while moving carries on, slowing down: the next update, which knows when
-    // the last moves happened, decides.
-    released_ = mode_ == drag::pan;
+    // A pan or spin released while moving carries on, slowing down: the next update, which
+    // knows when the last moves happened, decides.
+    released_ = mode_ == drag::pan || mode_ == drag::spin;
+    spun_ = mode_ == drag::spin;
     mode_ = drag::none;
     settle();
 }
 
 void globe_navigation::record()
 {
-    samples_[sample_count_ % samples_.size()] = {clock_, pan_eye_};
+    samples_[sample_count_ % samples_.size()] = {clock_, pan_eye_, spin_angle_};
     ++sample_count_;
 }
 
@@ -578,20 +747,35 @@ void globe_navigation::start_throw(const camera& c)
     {
         return;
     }
-    const vgl_dvec3 a = normalize(first->eye);
-    const vgl_dvec3 b = normalize(last.eye);
-    const vgl_dvec3 axis = cross(a, b);
-    const double sine = length(axis);
-    if (sine < 1e-15)
+    if (spun_)
     {
-        return;
+        // A spin turned the camera back about its axis by the angle: the throw carries on.
+        const double turned = last.angle - first->angle;
+        if (std::abs(turned) < 1e-15)
+        {
+            return;
+        }
+        throw_axis_ = scale(normalize(spin_axis_), turned > 0.0 ? -1.0 : 1.0);
+        throw_rate_ = std::abs(turned) / elapsed;
+    }
+    else
+    {
+        const vgl_dvec3 a = normalize(first->eye);
+        const vgl_dvec3 b = normalize(last.eye);
+        const vgl_dvec3 axis = cross(a, b);
+        const double sine = length(axis);
+        if (sine < 1e-15)
+        {
+            return;
+        }
+        throw_axis_ = scale(axis, 1.0 / sine);
+        throw_rate_ = std::atan2(sine, dot(a, b)) / elapsed;
     }
     // Measured against how much of the globe the view spans: a throw needs a twentieth of the
-    // view each second to start, and stops below a hundred-and-fiftieth.
+    // view each second to start, and stops below a hundred-and-fiftieth. A spin's rate is
+    // measured the same way, at the rim of the globe.
     const double span = std::max(c.altitude - ground_, 1.0) * 2.0 *
                         std::tan(vgl::degrees_to_radians(field_of_view_) / 2.0) / semi_major;
-    throw_axis_ = scale(axis, 1.0 / sine);
-    throw_rate_ = std::atan2(sine, dot(a, b)) / elapsed;
     throw_stop_ = span / 150.0;
     throwing_ = throw_rate_ > span / 20.0;
 }
@@ -641,7 +825,7 @@ void globe_navigation::update(double dt, const navigation_keys& keys, camera& c)
     // every update counts, moved or not, so that holding still slows it; after its release, only
     // moves that came before the release.
     clock_ += dt;
-    if (mode_ == drag::pan || (released_ && moved_))
+    if (mode_ == drag::pan || mode_ == drag::spin || (released_ && moved_))
     {
         record();
     }

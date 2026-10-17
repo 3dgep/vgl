@@ -89,7 +89,8 @@ The Direct3D 11 and Ogre backends are still empty placeholders.
 
 The samples run on the sample data in `samples/data`: `vgl-headless` without a GPU, `vgl-gl`
 in a window (`--es` for OpenGL ES, `--depth reversed` for reversed-Z), and `vgl-c`, the same
-in C. `vgl-gl` navigates like Google Earth: drag to grab the globe, scroll or double-click to
+in C. `vgl-gl` navigates like Google Earth: drag to grab the globe (from space, to spin it like a
+disk about its centre), scroll or double-click to
 zoom to the cursor, drag with Shift or the middle button to orbit and tilt, with Ctrl to look
 around, and with the right button to zoom; arrows or WASD move, Shift with them orbits, Page
 Up and Page Down zoom, and N, U and R turn north up, look straight down, or both. 1 to 7 jump

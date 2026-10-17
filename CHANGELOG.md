@@ -170,7 +170,16 @@ The pack format has its own version number, independent of the library version.
   down instead of turning the view over. Orbiting with the middle button or Shift and the left
   button turns around the point under the cursor, which stays there, and does nothing when
   pressed over space; tilting stops where the camera looks straight down, which for a point off
-  the centre of the view comes before the eye is above it. As in Google Earth, a small reticle
+  the centre of the view comes before the eye is above it. Orbiting sideways while looking
+  straight down only turns the heading, keeping the camera looking down and the point under the
+  cursor, instead of flipping the heading or tilting the camera out into space. A drag pressed over space turns the
+  globe like a disk facing the screen, about the axis through its centre along the view,
+  following the cursor around it and carrying the camera over the globe, instead of turning the
+  camera. A drag switches between the two wherever the cursor crosses the globe's edge, whether
+  it was pressed over space or over the globe: on the globe it grabs the point there, off it it
+  spins, keeping the grabbed point on the line from the centre to the cursor, so that the point
+  comes back under the cursor when the cursor returns to the globe. A spin released while moving
+  throws the globe as a pan does, turning on about the same axis and slowing down. As in Google Earth, a small reticle
   marks the point that the mouse orbits or zooms around while it does, then fades over half a
   second (`globe_navigation::focus`, drawn by the OpenGL sample's overlay). A throw keeps the globe turning about its centre at
   the rate of the pan's last tenth of a second, measured on the clock of the frames, so that it
