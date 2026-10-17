@@ -11,6 +11,7 @@
 #    include <vgl/gl.h>
 #endif
 
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -201,6 +202,21 @@ static void check_context(void)
     CHECK(vgl_context_view_get(context, &got) == VGL_RESULT_SUCCESS);
     CHECK(got.struct_size == sizeof(got) && got.viewport_width == 640 &&
           got.projection_matrix.m[15] == 1.0);
+    {
+        /* Through the identity view and projection, a point lands where its x and y say. */
+        const vgl_dvec3 point = {0.5, -0.5, 0.0};
+        vgl_dvec3 window = {0.0, 0.0, 0.0};
+        CHECK(vgl_view_project(&view, &point, &window) == VGL_RESULT_SUCCESS);
+        CHECK(window.x == 480.0 && window.y == 360.0 && window.z == 1.0);
+    }
+    {
+        /* And from a geodetic position: the north pole lies on the identity view's axis, at
+           the viewport's centre. */
+        const vgl_geodetic pole = {VGL_DEGREES_TO_RADIANS(90.0), 0.0, 0.0};
+        vgl_dvec3 window = {0.0, 0.0, 0.0};
+        CHECK(vgl_view_geodetic_project(&view, NULL, &pole, &window) == VGL_RESULT_SUCCESS);
+        CHECK(fabs(window.x - 320.0) < 1e-6 && fabs(window.y - 240.0) < 1e-6 && window.z == 1.0);
+    }
     CHECK(vgl_context_update(context, NULL) == VGL_RESULT_SUCCESS);
     CHECK(vgl_context_frame_begin(context, NULL, &frame) == VGL_RESULT_SUCCESS);
     CHECK(vgl_frame_draw_list_get(frame, &items, &item_count) == VGL_RESULT_SUCCESS);

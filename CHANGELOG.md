@@ -119,6 +119,11 @@ The pack format has its own version number, independent of the library version.
   backend, pixel for pixel but for anti-aliased wireframe lines on Direct3D 11. CI runs it on
   Linux with Mesa on full runs.
 - The samples in a GLFW window share their controls (`samples/common/glfw_controls.hpp`).
+- `vgl_view_project`: where an ECEF position appears in a view's viewport, in pixels from the
+  top left, with its distance along the view axis, for labels and markers; free-threaded, with
+  any handedness and depth mapping. `vgl_view_geodetic_project` does the same from a latitude,
+  longitude and height, on WGS84 or an ellipsoid given. C++ wrappers: `vgl::view_project` and
+  `vgl::view_geodetic_project`.
 - Atmosphere, in every backend (`vgl_gl_draw_info::atmosphere`, `vgl_d3d11_draw_info::atmosphere`,
   `vgl::ogre::globe_settings::atmosphere`): the sky where nothing was drawn, the glow around the
   globe seen from space, the haze over the terrain and the sunlight reddened and dimmed on it,

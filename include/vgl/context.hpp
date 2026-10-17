@@ -57,6 +57,38 @@ struct pack_status
     result failure = result::success;
 };
 
+// Where an ECEF position appears in a view's viewport: x and y in pixels from its top left, y
+// downwards, and the clip-space w, the distance along the view axis for a perspective
+// projection (vgl_view_project). Behind the camera is result::not_found.
+[[nodiscard]] inline expected<vgl_dvec3> view_project(const vgl_view& view,
+                                                      const vgl_dvec3& position) noexcept
+{
+    vgl_dvec3 window{};
+    const auto r = static_cast<result>(vgl_view_project(&view, &position, &window));
+    if (failed(r))
+    {
+        return unexpected(r);
+    }
+    return window;
+}
+
+// Where a geodetic position (radians, height above the ellipsoid) appears in a view's
+// viewport, on an ellipsoid, WGS84 by default (vgl_view_geodetic_project).
+[[nodiscard]] inline expected<vgl_dvec3>
+view_geodetic_project(const vgl_view& view,
+                      const vgl_geodetic& geodetic,
+                      const vgl_ellipsoid* ellipsoid = nullptr) noexcept
+{
+    vgl_dvec3 window{};
+    const auto r =
+        static_cast<result>(vgl_view_geodetic_project(&view, ellipsoid, &geodetic, &window));
+    if (failed(r))
+    {
+        return unexpected(r);
+    }
+    return window;
+}
+
 // Owns a vgl_context.
 class context
 {

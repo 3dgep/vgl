@@ -908,6 +908,94 @@ TEST_CASE(view_set_validates_its_input)
     CHECK_EQ(vgl_context_destroy(ctx), VGL_RESULT_SUCCESS);
 }
 
+TEST_CASE(positions_project_to_the_viewport)
+{
+    const ellipsoid e;
+    // Straight down from 10 km: the point below is at the centre, 10 km away.
+    const vgl_view v = camera_over(45.0, 7.0, 10000.0);
+    const vgl_dvec3 below = e.to_ecef({radians(45.0), radians(7.0), 0.0}).to_c();
+    vgl_dvec3 w{};
+    CHECK_EQ(vgl_view_project(&v, &below, &w), VGL_RESULT_SUCCESS);
+    CHECK_NEAR(w.x, 960.0, 1e-6);
+    CHECK_NEAR(w.y, 540.0, 1e-6);
+    CHECK_NEAR(w.z, 10000.0, 1e-6);
+
+    // A point at the edge of the field of view lands at the viewport's edge: 30 degrees up from
+    // the view axis in a 60-degree field is the top edge, y = 0.
+    const dmat4 view = dmat4::from_c(v.view_matrix);
+    const dvec3 eye = e.to_ecef({radians(45.0), radians(7.0), 10000.0});
+    const dvec3 forward = normalized(dvec3::from_c(below) - eye);
+    const dvec3 up_axis{view(1, 0), view(1, 1), view(1, 2)}; // The camera's up, in ECEF.
+    const dvec3 top = eye + (forward + up_axis * std::tan(radians(30.0))) * 5000.0;
+    const vgl_dvec3 top_c = top.to_c();
+    CHECK_EQ(vgl_view_project(&v, &top_c, &w), VGL_RESULT_SUCCESS);
+    CHECK_NEAR(w.x, 960.0, 1e-6);
+    CHECK_NEAR(w.y, 0.0, 1e-6);
+    CHECK_NEAR(w.z, 5000.0, 1e-6);
+
+    // Behind the camera: not on the screen, and the output is left alone.
+    const vgl_dvec3 behind = (eye - forward * 100.0).to_c();
+    w = {-1.0, -1.0, -1.0};
+    CHECK_EQ(vgl_view_project(&v, &behind, &w), VGL_RESULT_NOT_FOUND);
+    CHECK_EQ(w.x, -1.0);
+
+    // A left-handed view with a reversed, infinite Direct3D projection puts it at the same place.
+    const vgl_view d3d =
+        make_view(look_at(eye, dvec3::from_c(below), {0.0, 0.0, 1.0}, true),
+                  perspective_d3d_reversed_infinite(radians(60.0), 16.0 / 9.0, 1.0));
+    CHECK_EQ(vgl_view_project(&d3d, &below, &w), VGL_RESULT_SUCCESS);
+    CHECK_NEAR(w.x, 960.0, 1e-6);
+    CHECK_NEAR(w.y, 540.0, 1e-6);
+    CHECK_NEAR(w.z, 10000.0, 1e-6);
+    CHECK_EQ(vgl_view_project(&d3d, &top_c, &w), VGL_RESULT_SUCCESS);
+    CHECK_NEAR(w.y, 0.0, 1e-6);
+
+    // From a geodetic position, on WGS84 by default or on an ellipsoid given: the same.
+    const vgl_geodetic ground{radians(45.0), radians(7.0), 0.0};
+    vgl_dvec3 g{};
+    CHECK_EQ(vgl_view_geodetic_project(&v, nullptr, &ground, &g), VGL_RESULT_SUCCESS);
+    CHECK_NEAR(g.x, 960.0, 1e-6);
+    CHECK_NEAR(g.y, 540.0, 1e-6);
+    CHECK_NEAR(g.z, 10000.0, 1e-6);
+    vgl_ellipsoid wgs84{};
+    REQUIRE(vgl_ellipsoid_wgs84_get(&wgs84) == VGL_RESULT_SUCCESS);
+    CHECK_EQ(vgl_view_geodetic_project(&v, &wgs84, &ground, &g), VGL_RESULT_SUCCESS);
+    CHECK_NEAR(g.y, 540.0, 1e-6);
+    // 2 km up, straight below the camera still, 2 km nearer.
+    const vgl_geodetic raised{radians(45.0), radians(7.0), 2000.0};
+    CHECK_EQ(vgl_view_geodetic_project(&v, nullptr, &raised, &g), VGL_RESULT_SUCCESS);
+    CHECK_NEAR(g.x, 960.0, 1e-6);
+    CHECK_NEAR(g.z, 8000.0, 1e-6);
+    // Above the camera, which looks down, is behind it. The far side of the globe is not: it is
+    // ahead, through the Earth, hidden but on the screen.
+    const vgl_geodetic above{radians(45.0), radians(7.0), 20000.0};
+    CHECK_EQ(vgl_view_geodetic_project(&v, nullptr, &above, &g), VGL_RESULT_NOT_FOUND);
+    const vgl_geodetic antipode{radians(-45.0), radians(-173.0), 0.0};
+    CHECK_EQ(vgl_view_geodetic_project(&v, nullptr, &antipode, &g), VGL_RESULT_SUCCESS);
+    // Near the centre: the normal at 45 degrees misses the Earth's centre by about 21 km.
+    CHECK(std::fabs(g.x - 960.0) < 10.0 && std::fabs(g.y - 540.0) < 10.0);
+    const vgl_geodetic past_pole{2.0, 0.0, 0.0};
+    const vgl_ellipsoid flat{6378137.0, 2.0};
+    CHECK_EQ(vgl_view_geodetic_project(&v, nullptr, &past_pole, &g), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_view_geodetic_project(&v, &flat, &ground, &g), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_view_geodetic_project(&v, nullptr, nullptr, &g), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_view_geodetic_project(nullptr, nullptr, &ground, &g), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_view_geodetic_project(&v, nullptr, &ground, nullptr), VGL_RESULT_INVALID_ARGUMENT);
+
+    // Invalid arguments.
+    const vgl_dvec3 nan{std::numeric_limits<double>::quiet_NaN(), 0.0, 0.0};
+    CHECK_EQ(vgl_view_project(nullptr, &below, &w), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_view_project(&v, nullptr, &w), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_view_project(&v, &below, nullptr), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_view_project(&v, &nan, &w), VGL_RESULT_INVALID_ARGUMENT);
+    vgl_view bad = v;
+    bad.viewport_height = 0;
+    CHECK_EQ(vgl_view_project(&bad, &below, &w), VGL_RESULT_INVALID_ARGUMENT);
+    bad = v;
+    bad.struct_size = 8;
+    CHECK_EQ(vgl_view_project(&bad, &below, &w), VGL_RESULT_INVALID_ARGUMENT);
+}
+
 TEST_CASE(without_packs_the_ellipsoid_is_selected)
 {
     vgl_context* ctx = nullptr;

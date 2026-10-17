@@ -175,6 +175,67 @@ typedef struct vgl_view
 VGL_API vgl_result vgl_context_view_set(vgl_context* context, const vgl_view* view);
 
 /**
+ * Projects a position to the viewport of a view: where it appears on the screen, as for a
+ * label or a marker. The view is the same as for vgl_context_view_set, and any handedness and
+ * depth mapping work. The position is ECEF; vgl_ellipsoid_geodetic_to_ecef turns a latitude,
+ * longitude and height into one. The projection is composed in double precision.
+ *
+ * The result does not say whether the position is visible: it may lie outside the viewport,
+ * beyond the far plane, or behind the terrain or the globe. vgl_context_ray_query from the
+ * camera towards it tells whether something is in the way.
+ *
+ * @param view        The view.
+ * @param position    The position, ECEF, in metres.
+ * @param out_window  Receives the position in the viewport: x in pixels from its left edge, y
+ *                    in pixels from its top edge, downwards, so pixel (i, j) has its centre at
+ *                    (i + 0.5, j + 0.5); and z, the clip-space w, which a perspective
+ *                    projection makes the distance from the camera along the view axis, in
+ *                    metres. Unchanged when the position is behind the camera. OpenGL's window
+ *                    coordinates count y upwards: they are (x, viewport_height - y).
+ *
+ * @retval VGL_RESULT_SUCCESS           The position is in front of the camera: its clip-space
+ *                                      w is positive.
+ * @retval VGL_RESULT_NOT_FOUND         The position is behind the camera, or on the plane
+ *                                      through it, where it has no place on the screen.
+ * @retval VGL_RESULT_INVALID_ARGUMENT  A pointer is null, the position is not finite, or the
+ *                                      view is invalid, as for vgl_context_view_set.
+ * @retval VGL_RESULT_NOT_SUPPORTED     view has fields from a newer version set.
+ *
+ * @par Thread safety
+ * Free-threaded: it takes no context.
+ */
+VGL_API vgl_result vgl_view_project(const vgl_view* view,
+                                    const vgl_dvec3* position,
+                                    vgl_dvec3* out_window);
+
+/**
+ * Projects a geodetic position to the viewport of a view: vgl_ellipsoid_geodetic_to_ecef, then
+ * vgl_view_project, which describes the result. The height is above the ellipsoid; for a height
+ * above mean sea level, add the geoid's height there first (vgl_context_height_query gives both).
+ *
+ * @param view        The view.
+ * @param ellipsoid   Optional. The reference ellipsoid; null selects WGS84.
+ * @param geodetic    The position: latitude and longitude in radians, height in metres.
+ * @param out_window  Receives x and y in pixels from the viewport's top left, y downwards, and
+ *                    the clip-space w, as for vgl_view_project. Unchanged when the position is
+ *                    behind the camera.
+ *
+ * @retval VGL_RESULT_SUCCESS           The position is in front of the camera.
+ * @retval VGL_RESULT_NOT_FOUND         The position is behind the camera.
+ * @retval VGL_RESULT_INVALID_ARGUMENT  A pointer other than ellipsoid is null, the ellipsoid or
+ *                                      the view is invalid, or the position is not finite or its
+ *                                      latitude is out of range.
+ * @retval VGL_RESULT_NOT_SUPPORTED     view has fields from a newer version set.
+ *
+ * @par Thread safety
+ * Free-threaded: it takes no context.
+ */
+VGL_API vgl_result vgl_view_geodetic_project(const vgl_view* view,
+                                             const vgl_ellipsoid* ellipsoid,
+                                             const vgl_geodetic* geodetic,
+                                             vgl_dvec3* out_window);
+
+/**
  * Gets the view set with vgl_context_view_set, for example for a backend that needs its
  * projection matrix.
  *

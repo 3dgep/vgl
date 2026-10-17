@@ -10,6 +10,7 @@
 #include "tiling/tile.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 namespace vgl::internal
@@ -418,6 +419,75 @@ extern "C" VGL_API vgl_result vgl_context_view_set(vgl_context* context, const v
     context->host_view.struct_size = sizeof(vgl_view);
     context->has_view = true;
     return VGL_RESULT_SUCCESS;
+}
+
+extern "C" VGL_API vgl_result vgl_view_project(const vgl_view* view,
+                                               const vgl_dvec3* position,
+                                               vgl_dvec3* out_window)
+{
+    if (view == nullptr || position == nullptr || out_window == nullptr ||
+        view->struct_size < sizeof(vgl_view) || !std::isfinite(position->x) ||
+        !std::isfinite(position->y) || !std::isfinite(position->z))
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    if (view->struct_size > sizeof(vgl_view))
+    {
+        const auto* bytes = reinterpret_cast<const unsigned char*>(view);
+        for (std::size_t i = sizeof(vgl_view); i < view->struct_size; ++i)
+        {
+            if (bytes[i] != 0)
+            {
+                return VGL_RESULT_NOT_SUPPORTED;
+            }
+        }
+    }
+    view_state state;
+    if (!make_view_state(*view, state))
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    // Camera space first, then clip space: composing the two matrices would round the large
+    // translation of the view into the projection's terms.
+    const dmat4 v = dmat4::from_c(view->view_matrix);
+    const dmat4 p = dmat4::from_c(view->projection_matrix);
+    const dvec3 camera = transform_point(v, dvec3::from_c(*position));
+    const auto clip = [&](int row) {
+        return p(row, 0) * camera.x + p(row, 1) * camera.y + p(row, 2) * camera.z + p(row, 3);
+    };
+    const double w = clip(3);
+    if (!(w > 0.0))
+    {
+        return VGL_RESULT_NOT_FOUND;
+    }
+    const double width = view->viewport_width;
+    const double height = view->viewport_height;
+    *out_window = {(clip(0) / w * 0.5 + 0.5) * width, (0.5 - clip(1) / w * 0.5) * height, w};
+    return VGL_RESULT_SUCCESS;
+}
+
+extern "C" VGL_API vgl_result vgl_view_geodetic_project(const vgl_view* view,
+                                                        const vgl_ellipsoid* ellipsoid,
+                                                        const vgl_geodetic* geodetic,
+                                                        vgl_dvec3* out_window)
+{
+    if (view == nullptr || out_window == nullptr)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    vgl_ellipsoid wgs84{};
+    if (ellipsoid == nullptr)
+    {
+        static_cast<void>(vgl_ellipsoid_wgs84_get(&wgs84));
+        ellipsoid = &wgs84;
+    }
+    vgl_dvec3 position{};
+    const vgl_result r = vgl_ellipsoid_geodetic_to_ecef(ellipsoid, geodetic, &position);
+    if (r != VGL_RESULT_SUCCESS)
+    {
+        return r;
+    }
+    return vgl_view_project(view, &position, out_window);
 }
 
 extern "C" VGL_API vgl_result vgl_context_view_get(const vgl_context* context, vgl_view* out_view)
