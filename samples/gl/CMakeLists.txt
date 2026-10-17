@@ -6,15 +6,15 @@
 # statistics and debug views. With --check, it is also the test of the backend.
 
 # Its overlay of statistics and debug controls uses Dear ImGui.
-if(NOT TARGET vgl_imgui)
+if(NOT TARGET vgl_imgui_glfw_gl3)
     message(STATUS "vgl: Dear ImGui is not available (VGL_FETCH_DEPENDENCIES is off); skipping the OpenGL sample")
     return()
 endif()
 
-add_executable(vgl_gl_sample main.cpp overlay.cpp overlay.hpp)
+add_executable(vgl_gl_sample main.cpp)
 set_target_properties(vgl_gl_sample PROPERTIES OUTPUT_NAME vgl-gl)
 target_link_libraries(vgl_gl_sample PRIVATE
-    vgl_sample_common vgl::vgl vgl::defaults vgl::gl glfw vgl_imgui)
+    vgl_sample_common vgl_sample_overlay vgl::vgl vgl::defaults vgl::gl glfw vgl_imgui_glfw_gl3)
 target_compile_definitions(vgl_gl_sample PRIVATE
     VGL_SAMPLE_DATA_DIR="${PROJECT_SOURCE_DIR}/samples/data")
 vgl_target_options(vgl_gl_sample)

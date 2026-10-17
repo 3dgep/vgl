@@ -33,7 +33,9 @@
 #include "navigation.hpp"
 #include "overlay.hpp"
 #include "sample_camera.hpp"
+#include "sample_check.hpp"
 #include "sample_data.hpp"
+#include <imgui_impl_opengl3.h>
 
 #include <vgl/defaults.hpp>
 #include <vgl/gl.hpp>
@@ -50,6 +52,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <imgui_impl_glfw.h>
 #include <string>
 #include <thread>
 #include <utility>
@@ -61,6 +64,15 @@
 
 namespace
 {
+
+using sample::clear_color;
+using sample::contour_interval_for;
+using sample::depth_name;
+using sample::expect;
+using sample::field_of_view;
+using sample::image;
+using sample::place;
+using sample::places;
 
 // ---------------------------------------------------------------------------------------------
 // The OpenGL the host itself uses: clearing, its framebuffer, and the checks.
@@ -239,9 +251,6 @@ void target_destroy(const host_gl& gl, target& t)
 // Drawing a frame
 // ---------------------------------------------------------------------------------------------
 
-constexpr double field_of_view = 60.0; // Degrees, vertical.
-constexpr std::array<float, 3> clear_color{0.02f, 0.02f, 0.05f};
-
 struct scene
 {
     vgl_depth_convention depth = VGL_DEPTH_CONVENTION_LOGARITHMIC;
@@ -313,32 +322,10 @@ vgl::result draw(vgl::gl_backend& backend, const scene& s, int width, int height
     {
         info.sun_direction = {1.0, 0.4, 0.3}; // Over the Atlantic, a little north.
     }
-    info.debug_flags =
-        (s.debug.wireframe ? std::uint32_t{VGL_GL_DEBUG_FLAG_WIREFRAME} : 0u) |
-        (s.debug.level_colors ? std::uint32_t{VGL_GL_DEBUG_FLAG_LEVEL_COLORS} : 0u) |
-        (s.debug.imagery_source ? std::uint32_t{VGL_GL_DEBUG_FLAG_IMAGERY_SOURCE} : 0u) |
-        (s.debug.height_colors ? std::uint32_t{VGL_GL_DEBUG_FLAG_HEIGHT_COLORS} : 0u) |
-        (s.debug.contours ? std::uint32_t{VGL_GL_DEBUG_FLAG_CONTOURS} : 0u);
+    info.debug_flags = sample::debug_flags(s.debug);
     info.contour_interval = s.debug.contour_interval;
     info.sea_surface = s.debug.sea ? VGL_TRUE : VGL_FALSE;
     return backend.draw(&info);
-}
-
-// A contour interval for an altitude: about a 250th of it, rounded down to 1, 2 or 5 times a
-// power of ten, from 1 m to 2,000 m. From 300 km that is 1,000 m, from 60 km 200 m.
-float contour_interval_for(double altitude)
-{
-    const double target = std::clamp(altitude / 250.0, 1.0, 2000.0);
-    const double power = std::pow(10.0, std::floor(std::log10(target)));
-    double step = power;
-    for (const double m : {2.0, 5.0})
-    {
-        if (m * power <= target)
-        {
-            step = m * power;
-        }
-    }
-    return static_cast<float>(step);
 }
 
 // The host's clip control, for its own geometry: the reversed-Z convention needs depth from 0
@@ -355,57 +342,9 @@ bool depth_mode_set(const host_gl& gl, vgl_depth_convention depth)
     return true;
 }
 
-const char* depth_name(vgl_depth_convention depth)
-{
-    switch (depth)
-    {
-    case VGL_DEPTH_CONVENTION_REVERSED_Z:
-        return "reversed-Z";
-    case VGL_DEPTH_CONVENTION_CONVENTIONAL:
-        return "conventional";
-    default:
-        return "logarithmic";
-    }
-}
-
-// ---------------------------------------------------------------------------------------------
-// Places
-// ---------------------------------------------------------------------------------------------
-
-// With the share of a 16:9 view the globe covers there, for the check: from orbit, the globe
-// is a disc in the middle; closer, the terrain fills the view below the horizon.
-struct place
-{
-    const char* name;
-    sample::camera camera;
-    double least_coverage;
-    double most_coverage;
-};
-
-const std::array<place, 7> places{{
-    {"orbit, Atlantic", {30.0, -30.0, 2.0e7, 0.0, 90.0}, 0.06, 0.12},
-    {"Europe", {48.0, 10.0, 5.0e6, 0.0, 90.0}, 0.45, 0.70},
-    {"Alps", {44.5, 9.0, 3.0e5, 0.0, 35.0}, 0.65, 0.82},
-    {"Himalaya", {26.0, 86.9, 6.0e4, 0.0, 20.0}, 0.58, 0.77},
-    {"Mid-Atlantic Ridge", {20.0, -50.0, 1.5e6, 90.0, 40.0}, 0.38, 0.55},
-    {"Sahara", {23.0, 12.0, 1.0e6, 0.0, 90.0}, 0.99, 1.0},
-    {"Sognefjord", {61.1, 6.2, 1.5e4, 60.0, 25.0}, 0.75, 0.9},
-}};
-
 // ---------------------------------------------------------------------------------------------
 // The check
 // ---------------------------------------------------------------------------------------------
-
-int failures = 0;
-
-void expect(bool condition, const std::string& what)
-{
-    if (!condition)
-    {
-        std::fprintf(stderr, "check failed: %s\n", what.c_str());
-        ++failures;
-    }
-}
 
 // Host state set before each draw in the check, which the backend must leave as it was.
 void sentinel_state_set(const host_gl& gl, GLuint vertex_array)
@@ -449,79 +388,24 @@ void sentinel_state_check(const host_gl& gl, GLuint vertex_array, vgl_depth_conv
     }
 }
 
-using image = std::vector<std::uint8_t>; // RGBA, bottom row first.
-
+// The framebuffer's pixels, rows from the top: OpenGL reads them from the bottom.
 image read_image(const host_gl& gl, const target& t)
 {
-    image pixels(static_cast<std::size_t>(t.width) * static_cast<std::size_t>(t.height) * 4);
+    image i;
+    i.width = t.width;
+    i.height = t.height;
+    const std::size_t row = static_cast<std::size_t>(t.width) * 4;
+    std::vector<std::uint8_t> bottom_up(row * static_cast<std::size_t>(t.height));
     gl.BindFramebuffer(GL_READ_FRAMEBUFFER, t.framebuffer);
-    gl.ReadPixels(0, 0, t.width, t.height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
-    return pixels;
-}
-
-void save_image(const image& pixels, int width, int height, const std::string& path)
-{
-    std::ofstream f(path, std::ios::binary);
-    f << "P6\n" << width << ' ' << height << "\n255\n";
-    for (int y = height - 1; y >= 0; --y)
+    gl.ReadPixels(0, 0, t.width, t.height, GL_RGBA, GL_UNSIGNED_BYTE, bottom_up.data());
+    i.pixels.resize(bottom_up.size());
+    for (int y = 0; y < t.height; ++y)
     {
-        for (int x = 0; x < width; ++x)
-        {
-            const std::size_t i = static_cast<std::size_t>(y) * static_cast<std::size_t>(width) +
-                                  static_cast<std::size_t>(x);
-            const auto* p = &pixels[i * 4];
-            f.write(reinterpret_cast<const char*>(p), 3);
-        }
+        std::copy_n(bottom_up.data() + static_cast<std::size_t>(t.height - 1 - y) * row,
+                    row,
+                    i.pixels.data() + static_cast<std::size_t>(y) * row);
     }
-    if (!f)
-    {
-        std::fprintf(stderr, "could not write %s\n", path.c_str());
-    }
-}
-
-// Whether a pixel shows the globe rather than the clear color.
-bool covered_pixel(const image& pixels, std::size_t pixel)
-{
-    for (std::size_t c = 0; c < 3; ++c)
-    {
-        const int background = static_cast<int>(std::lround(clear_color[c] * 255.0f));
-        if (std::abs(pixels[pixel * 4 + c] - background) > 2)
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-// The share of pixels that show the globe.
-double coverage(const image& pixels)
-{
-    const std::size_t count = pixels.size() / 4;
-    std::size_t n = 0;
-    for (std::size_t i = 0; i < count; ++i)
-    {
-        if (covered_pixel(pixels, i))
-        {
-            ++n;
-        }
-    }
-    return static_cast<double>(n) / static_cast<double>(count);
-}
-
-// The share of pixels whose color differs by more than a little.
-double difference(const image& a, const image& b)
-{
-    std::size_t differing = 0;
-    for (std::size_t i = 0; i < a.size(); i += 4)
-    {
-        const int d = std::max(
-            {std::abs(a[i] - b[i]), std::abs(a[i + 1] - b[i + 1]), std::abs(a[i + 2] - b[i + 2])});
-        if (d > 24)
-        {
-            ++differing;
-        }
-    }
-    return static_cast<double>(differing) / static_cast<double>(a.size() / 4);
+    return i;
 }
 
 // Where an ECEF point appears in a window, for a camera; false behind it.
@@ -1210,13 +1094,6 @@ void navigation_check()
     }
 }
 
-bool idle(const vgl_context_statistics& s)
-{
-    return s.packs_loading == 0 && s.reads_outstanding == 0 && s.tiles_decoding == 0 &&
-           s.meshes_building == 0 && s.meshes_waiting == 0 && s.textures_waiting == 0 &&
-           s.resources_created == 0 && s.tiles_drawn == s.tiles_selected;
-}
-
 struct options
 {
     std::string data;               // The sample set's directory, from --data.
@@ -1282,7 +1159,7 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
                        "vgl_gl_backend_draw succeeds");
                 sentinel_state_check(gl, host_vertex_array, s.depth);
                 const vgl_context_statistics st = ctx.statistics_get();
-                quiet = idle(st) ? quiet + 1 : 0;
+                quiet = sample::idle(st) ? quiet + 1 : 0;
                 ++frames;
                 glfwPollEvents();
                 if (quiet == 0)
@@ -1292,54 +1169,12 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
             }
             const vgl_context_statistics st = ctx.statistics_get();
             image pixels = read_image(gl, t);
-            const double covered = coverage(pixels);
-            std::printf(
-                "%-13s %-20s %5d frames %5u tiles %8llu triangles %6.1f MiB  %5.1f%% globe\n",
-                depth_name(s.depth),
-                p.name,
-                frames,
-                st.tiles_drawn,
-                static_cast<unsigned long long>(st.triangles_drawn),
-                static_cast<double>(st.gpu_used) / (1024.0 * 1024.0),
-                covered * 100.0);
-            const std::string where = std::string(depth_name(s.depth)) + ", " + p.name;
-            expect(quiet >= 5, "loading settles: " + where);
-            expect(st.tiles_drawn > 0 && st.tiles_drawn == st.tiles_selected,
-                   "every selected tile is drawn: " + where);
-            expect(gl.GetError() == 0, "OpenGL reports no error: " + where);
-            // From orbit, tiles a pixel or two per sample apart draw coarser grids.
-            expect(std::strcmp(p.name, "orbit, Atlantic") != 0 || st.triangles_drawn < 20000,
-                   "the globe from orbit draws coarse meshes: " + where);
-            expect(covered >= p.least_coverage && covered <= p.most_coverage,
-                   "the globe covers its share of the view: " + where);
-            // Every view looks at the globe in the middle, and past it in the top corners,
-            // except straight down from close by.
-            const std::size_t w = width;
-            const std::size_t h = height;
-            const bool sky = p.most_coverage < 1.0;
-            expect(covered_pixel(pixels, h / 2 * w + w / 2) &&
-                       (!sky ||
-                        (!covered_pixel(pixels, (h - 1) * w) && !covered_pixel(pixels, h * w - 1))),
-                   "the globe is below and the sky above: " + where);
-            // Imagery is drawn: the desert is tan, where the colours by height would be green.
-            if (std::strcmp(p.name, "Sahara") == 0)
-            {
-                const std::uint8_t* middle = &pixels[(h / 2 * w + w / 2) * 4];
-                expect(middle[0] > middle[1] && middle[1] > middle[2],
-                       "the Sahara is sand-coloured: " + where);
-            }
+            sample::check_place(s.depth, p, frames, quiet >= 5, st, pixels);
+            expect(gl.GetError() == 0,
+                   std::string("OpenGL reports no error: ") + depth_name(s.depth) + ", " + p.name);
             if (!o.save.empty())
             {
-                std::string name = o.save + "/" + depth_name(s.depth) + "-" + p.name + ".ppm";
-                std::replace(name.begin() + static_cast<std::ptrdiff_t>(o.save.size()),
-                             name.end(),
-                             ' ',
-                             '-');
-                std::replace(name.begin() + static_cast<std::ptrdiff_t>(o.save.size()),
-                             name.end(),
-                             ',',
-                             '_');
-                save_image(pixels, width, height, name);
+                sample::save_image(pixels, sample::image_path(o.save, s.depth, p.name));
                 // The same view as elevation: colours by height, and contours at the interval
                 // the interactive sample would choose.
                 scene elevation = s;
@@ -1348,16 +1183,18 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
                 elevation.debug.contour_interval = contour_interval_for(s.camera.altitude);
                 clear(gl, elevation, t);
                 static_cast<void>(draw(*backend, elevation, width, height));
-                std::string elevation_name = name;
-                elevation_name.insert(elevation_name.size() - 4, "-elevation");
-                save_image(read_image(gl, t), width, height, elevation_name);
+                sample::save_image(
+                    read_image(gl, t),
+                    sample::image_path(
+                        o.save, s.depth, (std::string(p.name) + "-elevation").c_str()));
                 // And with the sea surface over the imagery.
                 scene sea = s;
                 sea.debug.sea = true;
                 clear(gl, sea, t);
                 static_cast<void>(draw(*backend, sea, width, height));
-                name.insert(name.size() - 4, "-sea");
-                save_image(read_image(gl, t), width, height, name);
+                sample::save_image(
+                    read_image(gl, t),
+                    sample::image_path(o.save, s.depth, (std::string(p.name) + "-sea").c_str()));
             }
             images[c].push_back(std::move(pixels));
         }
@@ -1372,10 +1209,7 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
         expect(gl.GetError() == 0, "OpenGL reports no error with the debug views");
         if (!o.save.empty())
         {
-            save_image(read_image(gl, t),
-                       width,
-                       height,
-                       o.save + "/" + depth_name(s.depth) + "-debug.ppm");
+            sample::save_image(read_image(gl, t), sample::image_path(o.save, s.depth, "debug"));
         }
         // The wireframe alone: the grid's cells and the tiles' boundaries over the imagery.
         s.debug.level_colors = s.debug.imagery_source = false;
@@ -1385,10 +1219,7 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
                "vgl_gl_backend_draw succeeds with the wireframe");
         if (!o.save.empty())
         {
-            save_image(read_image(gl, t),
-                       width,
-                       height,
-                       o.save + "/" + depth_name(s.depth) + "-wireframe.ppm");
+            sample::save_image(read_image(gl, t), sample::image_path(o.save, s.depth, "wireframe"));
         }
         s.debug.height_colors = s.debug.contours = s.debug.sea = true;
         // The heightmap with contour lines alone, every 100 m.
@@ -1400,10 +1231,7 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
         expect(gl.GetError() == 0, "OpenGL reports no error with contour lines");
         if (!o.save.empty())
         {
-            save_image(read_image(gl, t),
-                       width,
-                       height,
-                       o.save + "/" + depth_name(s.depth) + "-contours.ppm");
+            sample::save_image(read_image(gl, t), sample::image_path(o.save, s.depth, "contours"));
         }
         target_destroy(gl, t);
         backend->reset();
@@ -1411,30 +1239,9 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
     depth_mode_set(gl, VGL_DEPTH_CONVENTION_LOGARITHMIC);
     gl.DeleteVertexArrays(1, &host_vertex_array);
 
-    // Where the conventions resolve depth well, they draw the same image. A conventional depth
-    // buffer loses distant detail, so it is held to a looser bound.
-    for (std::size_t c = 1; c < conventions.size(); ++c)
-    {
-        if (images[0].size() != places.size() || images[c].size() != places.size())
-        {
-            continue;
-        }
-        for (std::size_t i = 0; i < places.size(); ++i)
-        {
-            const double d = difference(images[0][i], images[c][i]);
-            const double bound = conventions[c] == VGL_DEPTH_CONVENTION_CONVENTIONAL ? 0.05 : 0.01;
-            std::printf("%s and %s differ in %.2f%% of %s\n",
-                        depth_name(conventions[0]),
-                        depth_name(conventions[c]),
-                        d * 100.0,
-                        places[i].name);
-            expect(d <= bound,
-                   std::string(depth_name(conventions[c])) +
-                       " agrees with logarithmic depth: " + places[i].name);
-        }
-    }
-    std::printf("\n%s\n", failures == 0 ? "all checks passed" : "checks failed");
-    return failures == 0 ? 0 : 1;
+    sample::compare_conventions({conventions.begin(), conventions.end()}, images);
+    std::printf("\n%s\n", sample::failures() == 0 ? "all checks passed" : "checks failed");
+    return sample::failures() == 0 ? 0 : 1;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1624,14 +1431,35 @@ int run_interactive(const options& o, GLFWwindow* window, const host_gl& gl, vgl
     glfwSetCursorPosCallback(window, on_cursor);
     glfwSetScrollCallback(window, on_scroll);
     glfwSetKeyCallback(window, on_key);
-    if (!ui.init(window, o.es))
+    struct imgui_host
+    {
+        GLFWwindow* window;
+        bool es;
+    } host{window, o.es};
+    sample::overlay::backend imgui;
+    imgui.user_data = &host;
+    imgui.init = [](void* user) {
+        const auto* h = static_cast<const imgui_host*>(user);
+        return ImGui_ImplGlfw_InitForOpenGL(h->window, true) &&
+               ImGui_ImplOpenGL3_Init(h->es ? "#version 300 es" : "#version 330 core");
+    };
+    imgui.new_frame = [](void*) {
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+    };
+    imgui.render = [](void*) { ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData()); };
+    imgui.shutdown = [](void*) {
+        ImGui_ImplOpenGL3_Shutdown();
+        ImGui_ImplGlfw_Shutdown();
+    };
+    if (!ui.init(imgui))
     {
         std::fprintf(stderr, "could not set up the overlay\n");
         return 1;
     }
     sample::panel_info panel;
-    panel.gl_version = reinterpret_cast<const char*>(gl.GetString(GL_VERSION));
-    panel.gl_renderer = reinterpret_cast<const char*>(gl.GetString(GL_RENDERER));
+    panel.api = reinterpret_cast<const char*>(gl.GetString(GL_VERSION));
+    panel.device = reinterpret_cast<const char*>(gl.GetString(GL_RENDERER));
     panel.depth = depth_name(s.depth);
     bool was_frozen = false;
     auto last_frame = std::chrono::steady_clock::now();

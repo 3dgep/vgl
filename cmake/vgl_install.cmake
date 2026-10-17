@@ -33,6 +33,16 @@ if(TARGET vgl_gl)
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
 endif()
 
+# The Direct3D 11 backend, as vgl::d3d11 in the same package. Windows has no pkg-config
+# convention, so it has no .pc file.
+if(TARGET vgl_d3d11)
+    install(TARGETS vgl_d3d11
+        EXPORT vgl-targets
+        RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}"
+        LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+endif()
+
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/vgl"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 install(DIRECTORY "${PROJECT_BINARY_DIR}/include/vgl"

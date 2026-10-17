@@ -25,6 +25,7 @@ endif()
 
 set_target_properties(vgl_gl PROPERTIES
     OUTPUT_NAME vgl-gl
+    EXPORT_NAME gl
     VERSION ${PROJECT_VERSION}
     SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR})
 

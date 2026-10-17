@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Jeremiah van Oosten
 //
-// The OpenGL sample's overlay, drawn with Dear ImGui: a panel with the context's statistics,
-// the credits and the camera, controls for the debug views, and the outline of a frozen
-// camera's frustum.
+// The interactive samples' overlay, drawn with Dear ImGui: a panel with the context's
+// statistics, the credits and the camera, controls for the debug views, and the outline of a
+// frozen camera's frustum. It uses Dear ImGui's platform and renderer backends only through the
+// hooks a sample gives it, so every sample shares it whatever its window and graphics API.
 
-#ifndef VGL_SAMPLES_GL_OVERLAY_HPP
-#define VGL_SAMPLES_GL_OVERLAY_HPP
+#ifndef VGL_SAMPLES_OVERLAY_HPP
+#define VGL_SAMPLES_OVERLAY_HPP
 
 #include "sample_camera.hpp"
 
@@ -14,9 +15,8 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <vector>
-
-struct GLFWwindow;
 
 namespace sample
 {
@@ -38,11 +38,15 @@ struct debug_settings
     float max_error = 2.0f;          // Screen-space error in pixels.
 };
 
+// The debug views' flags, which the OpenGL and Direct3D 11 backends share (vgl_gl_debug_flag,
+// vgl_d3d11_debug_flag).
+std::uint32_t debug_flags(const debug_settings& d);
+
 // What the panel shows besides the statistics.
 struct panel_info
 {
-    const char* gl_version = "";
-    const char* gl_renderer = "";
+    const char* api = "";    // The graphics API and its version.
+    const char* device = ""; // The device that draws.
     const char* depth = "";
     camera live;
     camera frozen;
@@ -64,9 +68,20 @@ public:
     overlay& operator=(overlay&&) = delete;
     ~overlay();
 
-    // Sets up Dear ImGui on the window's current OpenGL context. Install the window's own
-    // callbacks first: Dear ImGui calls them after its own.
-    bool init(GLFWwindow* window, bool es);
+    // Dear ImGui's platform and renderer backends, as a sample sets them up. init runs with the
+    // Dear ImGui context created; new_frame runs before each frame, render draws its data, and
+    // shutdown undoes init.
+    struct backend
+    {
+        bool (*init)(void* user_data) = nullptr;
+        void (*new_frame)(void* user_data) = nullptr;
+        void (*render)(void* user_data) = nullptr;
+        void (*shutdown)(void* user_data) = nullptr;
+        void* user_data = nullptr;
+    };
+
+    // Creates the Dear ImGui context and sets up the backends on it.
+    bool init(const backend& b);
 
     // True while the panel uses the mouse or keyboard, which the camera must then ignore.
     [[nodiscard]] bool wants_mouse() const;
@@ -83,7 +98,7 @@ public:
                const std::array<vgl_dvec3, 5>& frustum, // Eye, then far corners.
                debug_settings& settings);
 
-    // Draws the overlay into the bound framebuffer.
+    // Draws the overlay into the bound render target.
     void render();
 
 private:
@@ -94,6 +109,7 @@ private:
     static void reticle(double x, double y, double strength);
 
     bool initialized_ = false;
+    backend backend_;
     std::array<float, 240> frame_ms_ = {};
     std::size_t next_ = 0;
 };
@@ -104,4 +120,4 @@ frustum_of(const camera& c, double field_of_view, double aspect, double distance
 
 } // namespace sample
 
-#endif // VGL_SAMPLES_GL_OVERLAY_HPP
+#endif // VGL_SAMPLES_OVERLAY_HPP

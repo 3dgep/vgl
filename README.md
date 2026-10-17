@@ -85,11 +85,13 @@ cmake --workflow --preset linux-gcc-static-debug
 | `VGL_TEST_GL` | `OFF` | Run the OpenGL samples' checks as tests (needs a display) |
 | `VGL_INSTALL` | `ON` (top level) | Generate install rules |
 
-The Direct3D 11 and Ogre backends are still empty placeholders.
+The Ogre backend is still an empty placeholder. The Direct3D 11 backend needs the Windows SDK's
+HLSL compiler, `fxc`, which compiles its shaders at build time.
 
 The samples run on the sample data in `samples/data`: `vgl-headless` without a GPU, `vgl-gl`
-in a window (`--es` for OpenGL ES, `--depth reversed` for reversed-Z), and `vgl-c`, the same
-in C. `vgl-gl` navigates like Google Earth: drag to grab the globe (from space, to spin it like a
+in a window (`--es` for OpenGL ES, `--depth reversed` for reversed-Z), `vgl-d3d11`, the same on
+Direct3D 11 (reversed-Z by default, `--warp` for the software rasterizer), and `vgl-c`, the
+OpenGL sample's core in C. `vgl-gl` navigates like Google Earth: drag to grab the globe (from space, to spin it like a
 disk about its centre), scroll or double-click to
 zoom to the cursor, drag with Shift or the middle button to orbit and tilt, with Ctrl to look
 around, and with the right button to zoom; arrows or WASD move, Shift with them orbits, Page

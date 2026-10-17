@@ -3,14 +3,11 @@
 
 #include "overlay.hpp"
 
-#include <imgui_impl_opengl3.h>
-
 #include <algorithm>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <imgui.h>
-#include <imgui_impl_glfw.h>
 
 namespace sample
 {
@@ -79,29 +76,35 @@ vgl_dvec3 transform(const vgl_dmat4& m, const vgl_dvec3& p, double& w)
 
 } // namespace
 
+std::uint32_t debug_flags(const debug_settings& d)
+{
+    return (d.wireframe ? 0x1u : 0u) | (d.level_colors ? 0x2u : 0u) |
+           (d.imagery_source ? 0x4u : 0u) | (d.height_colors ? 0x8u : 0u) |
+           (d.contours ? 0x10u : 0u);
+}
+
 overlay::~overlay()
 {
     if (initialized_)
     {
-        ImGui_ImplOpenGL3_Shutdown();
-        ImGui_ImplGlfw_Shutdown();
+        backend_.shutdown(backend_.user_data);
         ImGui::DestroyContext();
     }
 }
 
-bool overlay::init(GLFWwindow* window, bool es)
+bool overlay::init(const backend& b)
 {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGui::GetIO().IniFilename = nullptr; // No imgui.ini next to the executable.
     ImGui::StyleColorsDark();
     ImGui::GetStyle().Alpha = 0.92f;
-    if (!ImGui_ImplGlfw_InitForOpenGL(window, true) ||
-        !ImGui_ImplOpenGL3_Init(es ? "#version 300 es" : "#version 330 core"))
+    if (!b.init(b.user_data))
     {
         ImGui::DestroyContext();
         return false;
     }
+    backend_ = b;
     initialized_ = true;
     return true;
 }
@@ -127,8 +130,7 @@ void overlay::frame(const vgl_context_statistics& s,
     frame_ms_[next_] = static_cast<float>(frame_seconds * 1000.0);
     next_ = (next_ + 1) % frame_ms_.size();
 
-    ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplGlfw_NewFrame();
+    backend_.new_frame(backend_.user_data);
     ImGui::NewFrame();
     if (settings.panel)
     {
@@ -173,7 +175,7 @@ void overlay::reticle(double x, double y, double strength)
 
 void overlay::render()
 {
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    backend_.render(backend_.user_data);
 }
 
 void overlay::panel(const vgl_context_statistics& s, const panel_info& info, debug_settings& d)
@@ -185,8 +187,8 @@ void overlay::panel(const vgl_context_statistics& s, const panel_info& info, deb
         ImGui::End();
         return;
     }
-    ImGui::TextWrapped("%s", info.gl_version);
-    ImGui::TextWrapped("%s", info.gl_renderer);
+    ImGui::TextWrapped("%s", info.api);
+    ImGui::TextWrapped("%s", info.device);
     ImGui::Text("Depth: %s", info.depth);
 
     // Frame times, the newest on the right.

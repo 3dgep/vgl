@@ -23,6 +23,7 @@ endif()
 
 set_target_properties(vgl_defaults PROPERTIES
     OUTPUT_NAME vgl-defaults
+    EXPORT_NAME defaults
     VERSION ${PROJECT_VERSION}
     SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR})
 

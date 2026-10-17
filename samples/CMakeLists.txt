@@ -16,12 +16,56 @@ add_library(vgl_sample_common STATIC
     common/navigation.cpp
     common/navigation.hpp
     common/sample_camera.hpp
+    common/sample_check.cpp
+    common/sample_check.hpp
     common/sample_data.hpp)
 target_include_directories(vgl_sample_common PUBLIC common)
 target_link_libraries(vgl_sample_common PUBLIC vgl::vgl)
 vgl_target_options(vgl_sample_common)
 
 add_subdirectory(headless)
+
+# Dear ImGui draws the interactive samples' statistics and debug controls, in an overlay they
+# share (common/overlay.hpp), with each sample's platform and renderer backends. It is a
+# sample-only dependency, downloaded at a pinned release with a checked hash. The samples are
+# for desktops, so Android and iOS build none.
+if(VGL_FETCH_DEPENDENCIES AND NOT ANDROID AND NOT IOS AND NOT TARGET vgl_imgui)
+    include(FetchContent)
+    FetchContent_Declare(vgl_imgui_source
+        URL "https://github.com/ocornut/imgui/archive/refs/tags/v1.92.9b.tar.gz"
+        URL_HASH SHA256=21d8a0a565e85dce943e375db00812c2f3f0ab21f3f0f7964e364a63422d7f99
+        SOURCE_SUBDIR do-not-build
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    FetchContent_MakeAvailable(vgl_imgui_source)
+    set(vgl_imgui_dir "${vgl_imgui_source_SOURCE_DIR}")
+    add_library(vgl_imgui STATIC
+        "${vgl_imgui_dir}/imgui.cpp"
+        "${vgl_imgui_dir}/imgui_draw.cpp"
+        "${vgl_imgui_dir}/imgui_tables.cpp"
+        "${vgl_imgui_dir}/imgui_widgets.cpp")
+    target_include_directories(vgl_imgui SYSTEM PUBLIC "${vgl_imgui_dir}" "${vgl_imgui_dir}/backends")
+    target_compile_features(vgl_imgui PUBLIC cxx_std_11)
+    set_target_properties(vgl_imgui PROPERTIES FOLDER third_party POSITION_INDEPENDENT_CODE ON)
+    message(STATUS "vgl: using downloaded Dear ImGui 1.92.9b for the interactive samples")
+
+    add_library(vgl_sample_overlay STATIC common/overlay.cpp common/overlay.hpp)
+    target_link_libraries(vgl_sample_overlay PUBLIC vgl_sample_common vgl_imgui)
+    vgl_target_options(vgl_sample_overlay)
+
+    # The Direct3D 11 sample's platform and renderer backends: Win32 and Direct3D 11, which
+    # compiles its shaders at runtime with d3dcompiler_47, a part of Windows.
+    if(WIN32 AND TARGET vgl_d3d11)
+        add_library(vgl_imgui_win32_dx11 STATIC
+            "${vgl_imgui_dir}/backends/imgui_impl_win32.cpp"
+            "${vgl_imgui_dir}/backends/imgui_impl_dx11.cpp")
+        target_link_libraries(vgl_imgui_win32_dx11 PUBLIC vgl_imgui d3d11 d3dcompiler dxgi dwmapi)
+        set_target_properties(vgl_imgui_win32_dx11 PROPERTIES FOLDER third_party)
+    endif()
+endif()
+
+if(TARGET vgl_d3d11)
+    add_subdirectory(d3d11)
+endif()
 
 # The OpenGL samples need GLFW for their window and context. GLFW is used only
 # by the samples: the library never creates windows or contexts. It is found
@@ -55,33 +99,16 @@ if(TARGET vgl_gl AND NOT ANDROID AND NOT IOS)
         message(STATUS "vgl: using downloaded GLFW ${VGL_GLFW_VERSION} for the samples")
     endif()
 
-    # Dear ImGui draws the OpenGL sample's statistics and debug controls. It is a
-    # sample-only dependency like GLFW, downloaded at a pinned release with a
-    # checked hash, and built here with its GLFW and OpenGL 3 backends.
-    if(TARGET glfw AND VGL_FETCH_DEPENDENCIES AND NOT TARGET vgl_imgui)
-        include(FetchContent)
-        FetchContent_Declare(vgl_imgui_source
-            URL "https://github.com/ocornut/imgui/archive/refs/tags/v1.92.9b.tar.gz"
-            URL_HASH SHA256=21d8a0a565e85dce943e375db00812c2f3f0ab21f3f0f7964e364a63422d7f99
-            SOURCE_SUBDIR do-not-build
-            DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
-        FetchContent_MakeAvailable(vgl_imgui_source)
-        set(imgui_dir "${vgl_imgui_source_SOURCE_DIR}")
-        add_library(vgl_imgui STATIC
-            "${imgui_dir}/imgui.cpp"
-            "${imgui_dir}/imgui_draw.cpp"
-            "${imgui_dir}/imgui_tables.cpp"
-            "${imgui_dir}/imgui_widgets.cpp"
-            "${imgui_dir}/backends/imgui_impl_glfw.cpp"
-            "${imgui_dir}/backends/imgui_impl_opengl3.cpp")
-        target_include_directories(vgl_imgui SYSTEM PUBLIC "${imgui_dir}" "${imgui_dir}/backends")
-        target_link_libraries(vgl_imgui PUBLIC glfw)
+    # The OpenGL samples' Dear ImGui backends: GLFW and OpenGL 3.
+    if(TARGET glfw AND TARGET vgl_imgui AND NOT TARGET vgl_imgui_glfw_gl3)
+        add_library(vgl_imgui_glfw_gl3 STATIC
+            "${vgl_imgui_dir}/backends/imgui_impl_glfw.cpp"
+            "${vgl_imgui_dir}/backends/imgui_impl_opengl3.cpp")
+        target_link_libraries(vgl_imgui_glfw_gl3 PUBLIC vgl_imgui glfw)
         # Its OpenGL backend loads its own functions; without this, GLFW's header would include
         # the system's GL/gl.h, which not every machine has.
-        target_compile_definitions(vgl_imgui PRIVATE GLFW_INCLUDE_NONE)
-        target_compile_features(vgl_imgui PUBLIC cxx_std_11)
-        set_target_properties(vgl_imgui PROPERTIES FOLDER third_party POSITION_INDEPENDENT_CODE ON)
-        message(STATUS "vgl: using downloaded Dear ImGui 1.92.9b for the OpenGL sample")
+        target_compile_definitions(vgl_imgui_glfw_gl3 PRIVATE GLFW_INCLUDE_NONE)
+        set_target_properties(vgl_imgui_glfw_gl3 PROPERTIES FOLDER third_party POSITION_INDEPENDENT_CODE ON)
     endif()
 
     if(TARGET glfw)

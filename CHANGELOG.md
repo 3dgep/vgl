@@ -100,6 +100,18 @@ The pack format has its own version number, independent of the library version.
 - Context tests with synchronous, deferred and threaded hosts, allocation accounting, failure
   injection for every allocation, corrupt packs and the CPU budget; and tests of the defaults
   module on packs written to disk.
+- Direct3D 11 backend (`vgl/d3d11.h`, C++ wrapper `vgl/d3d11.hpp`, target `vgl::d3d11`):
+  draws the globe with Direct3D 11 at feature level 11_0 on the host's device, with the OpenGL
+  backend's shading and debug views and every depth convention, reversed-Z being the natural one
+  there. Its HLSL shaders are compiled at build time with the Windows SDK's `fxc` and embedded,
+  so nothing compiles at runtime and it links only `d3d11.lib`. It saves and restores the
+  device context's state it changes, and `vgl_d3d11_backend_reset` recovers from a removed
+  device. The Direct3D 11 sample (`samples/d3d11`, `vgl-d3d11`) mirrors the OpenGL one, and its
+  check, a CTest test on Windows, runs on WARP where there is no GPU. Its images match the
+  OpenGL backend's, pixel for pixel but for anti-aliased wireframe lines.
+- The interactive samples share their overlay (`samples/common/overlay.hpp`), which takes Dear
+  ImGui's platform and renderer backends as hooks, and their places and checks
+  (`samples/common/sample_check.hpp`).
 - OpenGL / OpenGL ES backend (`vgl/gl.h`, target `vgl::gl`, pkg-config `vgl-gl`):
   `vgl_gl_backend_create` with the host's function loader, `vgl_gl_backend_draw`,
   `vgl_gl_backend_reset` for a lost OpenGL context, and `vgl_gl_backend_destroy`. It draws on
@@ -278,6 +290,10 @@ The pack format has its own version number, independent of the library version.
 
 ### Fixed
 
+- The installed CMake package exported the defaults module and the OpenGL backend as
+  `vgl::vgl_defaults` and `vgl::vgl_gl`, while the build tree and the documentation name them
+  `vgl::defaults` and `vgl::gl`. They, and the Direct3D 11 backend (`vgl::d3d11`), now have
+  those names in both, and the install test requires them.
 - Regions could stay empty, showing space, while their meshes waited: after a jump, where tiles
   came into view, and while slow reads (such as packs in WSL, read from Windows) kept data
   arriving. A newly selected tile now gets a placeholder at once, a 9 × 9 mesh interpolated from
