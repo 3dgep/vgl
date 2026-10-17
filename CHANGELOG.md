@@ -214,6 +214,10 @@ The pack format has its own version number, independent of the library version.
   texture unit 4 for them, and restores it.
 - The OpenGL backend's wireframe draws the tiles' boundaries in yellow, about two pixels wide,
   apart from the cyan grid cells.
+- The samples read their data from `--data`, or else from the environment variable
+  `VGL_SAMPLE_DATA`, or else from `samples/data` in the source tree, as before. `--pack`,
+  repeated, loads the packs named instead of the sample set, later ones winning where they
+  overlap. The sample tests name the sample data explicitly.
 - Statistics of the last frame's meshes: `vertices_drawn` and `triangles_drawn`, appended to
   `vgl_context_statistics`, shown in the OpenGL sample's overlay and printed by its check.
 

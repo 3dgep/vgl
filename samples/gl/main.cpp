@@ -5,8 +5,13 @@
 // window, on OpenGL 3.3 or, with --es, on OpenGL ES 3.0. The host owns the window, the context,
 // the camera and the framebuffer; vgl draws into it.
 //
-//   vgl-gl [--data <directory>] [--es] [--egl] [--depth logarithmic|reversed|conventional]
-//          [--check] [--save <directory>]
+//   vgl-gl [--data <directory> | --pack <uri>...] [--es] [--egl]
+//          [--depth logarithmic|reversed|conventional] [--check] [--save <directory>]
+//
+// It draws the sample set (samples/data/README.md) from the directory given with --data, or else
+// from the one in the environment variable VGL_SAMPLE_DATA, or else from the source tree's
+// samples/data. Instead, --pack, repeated, draws the packs named, each winning over the ones
+// before it where they overlap (samples/common/sample_data.hpp).
 //
 // Controls, as in Google Earth (samples/common/navigation.hpp, shared by the samples): drag to grab
 // the globe, scroll or double-click to zoom to the cursor, shift-drag or middle-drag to orbit and
@@ -28,6 +33,7 @@
 #include "navigation.hpp"
 #include "overlay.hpp"
 #include "sample_camera.hpp"
+#include "sample_data.hpp"
 
 #include <vgl/defaults.hpp>
 #include <vgl/gl.hpp>
@@ -1007,7 +1013,8 @@ bool idle(const vgl_context_statistics& s)
 
 struct options
 {
-    std::string data = VGL_SAMPLE_DATA_DIR;
+    std::string data;               // The sample set's directory, from --data.
+    std::vector<std::string> packs; // From --pack.
     bool es = false;
     bool egl = false;
     bool check = false;
@@ -1583,6 +1590,10 @@ bool parse(int argc, char** argv, options& o)
         {
             o.data = argv[++i];
         }
+        else if (std::strcmp(a, "--pack") == 0 && i + 1 < argc)
+        {
+            o.packs.emplace_back(argv[++i]);
+        }
         else if (std::strcmp(a, "--save") == 0 && i + 1 < argc)
         {
             o.save = argv[++i];
@@ -1612,7 +1623,8 @@ bool parse(int argc, char** argv, options& o)
             return false;
         }
     }
-    return true;
+    // The check expects the sample set, and --pack replaces it.
+    return o.packs.empty() || (o.data.empty() && !o.check);
 }
 
 } // namespace
@@ -1623,9 +1635,14 @@ int main(int argc, char** argv)
     if (!parse(argc, argv, o))
     {
         std::fprintf(stderr,
-                     "usage: vgl-gl [--data <directory>] [--es] [--egl] "
+                     "usage: vgl-gl [--data <directory> | --pack <uri>...] [--es] [--egl] "
                      "[--depth logarithmic|reversed|conventional] [--check] "
-                     "[--save <directory>]\n");
+                     "[--save <directory>]\n"
+                     "--pack, repeated, replaces the sample set, and cannot be combined with "
+                     "--data or --check. Without either, the sample set is read from "
+                     "$%s, or else from %s.\n",
+                     sample::data_variable,
+                     VGL_SAMPLE_DATA_DIR);
         return 2;
     }
 
@@ -1699,29 +1716,31 @@ int main(int argc, char** argv)
             stderr, "could not create the context: %s\n", vgl::result_name_get(ctx.error()));
         return 1;
     }
-    const std::string terrain_uri = o.data + "/packs/gebco";
-    const std::string geoid_uri = o.data + "/packs/egm2008";
-    const std::string imagery_uri = o.data + "/packs/bluemarble";
-    const std::string detail_uri = o.data + "/packs/glo30-sognefjord";
-    vgl::expected<vgl::pack> terrain = vgl::pack::create(*ctx, terrain_uri.c_str());
-    // Finer terrain over the Sognefjord, above the global GEBCO.
-    vgl::expected<vgl::pack> detail = vgl::pack::create(*ctx, detail_uri.c_str(), 1);
-    vgl::expected<vgl::pack> geoid = vgl::pack::create(*ctx, geoid_uri.c_str());
-    vgl::expected<vgl::pack> imagery = vgl::pack::create(*ctx, imagery_uri.c_str());
-    if (!terrain || !geoid || !imagery || !detail)
+    const std::vector<sample::pack_source> sources =
+        o.packs.empty() ? sample::sample_packs(sample::data_directory(o.data, VGL_SAMPLE_DATA_DIR))
+                        : sample::named_packs(o.packs);
+    std::vector<vgl::pack> packs;
+    for (const sample::pack_source& s : sources)
     {
-        std::fprintf(stderr, "could not add the packs\n");
-        return 1;
+        std::printf("pack %s\n", s.uri.c_str());
+        vgl::expected<vgl::pack> p = vgl::pack::create(*ctx, s.uri.c_str(), s.priority);
+        if (!p)
+        {
+            std::fprintf(stderr,
+                         "could not add the pack %s: %s\n",
+                         s.uri.c_str(),
+                         vgl::result_name_get(p.error()));
+            return 1;
+        }
+        packs.push_back(std::move(*p));
     }
+    std::printf("\n");
 
     const int code = o.check ? run_check(o, gl, *ctx) : run_interactive(o, window, gl, *ctx);
 
     // Leave in order: the backend went with its run; then packs and context, the reader and
     // the pool, and last the window with its OpenGL context.
-    terrain->reset();
-    geoid->reset();
-    imagery->reset();
-    detail->reset();
+    packs.clear();
     ctx->reset();
     reader->reset();
     pool->reset();

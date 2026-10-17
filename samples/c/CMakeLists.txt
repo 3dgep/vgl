@@ -18,5 +18,6 @@ target_compile_definitions(vgl_c_sample PRIVATE
 vgl_target_options(vgl_c_sample)
 
 if(VGL_BUILD_TESTS AND VGL_TEST_GL)
-    add_test(NAME gl_c COMMAND vgl_c_sample --check)
+    # The check expects the sample set, wherever VGL_SAMPLE_DATA points.
+    add_test(NAME gl_c COMMAND vgl_c_sample --check --data "${PROJECT_SOURCE_DIR}/samples/data")
 endif()

@@ -13,5 +13,7 @@ target_compile_definitions(vgl_headless PRIVATE
 vgl_target_options(vgl_headless)
 
 if(VGL_BUILD_TESTS)
-    add_test(NAME headless COMMAND vgl_headless --check)
+    # The check expects the sample set, wherever VGL_SAMPLE_DATA points.
+    add_test(NAME headless
+        COMMAND vgl_headless --check --data "${PROJECT_SOURCE_DIR}/samples/data")
 endif()

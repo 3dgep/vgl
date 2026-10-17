@@ -99,6 +99,15 @@ debug views: wireframe (F2), colours by tile level (F3), the imagery source (F4)
 selection (F5) to inspect level of detail and culling from outside, the heightmap (F6),
 contour lines (F7) and a sea surface (F8).
 
+The samples find `samples/data` in the source tree by default; `--data <directory>` or the
+environment variable `VGL_SAMPLE_DATA` points them at a copy elsewhere, and `--pack <uri>`,
+repeated, loads other packs instead of the sample set, later ones winning where they overlap:
+
+```
+vgl-gl --pack samples/data/packs/gebco --pack /data/packs/glo30-norway \
+       --pack samples/data/packs/egm2008 --pack samples/data/packs/bluemarble
+```
+
 ### Using vgl
 
 After `cmake --install build`, consume vgl through its CMake package:

@@ -5,11 +5,19 @@
  * Pure-C sample (design document, section 11): the OpenGL sample's core, written in C99
  * against the C API, as a C host integrates vgl. A camera circles the globe; Escape quits.
  *
- *   vgl-c [--data <directory>] [--check]
+ *   vgl-c [--data <directory> | --pack <uri>...] [--check]
+ *
+ * It draws GEBCO, the geoid and Blue Marble from the sample set (samples/data/README.md) in the
+ * directory given with --data, or else in the one in the environment variable VGL_SAMPLE_DATA,
+ * or else in the source tree's samples/data. Instead, --pack, repeated, draws the packs named,
+ * each winning over the ones before it where they overlap.
  *
  * With --check, it runs hidden until the view has loaded, checks that every selected tile is
  * drawn and that OpenGL reports no error, and exits with 1 on a failure.
  */
+#ifdef _MSC_VER
+#    define _CRT_SECURE_NO_WARNINGS /* For getenv, which MSVC deprecates. */
+#endif
 #define GLFW_INCLUDE_NONE
 #include <vgl/defaults.h>
 #include <vgl/gl.h>
@@ -19,11 +27,15 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #ifndef VGL_SAMPLE_DATA_DIR
 #    define VGL_SAMPLE_DATA_DIR "."
 #endif
+
+/* The most packs --pack may name. */
+#define MAX_PACKS 16
 
 /* The OpenGL functions the host calls itself, to clear its framebuffer. */
 #define GL_DEPTH_BUFFER_BIT 0x0100
@@ -90,13 +102,15 @@ static vgl_dmat4 perspective(double fovy, double aspect)
 
 int main(int argc, char** argv)
 {
-    const char* data = VGL_SAMPLE_DATA_DIR;
+    const char* data = NULL;
+    const char* uris[MAX_PACKS];
+    int pack_count = 0;
+    int named = 0;
+    int usage = 0;
     int check = 0;
     int failed = 0;
     int i;
-    char terrain_uri[1024];
-    char geoid_uri[1024];
-    char imagery_uri[1024];
+    char sample_uris[3][1024];
     GLFWwindow* window;
     clear_color_fn gl_clear_color;
     clear_fn gl_clear;
@@ -110,9 +124,7 @@ int main(int argc, char** argv)
     vgl_context_create_info context_info = {.struct_size = sizeof(context_info)};
     vgl_context* context = NULL;
     vgl_pack_create_info pack_info = {.struct_size = sizeof(pack_info)};
-    vgl_pack* terrain = NULL;
-    vgl_pack* geoid = NULL;
-    vgl_pack* imagery = NULL;
+    vgl_pack* packs[MAX_PACKS] = {NULL};
     vgl_gl_backend_create_info backend_info = {.struct_size = sizeof(backend_info)};
     vgl_gl_backend* backend = NULL;
     vgl_gl_draw_info draw_info = {.struct_size = sizeof(draw_info)};
@@ -130,10 +142,44 @@ int main(int argc, char** argv)
         {
             data = argv[++i];
         }
+        else if (strcmp(argv[i], "--pack") == 0 && i + 1 < argc && pack_count < MAX_PACKS)
+        {
+            uris[pack_count++] = argv[++i];
+            named = 1;
+        }
         else
         {
-            fprintf(stderr, "usage: vgl-c [--data <directory>] [--check]\n");
-            return 2;
+            usage = 1;
+        }
+    }
+    /* The check expects the sample set, and --pack replaces it. */
+    if (usage || (named && (data != NULL || check)))
+    {
+        fprintf(stderr,
+                "usage: vgl-c [--data <directory> | --pack <uri>...] [--check]\n"
+                "--pack, repeated up to %d times, replaces the sample set, and cannot be "
+                "combined with --data or --check. Without either, the sample set is read from "
+                "$VGL_SAMPLE_DATA, or else from %s.\n",
+                MAX_PACKS,
+                VGL_SAMPLE_DATA_DIR);
+        return 2;
+    }
+    if (!named)
+    {
+        if (data == NULL)
+        {
+            data = getenv("VGL_SAMPLE_DATA"); /* NOLINT(concurrency-mt-unsafe): at start-up. */
+        }
+        if (data == NULL || data[0] == '\0')
+        {
+            data = VGL_SAMPLE_DATA_DIR;
+        }
+        snprintf(sample_uris[0], sizeof(sample_uris[0]), "%s/packs/gebco", data);
+        snprintf(sample_uris[1], sizeof(sample_uris[1]), "%s/packs/egm2008", data);
+        snprintf(sample_uris[2], sizeof(sample_uris[2]), "%s/packs/bluemarble", data);
+        for (pack_count = 0; pack_count < 3; ++pack_count)
+        {
+            uris[pack_count] = sample_uris[pack_count];
         }
     }
 
@@ -177,16 +223,18 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    /* 2. The packs: terrain, imagery, and the geoid for heights above mean sea level. */
-    snprintf(terrain_uri, sizeof(terrain_uri), "%s/packs/gebco", data);
-    snprintf(geoid_uri, sizeof(geoid_uri), "%s/packs/egm2008", data);
-    snprintf(imagery_uri, sizeof(imagery_uri), "%s/packs/bluemarble", data);
-    pack_info.uri = terrain_uri;
-    vgl_pack_create(context, &pack_info, &terrain);
-    pack_info.uri = geoid_uri;
-    vgl_pack_create(context, &pack_info, &geoid);
-    pack_info.uri = imagery_uri;
-    vgl_pack_create(context, &pack_info, &imagery);
+    /* 2. The packs: terrain, imagery, and the geoid for heights above mean sea level. At one
+     * priority, each wins over the ones created before it. */
+    for (i = 0; i < pack_count; ++i)
+    {
+        printf("pack %s\n", uris[i]);
+        pack_info.uri = uris[i];
+        if (vgl_pack_create(context, &pack_info, &packs[i]) != VGL_RESULT_SUCCESS)
+        {
+            fprintf(stderr, "could not add the pack %s\n", uris[i]);
+            return 1;
+        }
+    }
 
     /* The OpenGL backend, on the current OpenGL context. */
     backend_info.get_proc_address = load;
@@ -274,9 +322,10 @@ int main(int argc, char** argv)
     /* Leave in order: the backend while its OpenGL context exists, the packs and the context,
      * then the reader and the pool. */
     vgl_gl_backend_destroy(backend);
-    vgl_pack_destroy(terrain);
-    vgl_pack_destroy(geoid);
-    vgl_pack_destroy(imagery);
+    for (i = 0; i < pack_count; ++i)
+    {
+        vgl_pack_destroy(packs[i]);
+    }
     vgl_context_destroy(context);
     vgl_file_reader_destroy(reader);
     vgl_thread_pool_destroy(pool);

@@ -20,6 +20,8 @@ target_compile_definitions(vgl_gl_sample PRIVATE
 vgl_target_options(vgl_gl_sample)
 
 if(VGL_BUILD_TESTS AND VGL_TEST_GL)
-    add_test(NAME gl COMMAND vgl_gl_sample --check)
-    add_test(NAME gl_es COMMAND vgl_gl_sample --check --es)
+    # The checks expect the sample set, wherever VGL_SAMPLE_DATA points.
+    add_test(NAME gl COMMAND vgl_gl_sample --check --data "${PROJECT_SOURCE_DIR}/samples/data")
+    add_test(NAME gl_es
+        COMMAND vgl_gl_sample --check --es --data "${PROJECT_SOURCE_DIR}/samples/data")
 endif()
