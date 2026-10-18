@@ -15,6 +15,10 @@
 #ifndef VGL_CONST
 #define VGL_CONST const
 #endif
+// GLSL's two-argument atan, which HLSL calls atan2.
+#ifndef VGL_ATAN2
+#define VGL_ATAN2(y, x) atan(y, x)
+#endif
 
 VGL_CONST float vgl_ground_radius = 6378.137;
 VGL_CONST float vgl_atmosphere_height = 100.0;
@@ -193,4 +197,89 @@ float vgl_star_visibility(vec3 origin, float height, vec3 direction, vec3 sun)
     vgl_atmosphere(origin, height, direction, 1.0e9, sun, 8, inscatter, transmittance);
     vec3 sky = vgl_expose(inscatter * vgl_sky_brightness);
     return clamp(1.0 - 8.0 * dot(sky, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
+}
+
+// The clouds: a shell at a height above the ground, whose coverage the host gives as an image of
+// the whole globe in latitude and longitude (design document, section 7.6). These functions
+// find where a ray meets it, where on the image that is, and how the clouds there look; the
+// backends sample the image themselves, since each declares its textures its own way.
+
+// Where a ray from origin, height above the ground, along the unit direction first meets the
+// cloud shell at cloud_height, within max_distance: the distance, or below 0 if it does not.
+float vgl_cloud_distance(vec3 origin, float height, vec3 direction, float cloud_height, float max_distance)
+{
+    float r = vgl_ground_radius + height;
+    float mu = dot(origin, direction) / r;
+    float shell = vgl_ground_radius + cloud_height;
+    float disc = vgl_sphere_discriminant(r, mu, shell, cloud_height - height);
+    if (disc < 0.0)
+    {
+        return -1.0;
+    }
+    float root = sqrt(disc);
+    // From below the shell, the far root; from above, the near one.
+    float t = height < cloud_height ? -r * mu + root : -r * mu - root;
+    // A ray from above that meets the ground first passes no clouds, which lie above it.
+    float disc_ground = vgl_sphere_discriminant(r, mu, vgl_ground_radius, -height);
+    if (height >= cloud_height && mu < 0.0 && disc_ground >= 0.0 && -r * mu - sqrt(disc_ground) < t)
+    {
+        return -1.0;
+    }
+    return t > 0.0 && t < max_distance ? t : -1.0;
+}
+
+// The cloud image's coordinates at a point of the atmosphere's frame: u east from 180 W, v
+// south from 90 N. The latitude is the geodetic one of the ellipsoid's point under it.
+vec2 vgl_cloud_uv(vec3 p)
+{
+    float lon = VGL_ATAN2(p.y, p.x);
+    // The frame stretches z by a / b; the geodetic latitude is atan(a / b * z / r_xy) there.
+    float lat = VGL_ATAN2(p.z * 1.0033640898, length(p.xy));
+    return vec2(lon / (2.0 * vgl_pi) + 0.5, 0.5 - lat / vgl_pi);
+}
+
+// The level of the cloud image's mip chain for a footprint on the shell, in kilometres, with
+// texels texel_km wide at the equator.
+float vgl_cloud_lod(float footprint_km, float texel_km)
+{
+    return max(log2(max(footprint_km, 1e-6) / texel_km), 0.0);
+}
+
+// How opaque the clouds are, from the image's coverage: clear where the image is dark, as over
+// the sea, and opaque where it is white.
+float vgl_cloud_alpha(float coverage)
+{
+    return smoothstep(0.12, 0.8, coverage);
+}
+
+// The clouds' colour at a point of the shell, lit by the sunlight that reaches it and the
+// daylight around, and darker seen from below, the thicker they are.
+vec3 vgl_cloud_light(vec3 p, vec3 sun, float alpha, bool from_below)
+{
+    float r = length(p);
+    float mu_s = dot(p, sun) / r;
+    vec3 sunlight = vgl_sun_transmittance(r, mu_s) / vgl_zenith_transmittance;
+    float lit = smoothstep(-0.05, 0.15, mu_s);
+    vec3 c = vec3(0.92, 0.93, 0.95) * (0.25 * vgl_daylight(mu_s) + 0.75 * lit * sunlight);
+    if (from_below)
+    {
+        c *= mix(1.0, 0.45, alpha);
+    }
+    return c;
+}
+
+// Where the sunlight to a point below the cloud shell crosses it: the distance from the point
+// towards the sun, or below 0 for a point above the shell.
+float vgl_cloud_shadow_distance(vec3 p, vec3 sun, float cloud_height)
+{
+    float r = length(p);
+    float h = r - vgl_ground_radius;
+    if (h >= cloud_height)
+    {
+        return -1.0;
+    }
+    float mu_s = dot(p, sun) / r;
+    float shell = vgl_ground_radius + cloud_height;
+    float disc = vgl_sphere_discriminant(r, mu_s, shell, cloud_height - h);
+    return -r * mu_s + sqrt(max(disc, 0.0));
 }

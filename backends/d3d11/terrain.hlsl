@@ -12,6 +12,7 @@
 #define vec4 float4
 #define mix lerp
 #define VGL_CONST static const
+#define VGL_ATAN2(y, x) atan2(y, x)
 #include "../common/atmosphere.glsl"
 
 // Per frame (backend.cpp, frame_constants).
@@ -41,6 +42,9 @@ cbuffer frame_constants : register(b0)
     float4 u_celestial[3];
     float2 u_viewport;
     float2 u_stars_pad;
+    // The clouds, with the atmosphere: drawn or not, the shell's height and the image's texels
+    // at the equator, in kilometres.
+    float4 u_cloud;
 };
 
 // Camera space to the atmosphere's frame.
@@ -74,6 +78,9 @@ Texture2D u_layer3 : register(t3);
 // ellipsoid as float bits and the normal as two signed normalized 16-bit halves.
 Texture2D<uint2> u_samples : register(t4);
 SamplerState u_sampler : register(s0);
+// The clouds' coverage (atmosphere.glsl), round the globe in longitude.
+Texture2D<float> u_clouds : register(t5);
+SamplerState u_cloud_sampler : register(s1);
 
 struct vertex_input
 {
@@ -309,6 +316,15 @@ pixel_output ps_main(varyings i)
         float mu_s = dot(p, u_sun_planet) / r;
         sunlight = vgl_sun_transmittance(r, mu_s) / vgl_zenith_transmittance;
         ambient = vgl_daylight(mu_s);
+        if (u_cloud.x > 0.5)
+        {
+            // The clouds' shadow, where the sunlight crosses the shell.
+            float t = vgl_cloud_shadow_distance(p, u_sun_planet, u_cloud.y);
+            float3 crossing = p + u_sun_planet * max(t, 0.0);
+            float lod = vgl_cloud_lod(length(fwidth(crossing)), u_cloud.z);
+            float cover = vgl_cloud_alpha(u_clouds.SampleLevel(u_cloud_sampler, vgl_cloud_uv(crossing), lod));
+            sunlight *= t > 0.0 ? 1.0 - 0.75 * cover : 1.0;
+        }
     }
     float3 lit = albedo * (0.3 * ambient + 0.7 * diffuse * sunlight);
     // Skirts take the colour of the edge above them, as without the sea.
@@ -327,9 +343,27 @@ pixel_output ps_main(varyings i)
         float distance = length(offset);
         float3 inscatter;
         float3 transmittance;
-        vgl_atmosphere(u_camera_km, u_camera_height, offset / max(distance, 1e-9), distance,
-                       u_sun_planet, 8, inscatter, transmittance);
+        float3 direction = offset / max(distance, 1e-9);
+        vgl_atmosphere(u_camera_km, u_camera_height, direction, distance, u_sun_planet, 8,
+                       inscatter, transmittance);
         lit = lit * transmittance + vgl_expose(inscatter * vgl_sky_brightness);
+        if (u_cloud.x > 0.5)
+        {
+            // The clouds between the camera and the terrain (backends/gl/shaders.hpp).
+            float t = vgl_cloud_distance(u_camera_km, u_camera_height, direction, u_cloud.y, distance);
+            float3 hit = u_camera_km + direction * max(t, 0.0);
+            float lod = vgl_cloud_lod(length(fwidth(hit)), u_cloud.z);
+            float cover = vgl_cloud_alpha(u_clouds.SampleLevel(u_cloud_sampler, vgl_cloud_uv(hit), lod));
+            if (t > 0.0 && cover > 0.0)
+            {
+                float3 near_inscatter;
+                float3 near_transmittance;
+                vgl_atmosphere(u_camera_km, u_camera_height, direction, t, u_sun_planet, 6,
+                               near_inscatter, near_transmittance);
+                float3 cloud = vgl_cloud_light(hit, u_sun_planet, cover, u_camera_height < u_cloud.y);
+                lit = lerp(lit, cloud * near_transmittance + vgl_expose(near_inscatter * vgl_sky_brightness), cover);
+            }
+        }
     }
     pixel_output o;
     o.color = float4(lit, 1.0);
@@ -379,7 +413,26 @@ float4 sky_ps_main(sky_varyings i) : SV_Target
                    transmittance);
     float disc = smoothstep(0.999955, 0.999975, dot(direction, u_sun_planet));
     float3 color = vgl_expose(inscatter * vgl_sky_brightness) + transmittance * disc;
-    return float4(color, (transmittance.r + transmittance.g + transmittance.b) / 3.0);
+    float clear = (transmittance.r + transmittance.g + transmittance.b) / 3.0;
+    if (u_cloud.x > 0.5)
+    {
+        // The clouds overhead, or along the limb from space.
+        float t = vgl_cloud_distance(u_camera_km, u_camera_height, direction, u_cloud.y, 1.0e9);
+        float3 hit = u_camera_km + direction * max(t, 0.0);
+        float lod = vgl_cloud_lod(length(fwidth(hit)), u_cloud.z);
+        float cover = vgl_cloud_alpha(u_clouds.SampleLevel(u_cloud_sampler, vgl_cloud_uv(hit), lod));
+        if (t > 0.0 && cover > 0.0)
+        {
+            float3 near_inscatter;
+            float3 near_transmittance;
+            vgl_atmosphere(u_camera_km, u_camera_height, direction, t, u_sun_planet, 8,
+                           near_inscatter, near_transmittance);
+            float3 cloud = vgl_cloud_light(hit, u_sun_planet, cover, u_camera_height < u_cloud.y);
+            color = lerp(color, cloud * near_transmittance + vgl_expose(near_inscatter * vgl_sky_brightness), cover);
+            clear *= 1.0 - cover;
+        }
+    }
+    return float4(color, clear);
 }
 
 // The stars (backends/gl/shaders.hpp): a quad per star at the far depth, widened in pixels

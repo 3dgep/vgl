@@ -119,6 +119,17 @@ The pack format has its own version number, independent of the library version.
   backend, pixel for pixel but for anti-aliased wireframe lines on Direct3D 11. CI runs it on
   Linux with Mesa on full runs.
 - The samples in a GLFW window share their controls (`samples/common/glfw_controls.hpp`).
+- The interactive samples fly to places (1 to 7) and turn (N, U, R) smoothly instead of
+  jumping: along the great circle, with the altitude eased on a logarithmic scale and raised in
+  an arc over long flights, on an s-curve that starts and ends at rest, from half a second to
+  four seconds. Any other movement takes over. The Sognefjord place is now 4 km up, below the
+  clouds.
+- Clouds, in every backend, with the atmosphere: `vgl_gl_backend_clouds_set`,
+  `vgl_d3d11_backend_clouds_set` and `vgl::ogre::globe::clouds_set` take a coverage image of the
+  whole globe, and a `clouds` flag and `cloud_height` in each draw's settings draw it as a shell
+  above the ground, found per pixel by the shared atmosphere code: over the terrain, overhead and
+  along the limb, lit by the sun, hazed by the atmosphere, and casting shadows. The samples
+  draw NASA's Blue Marble cloud composite (`samples/data/clouds.jpg`).
 - Stars, in every backend: `vgl_gl_backend_stars_set`, `vgl_d3d11_backend_stars_set` and
   `vgl::ogre::globe::stars_set` take the host's stars (`vgl_star` in `vgl/render.h`), and a
   `stars` flag and `sidereal_angle` in each draw's settings draw them behind the sky, as small

@@ -159,6 +159,12 @@ typedef struct vgl_d3d11_draw_info
     uint32_t reserved4;
     /* The Earth rotation angle in radians (vgl_earth_rotation_angle_get). */
     double sidereal_angle;
+    /* VGL_TRUE draws, with the atmosphere, the clouds set with vgl_d3d11_backend_clouds_set,
+     * as vgl_gl_draw_info.clouds describes. */
+    vgl_bool clouds;
+    uint32_t reserved5;
+    /* The cloud shell's height above the ellipsoid, in metres. 0 selects 6,000. */
+    double cloud_height;
 } vgl_d3d11_draw_info;
 
 /* Debug views of vgl_d3d11_draw_info.debug_flags, the same as the OpenGL backend's
@@ -198,6 +204,31 @@ typedef enum vgl_d3d11_debug_flag
  */
 VGL_D3D11_API vgl_result vgl_d3d11_backend_draw(vgl_d3d11_backend* backend,
                                                 const vgl_d3d11_draw_info* info);
+
+/**
+ * Sets the clouds the backend draws when vgl_d3d11_draw_info.clouds asks for them, as
+ * vgl_gl_backend_clouds_set describes: a coverage image of the whole globe, copied with its mip
+ * levels, and kept for vgl_d3d11_backend_reset.
+ *
+ * @param backend   The backend.
+ * @param coverage  The image, width x height bytes, rows from the north; or null with width
+ *                  and height 0 to remove the clouds.
+ * @param width     Pixels from west to east, from 2 to 16,384.
+ * @param height    Pixels from north to south, from 2 to 8,192.
+ *
+ * @retval VGL_RESULT_SUCCESS           The clouds were set.
+ * @retval VGL_RESULT_INVALID_ARGUMENT  backend is null, or the image is null or of a size
+ *                                      outside the limits, but for a removal.
+ * @retval VGL_RESULT_OUT_OF_MEMORY     The copy could not be allocated; the clouds set before
+ *                                      stay.
+ *
+ * @par Thread safety
+ * Render thread.
+ */
+VGL_D3D11_API vgl_result vgl_d3d11_backend_clouds_set(vgl_d3d11_backend* backend,
+                                                      const uint8_t* coverage,
+                                                      uint32_t width,
+                                                      uint32_t height);
 
 /**
  * Sets the stars the backend draws when vgl_d3d11_draw_info.stars asks for them, replacing those

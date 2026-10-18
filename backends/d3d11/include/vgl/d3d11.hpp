@@ -73,6 +73,13 @@ public:
             handle_, stars.data(), static_cast<std::uint32_t>(stars.size())));
     }
 
+    // Sets the clouds it draws when asked to (vgl_d3d11_backend_clouds_set).
+    [[nodiscard]] result
+    clouds_set(const std::uint8_t* coverage, std::uint32_t width, std::uint32_t height) noexcept
+    {
+        return static_cast<result>(vgl_d3d11_backend_clouds_set(handle_, coverage, width, height));
+    }
+
     // Recovers from a removed device, on the new one.
     [[nodiscard]] result device_lost(ID3D11Device* device,
                                      ID3D11DeviceContext* device_context) noexcept

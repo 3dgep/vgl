@@ -42,7 +42,7 @@ inline constexpr std::array<place, 7> places{{
     {"Himalaya", {26.0, 86.9, 6.0e4, 0.0, 20.0}, 0.58, 0.77},
     {"Mid-Atlantic Ridge", {20.0, -50.0, 1.5e6, 90.0, 40.0}, 0.38, 0.55},
     {"Sahara", {23.0, 12.0, 1.0e6, 0.0, 90.0}, 0.99, 1.0},
-    {"Sognefjord", {61.1, 6.2, 1.5e4, 60.0, 25.0}, 0.75, 0.9},
+    {"Sognefjord", {61.1, 6.2, 4.0e3, 60.0, 25.0}, 0.75, 0.9},
 }};
 
 // A contour interval for an altitude: about a 250th of it, rounded down to 1, 2 or 5 times a

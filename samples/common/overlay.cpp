@@ -341,6 +341,7 @@ void overlay::panel(const vgl_context_statistics& s, const panel_info& info, deb
         ImGui::Checkbox("Sea surface (F8)", &d.sea);
         ImGui::Checkbox("Atmosphere (F9)", &d.atmosphere);
         ImGui::Checkbox("Stars", &d.stars);
+        ImGui::Checkbox("Clouds", &d.clouds);
         if (d.contours)
         {
             ImGui::Checkbox("Interval from altitude", &d.contour_auto);

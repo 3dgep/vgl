@@ -7,6 +7,7 @@
 // (terrain.hlsl) are compiled at build time.
 
 #include "backends/common/atmosphere_view.hpp"
+#include "backends/common/clouds.hpp"
 #include "backends/common/stars.hpp"
 #include "common/host_memory.hpp"
 #include "common/pointer_map.hpp"
@@ -46,9 +47,10 @@ enum class resource_kind : std::uint8_t
 // Imagery layers a draw blends; a tile with more draws the top ones.
 constexpr std::uint32_t max_layers = 4;
 
-// Slots 0 to 3 hold the layers, and the next one the mesh's samples.
+// Slots 0 to 3 hold the layers, the next one the mesh's samples, and the last the clouds.
 constexpr std::uint32_t samples_slot = max_layers;
-constexpr std::uint32_t texture_slots = max_layers + 1;
+constexpr std::uint32_t clouds_slot = max_layers + 1;
+constexpr std::uint32_t texture_slots = max_layers + 2;
 
 // The Direct3D objects of one render resource. Its address is the handle the context echoes in
 // draw items (vgl_frame_resource_handle_set).
@@ -85,8 +87,9 @@ struct frame_constants
     std::array<float, 12> celestial = {}; // Three rows of four.
     std::array<float, 2> viewport = {};
     std::array<float, 2> stars_pad = {};
+    std::array<float, 4> cloud = {}; // Drawn, height and texel size in kilometres, unused.
 };
-static_assert(sizeof(frame_constants) == 320, "frame_constants must match terrain.hlsl");
+static_assert(sizeof(frame_constants) == 336, "frame_constants must match terrain.hlsl");
 
 struct item_constants
 {
@@ -122,7 +125,7 @@ struct saved_state
     ID3D11PixelShader* pixel_shader = nullptr;
     std::array<ID3D11Buffer*, 2> ps_constants = {};
     std::array<ID3D11ShaderResourceView*, texture_slots> ps_resources = {};
-    ID3D11SamplerState* ps_sampler = nullptr;
+    std::array<ID3D11SamplerState*, 2> ps_samplers = {};
     ID3D11RasterizerState* rasterizer = nullptr;
     ID3D11DepthStencilState* depth_stencil = nullptr;
     UINT stencil_ref = 0;
@@ -181,6 +184,13 @@ struct vgl_d3d11_backend
     ID3D11Buffer* stars_buffer = nullptr;
     vgl::backends::star_vertex* star_vertices = nullptr;
     std::uint32_t star_count = 0;
+    // The clouds: the host's coverage with its mip levels (backends/common/clouds.hpp), kept on
+    // the CPU to be uploaded again after a reset, as a texture made when they are first drawn.
+    std::uint8_t* cloud_data = nullptr;
+    vgl::backends::cloud_levels cloud_levels;
+    ID3D11Texture2D* cloud_texture = nullptr;
+    ID3D11ShaderResourceView* cloud_view = nullptr;
+    ID3D11SamplerState* cloud_sampler = nullptr;
 
     vgl::common::pointer_map<d3d_resource> resources;
 };
@@ -452,6 +462,20 @@ void forget_resources(vgl_d3d11_backend& b)
     b.resources.clear();
 }
 
+// Frees the CPU copy of the clouds, and their texture.
+void free_clouds(vgl_d3d11_backend& b)
+{
+    release(b.cloud_sampler);
+    release(b.cloud_view);
+    release(b.cloud_texture);
+    if (b.cloud_data != nullptr)
+    {
+        b.mem.deallocate(b.cloud_data, b.cloud_levels.bytes, 1);
+    }
+    b.cloud_data = nullptr;
+    b.cloud_levels = {};
+}
+
 // Frees the CPU copy of the stars, and their buffer.
 void free_stars(vgl_d3d11_backend& b)
 {
@@ -471,6 +495,9 @@ void free_stars(vgl_d3d11_backend& b)
 void stop(vgl_d3d11_backend& b)
 {
     forget_resources(b);
+    release(b.cloud_sampler);
+    release(b.cloud_view);
+    release(b.cloud_texture);
     release(b.stars_buffer);
     release(b.stars_blend);
     release(b.stars_layout);
@@ -536,7 +563,7 @@ saved_state save_state(ID3D11DeviceContext* dc)
     dc->PSGetShader(&s.pixel_shader, nullptr, nullptr);
     dc->PSGetConstantBuffers(0, static_cast<UINT>(s.ps_constants.size()), s.ps_constants.data());
     dc->PSGetShaderResources(0, texture_slots, s.ps_resources.data());
-    dc->PSGetSamplers(0, 1, &s.ps_sampler);
+    dc->PSGetSamplers(0, static_cast<UINT>(s.ps_samplers.size()), s.ps_samplers.data());
     dc->RSGetState(&s.rasterizer);
     dc->OMGetDepthStencilState(&s.depth_stencil, &s.stencil_ref);
     dc->OMGetBlendState(&s.blend, s.blend_factor.data(), &s.sample_mask);
@@ -555,7 +582,7 @@ void restore_state(ID3D11DeviceContext* dc, saved_state& s)
     dc->PSSetShader(s.pixel_shader, nullptr, 0);
     dc->PSSetConstantBuffers(0, static_cast<UINT>(s.ps_constants.size()), s.ps_constants.data());
     dc->PSSetShaderResources(0, texture_slots, s.ps_resources.data());
-    dc->PSSetSamplers(0, 1, &s.ps_sampler);
+    dc->PSSetSamplers(0, static_cast<UINT>(s.ps_samplers.size()), s.ps_samplers.data());
     dc->RSSetState(s.rasterizer);
     dc->OMSetDepthStencilState(s.depth_stencil, s.stencil_ref);
     dc->OMSetBlendState(s.blend, s.blend_factor.data(), s.sample_mask);
@@ -577,7 +604,10 @@ void restore_state(ID3D11DeviceContext* dc, saved_state& s)
     {
         release(v);
     }
-    release(s.ps_sampler);
+    for (ID3D11SamplerState*& sampler : s.ps_samplers)
+    {
+        release(sampler);
+    }
     release(s.rasterizer);
     release(s.depth_stencil);
     release(s.blend);
@@ -837,6 +867,58 @@ bool write_constants(ID3D11DeviceContext* dc, ID3D11Buffer* buffer, const T& val
     return true;
 }
 
+// Creates the clouds' texture with its mip levels and its sampler, once after each set or
+// reset; false if it fails.
+bool upload_clouds(vgl_d3d11_backend& b)
+{
+    if (b.cloud_view != nullptr)
+    {
+        return true;
+    }
+    const vgl::backends::cloud_levels& l = b.cloud_levels;
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width = l.width[0];
+    desc.Height = l.height[0];
+    desc.MipLevels = l.count;
+    desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_R8_UNORM;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_IMMUTABLE;
+    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    std::array<D3D11_SUBRESOURCE_DATA, 16> data{};
+    for (std::uint32_t k = 0; k < l.count; ++k)
+    {
+        data[k].pSysMem = b.cloud_data + l.offset[k];
+        data[k].SysMemPitch = l.width[k];
+    }
+    // Trilinear, round the globe in longitude, and clamped at the poles.
+    D3D11_SAMPLER_DESC s{};
+    s.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    s.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
+    s.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+    s.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    s.ComparisonFunc = D3D11_COMPARISON_NEVER;
+    s.MaxLOD = D3D11_FLOAT32_MAX;
+    const char* function = "vgl_d3d11_backend_draw";
+    if (failed(b,
+               b.device->CreateTexture2D(&desc, data.data(), &b.cloud_texture),
+               function,
+               "the clouds' texture") ||
+        failed(b,
+               b.device->CreateShaderResourceView(b.cloud_texture, nullptr, &b.cloud_view),
+               function,
+               "the clouds' view") ||
+        failed(
+            b, b.device->CreateSamplerState(&s, &b.cloud_sampler), function, "the clouds' sampler"))
+    {
+        release(b.cloud_sampler);
+        release(b.cloud_view);
+        release(b.cloud_texture);
+        return false;
+    }
+    return true;
+}
+
 // Creates the stars' vertex buffer, once after each set or reset; false if there is none.
 bool upload_stars(vgl_d3d11_backend& b)
 {
@@ -896,6 +978,18 @@ void draw_items(vgl_d3d11_backend& b,
     }
     // The far plane's depth: 0 for reversed-Z, else 1, the logarithmic convention's too.
     fc.far_depth = b.depth == VGL_DEPTH_CONVENTION_REVERSED_Z ? 0.0f : 1.0f;
+    // The clouds, with the atmosphere, on their own slot and sampler.
+    const bool clouds =
+        atmosphere && info.clouds != VGL_FALSE && b.cloud_data != nullptr && upload_clouds(b);
+    if (clouds)
+    {
+        const double height =
+            info.cloud_height > 0.0 ? info.cloud_height : vgl::backends::default_cloud_height;
+        fc.cloud = {1.0f,
+                    static_cast<float>(height * 1e-3),
+                    static_cast<float>(vgl::backends::cloud_texel_km(b.cloud_levels.width[0])),
+                    0.0f};
+    }
     const bool stars = info.stars != VGL_FALSE && view != nullptr && b.star_count != 0;
     if (stars)
     {
@@ -946,7 +1040,8 @@ void draw_items(vgl_d3d11_backend& b,
     const std::array<ID3D11Buffer*, 2> constants = {b.frame_buffer, b.item_buffer};
     dc->VSSetConstantBuffers(0, 2, constants.data());
     dc->PSSetConstantBuffers(0, 2, constants.data());
-    dc->PSSetSamplers(0, 1, &b.sampler);
+    const std::array<ID3D11SamplerState*, 2> samplers = {b.sampler, b.cloud_sampler};
+    dc->PSSetSamplers(0, static_cast<UINT>(samplers.size()), samplers.data());
     dc->RSSetState(b.rasterizers[info.mirrored != VGL_FALSE ? 1 : 0]);
     dc->OMSetDepthStencilState(b.depth_state, 0);
     dc->OMSetBlendState(nullptr, nullptr, 0xFFFFFFFF);
@@ -958,6 +1053,7 @@ void draw_items(vgl_d3d11_backend& b,
     std::uint32_t count = 0;
     static_cast<void>(vgl_frame_draw_list_get(frame, &items, &count));
     std::array<ID3D11ShaderResourceView*, texture_slots> bound = {};
+    bound[clouds_slot] = clouds ? b.cloud_view : nullptr;
     dc->PSSetShaderResources(0, texture_slots, bound.data());
     const ID3D11Buffer* bound_indices = nullptr;
     for (std::uint32_t i = 0; i < count; ++i)
@@ -982,6 +1078,7 @@ void draw_items(vgl_d3d11_backend& b,
 
         // The top layers, if there are more than a draw can blend.
         std::array<ID3D11ShaderResourceView*, texture_slots> views = {};
+        views[clouds_slot] = bound[clouds_slot];
         const std::uint32_t used = std::min(item.layer_count, max_layers);
         const std::uint32_t first = item.first_layer + item.layer_count - used;
         std::uint32_t drawn_layers = 0;
@@ -1125,6 +1222,7 @@ extern "C" VGL_D3D11_API vgl_result vgl_d3d11_backend_destroy(vgl_d3d11_backend*
     }
     stop(*backend);
     free_stars(*backend);
+    free_clouds(*backend);
     // A later consumer of the context must receive every resource again.
     static_cast<void>(vgl_context_resources_reset(backend->context));
     const memory mem = backend->mem;
@@ -1173,6 +1271,45 @@ extern "C" VGL_D3D11_API vgl_result vgl_d3d11_backend_stars_set(vgl_d3d11_backen
     free_stars(b);
     b.star_vertices = vertices;
     b.star_count = star_count;
+    return VGL_RESULT_SUCCESS;
+}
+
+extern "C" VGL_D3D11_API vgl_result vgl_d3d11_backend_clouds_set(vgl_d3d11_backend* backend,
+                                                                 const std::uint8_t* coverage,
+                                                                 std::uint32_t width,
+                                                                 std::uint32_t height)
+{
+    if (backend == nullptr)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    vgl_d3d11_backend& b = *backend;
+    const bool removal = coverage == nullptr && width == 0 && height == 0;
+    if (!removal && (coverage == nullptr || !vgl::backends::cloud_size_is_valid(width, height)))
+    {
+        log(b,
+            VGL_LOG_LEVEL_ERROR,
+            "vgl_d3d11_backend_clouds_set: the coverage is null, or %ux%u is outside 2x2 to "
+            "16384x8192",
+            static_cast<unsigned>(width),
+            static_cast<unsigned>(height));
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    std::uint8_t* data = nullptr;
+    vgl::backends::cloud_levels levels;
+    if (!removal)
+    {
+        levels = vgl::backends::cloud_levels_of(width, height);
+        data = static_cast<std::uint8_t*>(b.mem.allocate(levels.bytes, 1));
+        if (data == nullptr)
+        {
+            return VGL_RESULT_OUT_OF_MEMORY;
+        }
+        vgl::backends::cloud_levels_build(coverage, levels, data);
+    }
+    free_clouds(b);
+    b.cloud_data = data;
+    b.cloud_levels = levels;
     return VGL_RESULT_SUCCESS;
 }
 
@@ -1227,6 +1364,7 @@ extern "C" VGL_D3D11_API vgl_result vgl_d3d11_backend_draw(vgl_d3d11_backend* ba
         VGL_D3D11_DEBUG_FLAG_CONTOURS;
     if ((info.debug_flags & ~known_flags) != 0 || info.reserved != 0 || info.reserved2 != 0 ||
         info.reserved3 != 0 || info.reserved4 != 0 || !std::isfinite(info.sidereal_angle) ||
+        info.reserved5 != 0 || !std::isfinite(info.cloud_height) || info.cloud_height < 0.0 ||
         !std::isfinite(info.contour_interval) || info.contour_interval < 0.0)
     {
         log(b,

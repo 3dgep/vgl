@@ -102,6 +102,10 @@ struct globe_settings
     // radians (vgl_earth_rotation_angle_get).
     bool stars = false;
     double sidereal_angle = 0.0;
+    // With the atmosphere, the clouds set with globe::clouds_set (vgl_gl_draw_info.clouds), as a
+    // shell at cloud_height metres above the ellipsoid; 0 selects 6,000.
+    bool clouds = false;
+    double cloud_height = 0.0;
 };
 
 class globe final : public Ogre::MovableObject
@@ -124,6 +128,13 @@ public:
     // before, as vgl_gl_backend_stars_set does: copied, drawn as small quads. vgl ships no
     // stars. Fails with invalid_argument for an invalid star or too many, and out_of_memory.
     [[nodiscard]] vgl::result stars_set(const vgl_star* stars, std::uint32_t count) noexcept;
+
+    // Sets the clouds the globe draws when its settings ask for them, as
+    // vgl_gl_backend_clouds_set does: a coverage image of the whole globe, copied with its mip
+    // levels; null with width and height 0 removes them. Fails with invalid_argument for a size
+    // outside 2 x 2 to 16,384 x 8,192, and out_of_memory.
+    [[nodiscard]] vgl::result
+    clouds_set(const std::uint8_t* coverage, std::uint32_t width, std::uint32_t height) noexcept;
 
     // Forgets the globe's Ogre objects and the context's render resources, which are uploaded
     // again over the next frames: after Ogre's render system lost its device, and the like.

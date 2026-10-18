@@ -7,6 +7,7 @@
 
 #include "atmosphere_shader.hpp"
 #include "backends/common/atmosphere_view.hpp"
+#include "backends/common/clouds.hpp"
 #include "backends/common/stars.hpp"
 #include "common/host_memory.hpp"
 #include "common/pointer_map.hpp"
@@ -47,6 +48,7 @@ enum custom : std::uint8_t
     custom_sun_planet = 15,
     custom_sky = 16,
     custom_celestial = 17, // To 19.
+    custom_cloud = 20,
 };
 
 enum class resource_kind : std::uint8_t
@@ -69,6 +71,7 @@ struct ogre_resource
     std::uint32_t sample_grid = 0;
     float min_height = 0.0f;
     std::array<Ogre::TexturePtr, max_layers> bound_layers; // The material's layers now.
+    Ogre::TexturePtr bound_clouds;                         // And its clouds.
     // Textures, and meshes' samples.
     Ogre::TexturePtr texture;
 };
@@ -156,6 +159,11 @@ struct vgl::ogre::globe::state
     vgl::backends::star_vertex* star_vertices = nullptr;
     std::uint32_t star_count = 0;
     bool stars_shown = false; // The last frame drew them.
+    // The clouds: the host's coverage with its mip levels (backends/common/clouds.hpp), kept on
+    // the CPU to be uploaded again after resources_reset, as a texture made when first drawn.
+    std::uint8_t* cloud_data = nullptr;
+    vgl::backends::cloud_levels cloud_levels;
+    Ogre::TexturePtr cloud_texture;
     vgl::common::pointer_map<ogre_resource> resources;
     std::uint64_t next_name = 0;
 
@@ -221,7 +229,10 @@ Ogre::HighLevelGpuProgramPtr compile_program(
     {
         text.replace(at,
                      marker.size(),
-                     std::string("#define VGL_CONST STATIC const\n") +
+                     std::string("#define VGL_CONST STATIC const\n"
+                                 "#ifdef OGRE_HLSL\n"
+                                 "#define VGL_ATAN2(y, x) atan2(y, x)\n"
+                                 "#endif\n") +
                          vgl::backends::atmosphere_shader);
     }
     p->setSource(std::string(glsl ? "OGRE_NATIVE_GLSL_VERSION_DIRECTIVE\n" : "") + text);
@@ -294,6 +305,8 @@ make_program(state& s, const char* language, Ogre::GpuProgramType type, const ch
     {
         params->setNamedConstant("u_layer" + std::to_string(k), k + 1);
     }
+    params->setNamedConstant("u_clouds", 5);
+    params->setNamedAutoConstant("u_cloud", Ogre::GpuProgramParameters::ACT_CUSTOM, custom_cloud);
     return p;
 }
 
@@ -340,6 +353,13 @@ void build_pipeline(state& s)
         layer->setTextureAddressingMode(Ogre::TextureUnitState::TAM_CLAMP);
         layer->setTexture(s.blank);
     }
+    // Unit 5: the clouds, trilinear, round the globe in longitude and clamped at the poles.
+    Ogre::TextureUnitState* clouds = pass->createTextureUnitState();
+    clouds->setTextureFiltering(Ogre::TFO_TRILINEAR);
+    clouds->setTextureAddressingMode(Ogre::TextureUnitState::TAM_WRAP,
+                                     Ogre::TextureUnitState::TAM_CLAMP,
+                                     Ogre::TextureUnitState::TAM_CLAMP);
+    clouds->setTexture(s.blank);
     s.material->load();
 
     // The sky: its programs, its material, which draws at the far depth only, without writing
@@ -354,6 +374,8 @@ void build_pipeline(state& s)
     const Ogre::GpuProgramParametersSharedPtr sky = s.sky_fragment_program->getDefaultParameters();
     sky->setNamedAutoConstant("u_inverse_projection",
                               Ogre::GpuProgramParameters::ACT_INVERSE_PROJECTION_MATRIX);
+    sky->setNamedConstant("u_clouds", 0);
+    sky->setNamedAutoConstant("u_cloud", Ogre::GpuProgramParameters::ACT_CUSTOM, custom_cloud);
     atmosphere_constants(sky);
     s.sky_material = Ogre::MaterialManager::getSingleton().create(s.name + "/sky", s.group);
     Ogre::Pass* sky_pass = s.sky_material->getTechnique(0)->getPass(0);
@@ -367,6 +389,12 @@ void build_pipeline(state& s)
         Ogre::SBF_ONE, Ogre::SBF_SOURCE_ALPHA, Ogre::SBF_ZERO, Ogre::SBF_ONE);
     sky_pass->setVertexProgram(s.sky_vertex_program->getName(), true);
     sky_pass->setFragmentProgram(s.sky_fragment_program->getName(), true);
+    Ogre::TextureUnitState* sky_clouds = sky_pass->createTextureUnitState();
+    sky_clouds->setTextureFiltering(Ogre::TFO_TRILINEAR);
+    sky_clouds->setTextureAddressingMode(Ogre::TextureUnitState::TAM_WRAP,
+                                         Ogre::TextureUnitState::TAM_CLAMP,
+                                         Ogre::TextureUnitState::TAM_CLAMP);
+    sky_clouds->setTexture(s.blank);
     s.sky_material->load();
 
     s.sky_vertices = OGRE_NEW Ogre::VertexData();
@@ -460,6 +488,18 @@ void free_star_buffer(state& s) noexcept
 void forget_resources(state& s) noexcept
 {
     free_star_buffer(s);
+    // The clouds' texture too, which upload_clouds makes again when they are next drawn.
+    try
+    {
+        if (s.cloud_texture)
+        {
+            Ogre::TextureManager::getSingleton().remove(s.cloud_texture);
+        }
+    }
+    catch (...) // NOLINT(bugprone-empty-catch): nothing more to do while forgetting.
+    {
+    }
+    s.cloud_texture.reset();
     s.resources.for_each([&](std::uint64_t, ogre_resource* r) {
         release(*r);
         s.mem.destroy(r);
@@ -827,6 +867,70 @@ void free_stars(state& s) noexcept
     s.star_count = 0;
 }
 
+// Frees the clouds' texture, which upload_clouds makes again.
+void free_cloud_texture(state& s) noexcept
+{
+    try
+    {
+        if (s.cloud_texture)
+        {
+            Ogre::TextureManager::getSingleton().remove(s.cloud_texture);
+        }
+    }
+    catch (...) // NOLINT(bugprone-empty-catch): nothing more to do while freeing.
+    {
+    }
+    s.cloud_texture.reset();
+}
+
+// Makes the clouds' texture with its mip levels, once after each set or reset; false if it
+// fails.
+bool upload_clouds(state& s)
+{
+    if (s.cloud_texture)
+    {
+        return true;
+    }
+    try
+    {
+        const vgl::backends::cloud_levels& l = s.cloud_levels;
+        s.cloud_texture =
+            Ogre::TextureManager::getSingleton().createManual(unique_name(s, "clouds"),
+                                                              s.group,
+                                                              Ogre::TEX_TYPE_2D,
+                                                              l.width[0],
+                                                              l.height[0],
+                                                              static_cast<int>(l.count) - 1,
+                                                              Ogre::PF_L8);
+        for (std::uint32_t k = 0; k < l.count; ++k)
+        {
+            s.cloud_texture->getBuffer(0, k)->blitFromMemory(Ogre::PixelBox(
+                l.width[k], l.height[k], 1, Ogre::PF_L8, s.cloud_data + l.offset[k]));
+        }
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        log(s,
+            VGL_LOG_LEVEL_ERROR,
+            std::string("vgl::ogre::globe: the clouds failed: ") + e.what());
+        free_cloud_texture(s);
+        return false;
+    }
+}
+
+// Frees the CPU copy of the clouds, and their texture.
+void free_clouds(state& s) noexcept
+{
+    free_cloud_texture(s);
+    if (s.cloud_data != nullptr)
+    {
+        s.mem.deallocate(s.cloud_data, s.cloud_levels.bytes, 1);
+    }
+    s.cloud_data = nullptr;
+    s.cloud_levels = {};
+}
+
 // Fills the renderables from the draw list.
 void fill_renderables(state& s, const vgl_frame* frame, const vgl_dmat4* view)
 {
@@ -874,6 +978,27 @@ void fill_renderables(state& s, const vgl_frame* frame, const vgl_dmat4* view)
     }
     s.sky.setCustomParameter(custom_camera, camera);
     s.sky.setCustomParameter(custom_sun_planet, sun_planet);
+    // The clouds, with the atmosphere.
+    Ogre::Vector4 cloud(0.0f, 0.0f, 1.0f, 0.0f);
+    const bool clouds = atmosphere && g.clouds && s.cloud_data != nullptr && upload_clouds(s);
+    if (clouds)
+    {
+        const double height =
+            g.cloud_height > 0.0 ? g.cloud_height : vgl::backends::default_cloud_height;
+        cloud = Ogre::Vector4(
+            1.0f,
+            static_cast<float>(height * 1e-3),
+            static_cast<float>(vgl::backends::cloud_texel_km(s.cloud_levels.width[0])),
+            0.0f);
+    }
+    s.sky.setCustomParameter(custom_cloud, cloud);
+    Ogre::TextureUnitState* sky_clouds =
+        s.sky_material->getTechnique(0)->getPass(0)->getTextureUnitState(0);
+    const Ogre::TexturePtr& clouds_texture = clouds ? s.cloud_texture : s.blank;
+    if (sky_clouds->_getTexturePtr() != clouds_texture)
+    {
+        sky_clouds->setTexture(clouds_texture);
+    }
     // The far plane's depth: 0 for reversed-Z, else 1, the logarithmic convention's too.
     s.sky.setCustomParameter(
         custom_sky,
@@ -993,6 +1118,12 @@ void fill_renderables(state& s, const vgl_frame* frame, const vgl_dmat4* view)
         }
         r->setCustomParameter(custom_camera, camera);
         r->setCustomParameter(custom_sun_planet, sun_planet);
+        r->setCustomParameter(custom_cloud, cloud);
+        if (mesh->bound_clouds != clouds_texture)
+        {
+            pass->getTextureUnitState(5)->setTexture(clouds_texture);
+            mesh->bound_clouds = clouds_texture;
+        }
     }
 }
 
@@ -1151,6 +1282,7 @@ globe::~globe()
         Ogre::HighLevelGpuProgramManager::getSingleton().remove(s.sky_vertex_program);
         Ogre::HighLevelGpuProgramManager::getSingleton().remove(s.sky_fragment_program);
         free_stars(s);
+        free_clouds(s);
         Ogre::MaterialManager::getSingleton().remove(s.stars_material);
         Ogre::HighLevelGpuProgramManager::getSingleton().remove(s.stars_vertex_program);
         Ogre::HighLevelGpuProgramManager::getSingleton().remove(s.stars_fragment_program);
@@ -1208,6 +1340,37 @@ vgl::result globe::stars_set(const vgl_star* stars, std::uint32_t count) noexcep
     free_stars(s);
     s.star_vertices = copy;
     s.star_count = count;
+    return vgl::result::success;
+}
+
+vgl::result
+globe::clouds_set(const std::uint8_t* coverage, std::uint32_t width, std::uint32_t height) noexcept
+{
+    state& s = *state_;
+    const bool removal = coverage == nullptr && width == 0 && height == 0;
+    if (!removal && (coverage == nullptr || !vgl::backends::cloud_size_is_valid(width, height)))
+    {
+        log(s,
+            VGL_LOG_LEVEL_ERROR,
+            "vgl::ogre::globe::clouds_set: the coverage is null, or " + std::to_string(width) +
+                "x" + std::to_string(height) + " is outside 2x2 to 16384x8192");
+        return vgl::result::invalid_argument;
+    }
+    std::uint8_t* data = nullptr;
+    vgl::backends::cloud_levels levels;
+    if (!removal)
+    {
+        levels = vgl::backends::cloud_levels_of(width, height);
+        data = static_cast<std::uint8_t*>(s.mem.allocate(levels.bytes, 1));
+        if (data == nullptr)
+        {
+            return vgl::result::out_of_memory;
+        }
+        vgl::backends::cloud_levels_build(coverage, levels, data);
+    }
+    free_clouds(s);
+    s.cloud_data = data;
+    s.cloud_levels = levels;
     return vgl::result::success;
 }
 

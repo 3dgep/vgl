@@ -19,6 +19,7 @@
 // the host's state, and that it draws again after a reset. It exits with 1 on a failure, so
 // that it doubles as a test of the backend. --save writes the images it checks as PPM files.
 
+#include "clouds.hpp"
 #include "navigation.hpp"
 #include "overlay.hpp"
 #include "sample_camera.hpp"
@@ -346,6 +347,7 @@ vgl::result draw(vgl::d3d11_backend& backend, const scene& s, int width, int hei
     info.sea_surface = s.debug.sea ? VGL_TRUE : VGL_FALSE;
     info.atmosphere = s.debug.atmosphere ? VGL_TRUE : VGL_FALSE;
     info.stars = s.debug.stars ? VGL_TRUE : VGL_FALSE;
+    info.clouds = s.debug.clouds ? VGL_TRUE : VGL_FALSE;
     info.sidereal_angle =
         sample::sidereal_angle(s.debug.time_of_day, s.debug.day_of_year, s.debug.year);
     return backend.draw(&info);
@@ -363,6 +365,11 @@ backend_create(vgl::context& ctx, const gpu& g, vgl_depth_convention depth)
     {
         expect(backend->stars_set(sample::sky_stars()) == vgl::result::success,
                "the stars are set");
+        const sample::cloud_image& clouds = sample::sky_clouds();
+        expect(clouds.width == 0 ||
+                   backend->clouds_set(clouds.coverage.data(), clouds.width, clouds.height) ==
+                       vgl::result::success,
+               "the clouds are set");
     }
     return backend;
 }
@@ -540,6 +547,7 @@ int run_check(const options& o, const gpu& g, vgl::context& ctx)
             scene air = s;
             air.debug.atmosphere = true;
             air.debug.stars = true;
+            air.debug.clouds = true;
             clear(g, air, t);
             sentinel_set(g, host);
             expect(draw(*backend, air, width, height) == vgl::result::success,
@@ -648,22 +656,27 @@ void on_key(HWND window, window_state& in, WPARAM key)
         break;
     case 'N':
     case 'R':
-        in.nav->stop();
-        in.s->camera.heading = 0.0; // North up.
+    {
+        sample::camera to = in.s->camera;
+        to.heading = 0.0; // North up.
         if (key == 'R')
         {
-            in.s->camera.pitch = 90.0; // And looking straight down.
+            to.pitch = 90.0; // And looking straight down.
         }
+        in.nav->fly_to(in.s->camera, to);
         break;
+    }
     case 'U':
-        in.nav->stop();
-        in.s->camera.pitch = 90.0;
+    {
+        sample::camera to = in.s->camera;
+        to.pitch = 90.0;
+        in.nav->fly_to(in.s->camera, to);
         break;
+    }
     default:
         if (key >= '1' && key < '1' + places.size())
         {
-            in.nav->stop();
-            in.s->camera = places[static_cast<std::size_t>(key - '1')].camera;
+            in.nav->fly_to(in.s->camera, places[static_cast<std::size_t>(key - '1')].camera);
         }
         break;
     }
@@ -856,6 +869,7 @@ int run_interactive(const options& o,
     scene s;
     s.debug.atmosphere = true;
     s.debug.stars = true;
+    s.debug.clouds = true;
     s.depth = o.depth;
     s.camera = places[0].camera;
     vgl::expected<vgl::d3d11_backend> backend = backend_create(ctx, g, s.depth);
@@ -1134,6 +1148,14 @@ int main(int argc, char** argv)
         {
             std::fprintf(stderr, "--stars: %s\n", error.c_str());
             return 1;
+        }
+    }
+    {
+        // The clouds of the sample set, if it has them.
+        std::string error;
+        if (!sample::clouds_load(sample::data_directory(o.data, VGL_SAMPLE_DATA_DIR), error))
+        {
+            std::fprintf(stderr, "no clouds: %s\n", error.c_str());
         }
     }
     SetProcessDPIAware();

@@ -30,6 +30,7 @@
 // PPM files.
 
 #define GLFW_INCLUDE_NONE
+#include "clouds.hpp"
 #include "glfw_controls.hpp"
 #include "navigation.hpp"
 #include "overlay.hpp"
@@ -337,6 +338,7 @@ vgl::result draw(vgl::gl_backend& backend, const scene& s, int width, int height
     info.sea_surface = s.debug.sea ? VGL_TRUE : VGL_FALSE;
     info.atmosphere = s.debug.atmosphere ? VGL_TRUE : VGL_FALSE;
     info.stars = s.debug.stars ? VGL_TRUE : VGL_FALSE;
+    info.clouds = s.debug.clouds ? VGL_TRUE : VGL_FALSE;
     info.sidereal_angle =
         sample::sidereal_angle(s.debug.time_of_day, s.debug.day_of_year, s.debug.year);
     return backend.draw(&info);
@@ -1120,6 +1122,87 @@ void navigation_check()
                    "orbiting from space does nothing" + where);
         }
     }
+
+    // Flights to each place from the one before, and turns in place as R makes: smooth all the
+    // way, starting at rest, and ending exactly at the place, at 60 frames a second.
+    std::vector<std::pair<sample::camera, sample::camera>> flights;
+    for (std::size_t i = 0; i < places.size(); ++i)
+    {
+        flights.emplace_back(places[(i + places.size() - 1) % places.size()].camera,
+                             places[i].camera);
+        sample::camera turned = places[i].camera;
+        turned.heading = 0.0;
+        turned.pitch = 90.0;
+        flights.emplace_back(places[i].camera, turned);
+    }
+    for (const auto& [from, to] : flights)
+    {
+        sample::globe_navigation nav;
+        nav.viewport(w, h, field_of_view);
+        nav.ground(0.0);
+        sample::camera c = from;
+        nav.fly_to(c, to);
+        // How far each frame moves the camera, in the terms the flight eases: the angle along
+        // the great circle, the altitude on a logarithmic scale, and the turn of the view. A
+        // jump would show as one frame taking much more of any of them than its share.
+        const auto direction = [](const sample::camera& k) {
+            const double lat = vgl::degrees_to_radians(k.latitude);
+            const double lon = vgl::degrees_to_radians(k.longitude);
+            return std::array<double, 3>{
+                std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), std::sin(lat)};
+        };
+        const auto step = [&](const sample::camera& p, const sample::camera& q) {
+            const std::array<double, 3> u = direction(p);
+            const std::array<double, 3> v = direction(q);
+            const double d = std::clamp(u[0] * v[0] + u[1] * v[1] + u[2] * v[2], -1.0, 1.0);
+            return std::array<double, 3>{
+                std::acos(d),
+                std::fabs(std::log(q.altitude / p.altitude)),
+                std::max(std::fabs(std::remainder(q.heading - p.heading, 360.0)),
+                         std::fabs(q.pitch - p.pitch))};
+        };
+        std::array<double, 3> total{};
+        std::array<double, 3> largest{};
+        std::array<double, 3> first{-1.0, -1.0, -1.0};
+        int frames = 0;
+        while (nav.flying() && frames < 1000)
+        {
+            const sample::camera before = c;
+            nav.update(1.0 / 60.0, {}, c);
+            const std::array<double, 3> d = step(before, c);
+            for (std::size_t k = 0; k < 3; ++k)
+            {
+                total[k] += d[k];
+                largest[k] = std::max(largest[k], d[k]);
+            }
+            if (first[0] < 0.0)
+            {
+                first = d;
+            }
+            ++frames;
+        }
+        const std::string what =
+            " flying " + std::to_string(static_cast<int>(step(from, to)[0] * 6371.0)) +
+            " km and turning " + std::to_string(static_cast<int>(step(from, to)[2])) + " degrees";
+        expect(!nav.flying() && c.latitude == to.latitude && c.longitude == to.longitude &&
+                   c.altitude == to.altitude && c.heading == to.heading && c.pitch == to.pitch,
+               "a flight ends at its place" + what);
+        expect(frames >= 25 && frames <= 250,
+               "a flight takes half a second to four seconds" + what);
+        // An s-curve's fastest frame covers 1.875 / frames of the way; the altitude's, with the
+        // rise over long flights on top, up to about 2.5 / frames. A jump takes far more.
+        const std::array<double, 3> share = {
+            2.0 / std::max(frames, 1), 3.0 / std::max(frames, 1), 2.0 / std::max(frames, 1)};
+        bool smooth = true;
+        bool at_rest = true;
+        for (std::size_t k = 0; k < 3; ++k)
+        {
+            smooth = smooth && largest[k] <= share[k] * total[k] + 1e-9;
+            at_rest = at_rest && first[k] <= 0.002 * total[k] + 1e-9;
+        }
+        expect(smooth, "a flight moves smoothly, without a jump" + what);
+        expect(at_rest, "a flight starts at rest" + what);
+    }
 }
 
 struct options
@@ -1172,6 +1255,15 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
         }
         const std::vector<vgl_star> stars = sample::sky_stars();
         expect(backend->stars_set(stars) == vgl::result::success, "the stars are set");
+        // An image too small to cover the globe is refused.
+        const std::uint8_t pixel = 0;
+        expect(backend->clouds_set(&pixel, 1, 1) == vgl::result::invalid_argument,
+               "a cloud image of one pixel is refused");
+        const sample::cloud_image& clouds = sample::sky_clouds();
+        expect(clouds.width == 0 ||
+                   backend->clouds_set(clouds.coverage.data(), clouds.width, clouds.height) ==
+                       vgl::result::success,
+               "the clouds are set");
         // A star without a direction is refused, and the stars stay as they were.
         const vgl_star none{};
         expect(backend->stars_set({&none, 1}) == vgl::result::invalid_argument,
@@ -1239,6 +1331,7 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
             scene air = s;
             air.debug.atmosphere = true;
             air.debug.stars = true;
+            air.debug.clouds = true;
             clear(gl, air, t);
             sentinel_state_set(gl, host_vertex_array);
             expect(draw(*backend, air, width, height) == vgl::result::success,
@@ -1317,6 +1410,7 @@ int run_interactive(const options& o,
     scene s;
     s.debug.atmosphere = true;
     s.debug.stars = true;
+    s.debug.clouds = true;
     s.depth = o.depth;
     s.camera = places[0].camera;
     if (!depth_mode_set(gl, s.depth))
@@ -1336,6 +1430,10 @@ int run_interactive(const options& o,
         return 1;
     }
     static_cast<void>(backend->stars_set(sample::sky_stars()));
+    if (const sample::cloud_image& clouds = sample::sky_clouds(); clouds.width != 0)
+    {
+        static_cast<void>(backend->clouds_set(clouds.coverage.data(), clouds.width, clouds.height));
+    }
 
     // The window's callbacks first: Dear ImGui chains to them.
     sample::overlay ui;
@@ -1597,6 +1695,14 @@ int main(int argc, char** argv)
         {
             std::fprintf(stderr, "--stars: %s\n", error.c_str());
             return 1;
+        }
+    }
+    {
+        // The clouds of the sample set, if it has them.
+        std::string error;
+        if (!sample::clouds_load(sample::data_directory(o.data, VGL_SAMPLE_DATA_DIR), error))
+        {
+            std::fprintf(stderr, "no clouds: %s\n", error.c_str());
         }
     }
 

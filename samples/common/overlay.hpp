@@ -25,17 +25,18 @@ namespace sample
 // What the debug controls set.
 struct debug_settings
 {
-    bool panel = true;               // The overlay itself (F1).
-    bool wireframe = false;          // F2
-    bool level_colors = false;       // F3.
-    bool imagery_source = false;     // F4.
-    bool freeze = false;             // F5: select tiles for a frozen camera.
-    bool height_colors = false;      // F6: colours by height instead of imagery.
-    bool contours = false;           // F7.
-    bool sea = false;                // F8: a sea surface over the ocean floor.
-    bool atmosphere = false;         // F9: the sky and haze; the interactive samples start with it.
-    bool stars = false;              // Behind the sky; the interactive samples start with them.
-    bool contour_auto = true;        // The interval follows the altitude.
+    bool panel = true;           // The overlay itself (F1).
+    bool wireframe = false;      // F2
+    bool level_colors = false;   // F3.
+    bool imagery_source = false; // F4.
+    bool freeze = false;         // F5: select tiles for a frozen camera.
+    bool height_colors = false;  // F6: colours by height instead of imagery.
+    bool contours = false;       // F7.
+    bool sea = false;            // F8: a sea surface over the ocean floor.
+    bool atmosphere = false;     // F9: the sky and haze; the interactive samples start with it.
+    bool stars = false;          // Behind the sky; the interactive samples start with them.
+    bool clouds = false;         // With the atmosphere; the interactive samples start with them.
+    bool contour_auto = true;    // The interval follows the altitude.
     float contour_interval = 500.0f; // Metres.
     bool sunlight = true;            // L.
     // The sun's place: the time of day in hours (UTC) and the day of the year, from 1 on

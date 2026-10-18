@@ -8,6 +8,7 @@
 
 #include "atmosphere_shader.hpp"
 #include "backends/common/atmosphere_view.hpp"
+#include "backends/common/clouds.hpp"
 #include "backends/common/stars.hpp"
 #include "common/host_memory.hpp"
 #include "common/pointer_map.hpp"
@@ -40,9 +41,10 @@ enum class resource_kind : std::uint8_t
 // Imagery layers a draw blends; a tile with more draws the top ones.
 constexpr std::uint32_t max_layers = 4;
 
-// Units 0 to 3 hold the layers, and the next one the mesh's samples.
+// Units 0 to 3 hold the layers, the next one the mesh's samples, and the last the clouds.
 constexpr std::uint32_t samples_unit = max_layers;
-constexpr std::uint32_t texture_units = max_layers + 1;
+constexpr std::uint32_t clouds_unit = max_layers + 1;
+constexpr std::uint32_t texture_units = max_layers + 2;
 
 // The OpenGL objects of one render resource. Its address is the handle the context echoes in
 // draw items (vgl_frame_resource_handle_set).
@@ -65,6 +67,8 @@ struct atmosphere_uniforms
     GLint camera_km = -1;
     GLint camera_height = -1;
     GLint sun_planet = -1;
+    GLint clouds = -1; // The sampler.
+    GLint cloud = -1;  // Drawn, height and texel size.
 };
 
 // The host's state that drawing changes (NFR-08; vgl/gl.h lists it).
@@ -141,6 +145,13 @@ struct vgl_gl_backend
     GLint u_sample_cells = -1;
     std::array<GLint, max_layers> u_layers = {-1, -1, -1, -1};
     atmosphere_uniforms u_terrain_atmosphere;
+
+    // The clouds: the host's coverage with its mip levels (backends/common/clouds.hpp), kept on
+    // the CPU to be uploaded again after a reset, as a texture made when they are first drawn.
+    std::uint8_t* cloud_data = nullptr;
+    vgl::backends::cloud_levels cloud_levels;
+    GLuint cloud_texture = 0;
+    GLuint cloud_sampler = 0;
 
     // The stars: the host's, as quads (backends/common/stars.hpp), kept on the CPU to be
     // uploaded again after a reset. The buffer is made when they are first drawn.
@@ -272,7 +283,9 @@ atmosphere_uniforms atmosphere_locations(const functions& gl, GLuint program)
             gl.GetUniformLocation(program, "u_to_planet"),
             gl.GetUniformLocation(program, "u_camera_km"),
             gl.GetUniformLocation(program, "u_camera_height"),
-            gl.GetUniformLocation(program, "u_sun_planet")};
+            gl.GetUniformLocation(program, "u_sun_planet"),
+            gl.GetUniformLocation(program, "u_clouds"),
+            gl.GetUniformLocation(program, "u_cloud")};
 }
 
 vgl_result build_program(vgl_gl_backend& b, const char* function)
@@ -408,6 +421,17 @@ void forget_resources(vgl_gl_backend& b, bool delete_objects)
     b.resources.clear();
 }
 
+// Frees the CPU copy of the clouds.
+void free_clouds(vgl_gl_backend& b)
+{
+    if (b.cloud_data != nullptr)
+    {
+        b.mem.deallocate(b.cloud_data, b.cloud_levels.bytes, 1);
+    }
+    b.cloud_data = nullptr;
+    b.cloud_levels = {};
+}
+
 // Frees the CPU copy of the stars.
 void free_stars(vgl_gl_backend& b)
 {
@@ -431,6 +455,11 @@ void stop(vgl_gl_backend& b, bool delete_objects)
         b.gl.DeleteProgram(b.program);
         b.gl.DeleteProgram(b.sky_program);
         b.gl.DeleteVertexArrays(1, &b.sky_vertex_array);
+        if (b.cloud_texture != 0)
+        {
+            b.gl.DeleteTextures(1, &b.cloud_texture);
+            b.gl.DeleteSamplers(1, &b.cloud_sampler);
+        }
         b.gl.DeleteProgram(b.stars_program);
         if (b.stars_vertex_array != 0)
         {
@@ -442,6 +471,8 @@ void stop(vgl_gl_backend& b, bool delete_objects)
     b.program = 0;
     b.sky_program = 0;
     b.sky_vertex_array = 0;
+    b.cloud_texture = 0;
+    b.cloud_sampler = 0;
     b.stars_program = 0;
     b.stars_buffer = 0;
     b.stars_vertex_array = 0;
@@ -789,10 +820,20 @@ const gl_resource* from_handle(std::uint64_t handle)
     return reinterpret_cast<const gl_resource*>(address); // NOLINT(performance-no-int-to-ptr)
 }
 
+// How a draw shows the clouds: drawn or not, the shell's height and the image's texels at the
+// equator, both in kilometres.
+struct cloud_view
+{
+    bool drawn = false;
+    float height_km = 0.0f;
+    float texel_km = 1.0f;
+};
+
 void set_atmosphere(const functions& gl,
                     const atmosphere_uniforms& u,
                     bool enabled,
-                    const atmosphere_view& a)
+                    const atmosphere_view& a,
+                    const cloud_view& c)
 {
     gl.Uniform1i(u.enabled, enabled ? 1 : 0);
     if (enabled)
@@ -802,6 +843,46 @@ void set_atmosphere(const functions& gl,
         gl.Uniform1f(u.camera_height, a.camera_height);
         gl.Uniform3f(u.sun_planet, a.sun_planet[0], a.sun_planet[1], a.sun_planet[2]);
     }
+    gl.Uniform1i(u.clouds, static_cast<GLint>(clouds_unit));
+    gl.Uniform3f(u.cloud, c.drawn ? 1.0f : 0.0f, c.height_km, c.texel_km);
+}
+
+// Uploads the clouds' texture with its mip levels and makes its sampler, once after each set
+// or reset, and binds them to their unit.
+void bind_clouds(vgl_gl_backend& b)
+{
+    const functions& gl = b.gl;
+    gl.ActiveTexture(GL_TEXTURE0 + clouds_unit);
+    if (b.cloud_texture == 0)
+    {
+        const vgl::backends::cloud_levels& l = b.cloud_levels;
+        gl.GenTextures(1, &b.cloud_texture);
+        gl.BindTexture(GL_TEXTURE_2D, b.cloud_texture);
+        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+        gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, static_cast<GLint>(l.count) - 1);
+        // Rows of one byte per pixel need no padding.
+        gl.PixelStorei(GL_UNPACK_ALIGNMENT, 1);
+        for (std::uint32_t k = 0; k < l.count; ++k)
+        {
+            gl.TexImage2D(GL_TEXTURE_2D,
+                          static_cast<GLint>(k),
+                          static_cast<GLint>(GL_R8),
+                          static_cast<GLsizei>(l.width[k]),
+                          static_cast<GLsizei>(l.height[k]),
+                          0,
+                          GL_RED,
+                          GL_UNSIGNED_BYTE,
+                          b.cloud_data + l.offset[k]);
+        }
+        // Trilinear, round the globe in longitude, and clamped at the poles.
+        gl.GenSamplers(1, &b.cloud_sampler);
+        gl.SamplerParameteri(b.cloud_sampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        gl.SamplerParameteri(b.cloud_sampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        gl.SamplerParameteri(b.cloud_sampler, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        gl.SamplerParameteri(b.cloud_sampler, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    }
+    gl.BindTexture(GL_TEXTURE_2D, b.cloud_texture);
+    gl.BindSampler(clouds_unit, b.cloud_sampler);
 }
 
 // Uploads the stars into a buffer and vertex array, once after each set or reset.
@@ -859,7 +940,7 @@ void draw_stars(vgl_gl_backend& b,
     std::array<GLint, 4> viewport{};
     gl.GetIntegerv(GL_VIEWPORT, viewport.data());
     gl.UseProgram(b.stars_program);
-    set_atmosphere(gl, b.u_stars_atmosphere, atmosphere, a);
+    set_atmosphere(gl, b.u_stars_atmosphere, atmosphere, a, {});
     gl.UniformMatrix3fv(b.u_stars_celestial,
                         1,
                         GL_FALSE,
@@ -883,7 +964,10 @@ void draw_stars(vgl_gl_backend& b,
 
 // The sky, after the terrain: one triangle at the far depth, where nothing was drawn, blended
 // over what the framebuffer holds by the atmosphere's transmittance.
-void draw_sky(const vgl_gl_backend& b, const vgl_dmat4& projection, const atmosphere_view& a)
+void draw_sky(const vgl_gl_backend& b,
+              const vgl_dmat4& projection,
+              const atmosphere_view& a,
+              const cloud_view& c)
 {
     vgl_dmat4 inverse{};
     if (!vgl::backends::invert(projection, inverse))
@@ -892,7 +976,7 @@ void draw_sky(const vgl_gl_backend& b, const vgl_dmat4& projection, const atmosp
     }
     const functions& gl = b.gl;
     gl.UseProgram(b.sky_program);
-    set_atmosphere(gl, b.u_sky_atmosphere, true, a);
+    set_atmosphere(gl, b.u_sky_atmosphere, true, a, c);
     gl.UniformMatrix4fv(b.u_sky_inverse_projection, 1, GL_FALSE, to_float(inverse).data());
     // The far plane is at depth 0 for reversed-Z, with clip control's [0, 1] depth, and at 1
     // otherwise, in OpenGL's [-1, 1]; the logarithmic convention keeps the far plane at 1.
@@ -932,7 +1016,19 @@ void draw_items(vgl_gl_backend& b,
         air = vgl::backends::atmosphere_for(*view, sun);
         sun = vgl::backends::atmosphere_sun(*view, sun);
     }
-    set_atmosphere(gl, b.u_terrain_atmosphere, atmosphere, air);
+    // The clouds, with the atmosphere, on their own texture unit.
+    cloud_view clouds;
+    if (atmosphere && info.clouds != VGL_FALSE && b.cloud_data != nullptr)
+    {
+        bind_clouds(b);
+        clouds.drawn = true;
+        const double height =
+            info.cloud_height > 0.0 ? info.cloud_height : vgl::backends::default_cloud_height;
+        clouds.height_km = static_cast<float>(height * 1e-3);
+        clouds.texel_km =
+            static_cast<float>(vgl::backends::cloud_texel_km(b.cloud_levels.width[0]));
+    }
+    set_atmosphere(gl, b.u_terrain_atmosphere, atmosphere, air, clouds);
 
     // The sun in camera space: only the view's rotation applies to a direction.
     std::array<double, 3> light{};
@@ -995,8 +1091,9 @@ void draw_items(vgl_gl_backend& b,
     // The samples' texture has its own nearest filtering.
     gl.Uniform1i(b.u_samples, static_cast<GLint>(samples_unit));
     gl.BindSampler(samples_unit, 0);
+    // The layers' and samples' units start empty; the clouds' keeps what bind_clouds bound.
     std::array<GLuint, texture_units> bound = {};
-    for (std::uint32_t k = 0; k < texture_units; ++k)
+    for (std::uint32_t k = 0; k < clouds_unit; ++k)
     {
         gl.ActiveTexture(GL_TEXTURE0 + k);
         gl.BindTexture(GL_TEXTURE_2D, 0);
@@ -1093,7 +1190,7 @@ void draw_items(vgl_gl_backend& b,
     }
     if (atmosphere)
     {
-        draw_sky(b, projection, air);
+        draw_sky(b, projection, air, clouds);
     }
 }
 
@@ -1179,6 +1276,7 @@ extern "C" VGL_GL_API vgl_result vgl_gl_backend_destroy(vgl_gl_backend* backend)
     }
     stop(*backend, true);
     free_stars(*backend);
+    free_clouds(*backend);
     // A later consumer of the context must receive every resource again.
     static_cast<void>(vgl_context_resources_reset(backend->context));
     const memory mem = backend->mem;
@@ -1231,6 +1329,52 @@ extern "C" VGL_GL_API vgl_result vgl_gl_backend_stars_set(vgl_gl_backend* backen
     return VGL_RESULT_SUCCESS;
 }
 
+extern "C" VGL_GL_API vgl_result vgl_gl_backend_clouds_set(vgl_gl_backend* backend,
+                                                           const std::uint8_t* coverage,
+                                                           std::uint32_t width,
+                                                           std::uint32_t height)
+{
+    if (backend == nullptr)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    vgl_gl_backend& b = *backend;
+    const bool removal = coverage == nullptr && width == 0 && height == 0;
+    if (!removal && (coverage == nullptr || !vgl::backends::cloud_size_is_valid(width, height)))
+    {
+        log(b,
+            VGL_LOG_LEVEL_ERROR,
+            "vgl_gl_backend_clouds_set: the coverage is null, or %ux%u is outside 2x2 to "
+            "16384x8192",
+            static_cast<unsigned>(width),
+            static_cast<unsigned>(height));
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    std::uint8_t* data = nullptr;
+    vgl::backends::cloud_levels levels;
+    if (!removal)
+    {
+        levels = vgl::backends::cloud_levels_of(width, height);
+        data = static_cast<std::uint8_t*>(b.mem.allocate(levels.bytes, 1));
+        if (data == nullptr)
+        {
+            return VGL_RESULT_OUT_OF_MEMORY;
+        }
+        vgl::backends::cloud_levels_build(coverage, levels, data);
+    }
+    free_clouds(b);
+    if (b.cloud_texture != 0)
+    {
+        b.gl.DeleteTextures(1, &b.cloud_texture);
+        b.gl.DeleteSamplers(1, &b.cloud_sampler);
+        b.cloud_texture = 0;
+        b.cloud_sampler = 0;
+    }
+    b.cloud_data = data;
+    b.cloud_levels = levels;
+    return VGL_RESULT_SUCCESS;
+}
+
 extern "C" VGL_GL_API vgl_result vgl_gl_backend_reset(vgl_gl_backend* backend)
 {
     if (backend == nullptr)
@@ -1279,6 +1423,7 @@ extern "C" VGL_GL_API vgl_result vgl_gl_backend_draw(vgl_gl_backend* backend,
         VGL_GL_DEBUG_FLAG_CONTOURS;
     if ((info.debug_flags & ~known_flags) != 0 || info.reserved != 0 || info.reserved2 != 0 ||
         info.reserved3 != 0 || info.reserved4 != 0 || !std::isfinite(info.sidereal_angle) ||
+        info.reserved5 != 0 || !std::isfinite(info.cloud_height) || info.cloud_height < 0.0 ||
         !std::isfinite(info.contour_interval) || info.contour_interval < 0.0)
     {
         log(b,

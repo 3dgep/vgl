@@ -28,7 +28,7 @@
  * State (NFR-08). The backend saves the following state when it draws, and restores it before
  * returning: the current program, the vertex array binding, the GL_ARRAY_BUFFER,
  * GL_COPY_WRITE_BUFFER and GL_PIXEL_UNPACK_BUFFER bindings, the active texture unit, the 2D
- * texture and sampler bindings of units 0 to 4, the unpack alignment, row length and skips,
+ * texture and sampler bindings of units 0 to 5, the unpack alignment, row length and skips,
  * GL_DEPTH_TEST, the depth function and write mask, GL_CULL_FACE, the cull face mode, the front
  * face, GL_BLEND, the blend functions and equations, primitive restart (where it exists) and,
  * for the reversed-Z convention, the clip control depth mode. It draws with the
@@ -189,6 +189,13 @@ typedef struct vgl_gl_draw_info
     /* The Earth rotation angle in radians (vgl_earth_rotation_angle_get), which turns the
      * stars' celestial frame into ECEF. */
     double sidereal_angle;
+    /* VGL_TRUE draws, with the atmosphere, the clouds set with vgl_gl_backend_clouds_set: a
+     * shell at cloud_height above the ellipsoid, over the terrain and in the sky, lit by the
+     * sun, which they shade the terrain from. */
+    vgl_bool clouds;
+    uint32_t reserved5;
+    /* The cloud shell's height above the ellipsoid, in metres. 0 selects 6,000. */
+    double cloud_height;
 } vgl_gl_draw_info;
 
 /* Debug views of vgl_gl_draw_info.debug_flags, for inspecting level of detail and loading. */
@@ -263,6 +270,33 @@ VGL_GL_API vgl_result vgl_gl_backend_draw(vgl_gl_backend* backend, const vgl_gl_
 VGL_GL_API vgl_result vgl_gl_backend_stars_set(vgl_gl_backend* backend,
                                                const vgl_star* stars,
                                                uint32_t star_count);
+
+/**
+ * Sets the clouds the backend draws when vgl_gl_draw_info.clouds asks for them, replacing those
+ * set before: their coverage of the whole globe, one byte per pixel from 0 (clear) to 255
+ * (overcast), row 0 at 90 N and column 0 at 180 W, each pixel a step of latitude and
+ * longitude, as in NASA's cloud composites. The image is copied, with its mip levels, and kept
+ * to be drawn again after vgl_gl_backend_reset.
+ *
+ * @param backend   The backend.
+ * @param coverage  The image, width x height bytes, rows tightly packed; or null with width and
+ *                  height 0 to remove the clouds.
+ * @param width     Pixels from west to east, from 2 to 16,384.
+ * @param height    Pixels from north to south, from 2 to 8,192.
+ *
+ * @retval VGL_RESULT_SUCCESS           The clouds were set.
+ * @retval VGL_RESULT_INVALID_ARGUMENT  backend is null, or the image is null or of a size
+ *                                      outside the limits, but for a removal.
+ * @retval VGL_RESULT_OUT_OF_MEMORY     The copy could not be allocated; the clouds set before
+ *                                      stay.
+ *
+ * @par Thread safety
+ * Render thread, with the backend's OpenGL context (or one sharing its objects) current.
+ */
+VGL_GL_API vgl_result vgl_gl_backend_clouds_set(vgl_gl_backend* backend,
+                                                const uint8_t* coverage,
+                                                uint32_t width,
+                                                uint32_t height);
 
 /**
  * Recovers from a lost OpenGL context, for example after an Android app returns from the

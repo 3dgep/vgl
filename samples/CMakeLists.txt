@@ -25,6 +25,14 @@ target_include_directories(vgl_sample_common PUBLIC common)
 target_link_libraries(vgl_sample_common PUBLIC vgl::vgl)
 vgl_target_options(vgl_sample_common)
 
+# The clouds' image, read with a private copy of stb_image, third-party code compiled without
+# vgl's warning flags.
+add_library(vgl_sample_clouds STATIC common/clouds.cpp common/clouds.hpp)
+target_include_directories(vgl_sample_clouds PUBLIC common)
+target_include_directories(vgl_sample_clouds SYSTEM PRIVATE "${VGL_STB_INCLUDE_DIR}")
+target_compile_features(vgl_sample_clouds PUBLIC cxx_std_20)
+target_link_libraries(vgl_sample_common PUBLIC vgl_sample_clouds)
+
 add_subdirectory(headless)
 
 # Dear ImGui draws the interactive samples' statistics and debug controls, in an overlay they

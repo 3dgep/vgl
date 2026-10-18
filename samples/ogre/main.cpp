@@ -20,6 +20,7 @@
 // doubles as a test of the backend. --save writes the images it checks as PPM files.
 
 #define GLFW_INCLUDE_NONE
+#include "clouds.hpp"
 #include "glfw_controls.hpp"
 #include "navigation.hpp"
 #include "overlay.hpp"
@@ -270,6 +271,7 @@ vgl::ogre::globe_settings settings_for(const scene& s)
     g.sea_surface = s.debug.sea;
     g.atmosphere = s.debug.atmosphere;
     g.stars = s.debug.stars;
+    g.clouds = s.debug.clouds;
     g.sidereal_angle =
         sample::sidereal_angle(s.debug.time_of_day, s.debug.day_of_year, s.debug.year);
     return g;
@@ -289,6 +291,11 @@ globe_create(vgl::context& ctx, ogre_app& a, vgl_depth_convention depth, vgl::og
         expect(globe->stars_set(stars.data(), static_cast<std::uint32_t>(stars.size())) ==
                    vgl::result::success,
                "the stars are set");
+        const sample::cloud_image& clouds = sample::sky_clouds();
+        expect(clouds.width == 0 ||
+                   globe->clouds_set(clouds.coverage.data(), clouds.width, clouds.height) ==
+                       vgl::result::success,
+               "the clouds are set");
     }
     return r;
 }
@@ -409,6 +416,7 @@ int run_check(const options& o, vgl::context& ctx)
                 scene air = s;
                 air.debug.atmosphere = true;
                 air.debug.stars = true;
+                air.debug.clouds = true;
                 globe->settings_set(settings_for(air));
                 a.root->renderOneFrame();
                 image sky = read_image(target);
@@ -546,6 +554,7 @@ int run_interactive(const options& o,
         scene s;
         s.debug.atmosphere = true;
         s.debug.stars = true;
+        s.debug.clouds = true;
         s.depth = o.depth;
         s.camera = places[0].camera;
         vgl::ogre::globe* globe = nullptr;
@@ -807,6 +816,14 @@ int main(int argc, char** argv)
         {
             std::fprintf(stderr, "--stars: %s\n", error.c_str());
             return 1;
+        }
+    }
+    {
+        // The clouds of the sample set, if it has them.
+        std::string error;
+        if (!sample::clouds_load(sample::data_directory(o.data, VGL_SAMPLE_DATA_DIR), error))
+        {
+            std::fprintf(stderr, "no clouds: %s\n", error.c_str());
         }
     }
 #if !defined(_WIN32)

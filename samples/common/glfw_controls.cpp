@@ -135,22 +135,27 @@ void on_key(GLFWwindow* window, int key, int /*scancode*/, int action, int /*mod
         break;
     case GLFW_KEY_N:
     case GLFW_KEY_R:
-        in.nav->stop();
-        in.camera->heading = 0.0; // North up.
+    {
+        camera to = *in.camera;
+        to.heading = 0.0; // North up.
         if (key == GLFW_KEY_R)
         {
-            in.camera->pitch = 90.0; // And looking straight down.
+            to.pitch = 90.0; // And looking straight down.
         }
+        in.nav->fly_to(*in.camera, to);
         break;
+    }
     case GLFW_KEY_U:
-        in.nav->stop();
-        in.camera->pitch = 90.0;
+    {
+        camera to = *in.camera;
+        to.pitch = 90.0;
+        in.nav->fly_to(*in.camera, to);
         break;
+    }
     default:
         if (key >= GLFW_KEY_1 && key < GLFW_KEY_1 + static_cast<int>(places.size()))
         {
-            in.nav->stop();
-            *in.camera = places[static_cast<std::size_t>(key - GLFW_KEY_1)].camera;
+            in.nav->fly_to(*in.camera, places[static_cast<std::size_t>(key - GLFW_KEY_1)].camera);
         }
         break;
     }

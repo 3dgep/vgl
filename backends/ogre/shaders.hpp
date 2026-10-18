@@ -91,6 +91,8 @@ SAMPLER2D(u_layer0, 1);
 SAMPLER2D(u_layer1, 2);
 SAMPLER2D(u_layer2, 3);
 SAMPLER2D(u_layer3, 4);
+// The clouds' coverage (atmosphere.glsl), round the globe in longitude.
+SAMPLER2D(u_clouds, 5);
 
 OGRE_UNIFORMS(
     uniform mat4 u_world_view;
@@ -112,6 +114,7 @@ OGRE_UNIFORMS(
     uniform vec4 u_to_planet2;
     uniform vec4 u_camera;
     uniform vec4 u_sun_planet;
+    uniform vec4 u_cloud; // Drawn, the shell's height and the image's texels at the equator in kilometres.
 )
 
 vec3 to_planet(vec3 v)
@@ -292,6 +295,14 @@ MAIN_DECLARATION
         float mu_s = dot(p, u_sun_planet.xyz) / r;
         sunlight = vgl_sun_transmittance(r, mu_s) / vgl_zenith_transmittance;
         ambient = vgl_daylight(mu_s);
+        if (u_cloud.x > 0.5)
+        {
+            float ts = vgl_cloud_shadow_distance(p, u_sun_planet.xyz, u_cloud.y);
+            vec3 crossing = p + u_sun_planet.xyz * max(ts, 0.0);
+            float lod = vgl_cloud_lod(length(fwidth(crossing)), u_cloud.z);
+            float cover = vgl_cloud_alpha(texture2DLod(u_clouds, vgl_cloud_uv(crossing), lod).r);
+            sunlight *= ts > 0.0 ? 1.0 - 0.75 * cover : 1.0;
+        }
     }
     vec3 lit = albedo * (0.3 * ambient + 0.7 * diffuse * sunlight);
     if (sea && height < 0.0 && v_skirt == 0.0)
@@ -308,9 +319,26 @@ MAIN_DECLARATION
         float distance = length(offset);
         vec3 inscatter;
         vec3 transmittance;
-        vgl_atmosphere(u_camera.xyz, u_camera.w, offset / max(distance, 1e-9), distance,
-                       u_sun_planet.xyz, 8, inscatter, transmittance);
+        vec3 direction = offset / max(distance, 1e-9);
+        vgl_atmosphere(u_camera.xyz, u_camera.w, direction, distance, u_sun_planet.xyz, 8,
+                       inscatter, transmittance);
         lit = lit * transmittance + vgl_expose(inscatter * vgl_sky_brightness);
+        if (u_cloud.x > 0.5)
+        {
+            float tc = vgl_cloud_distance(u_camera.xyz, u_camera.w, direction, u_cloud.y, distance);
+            vec3 hit = u_camera.xyz + direction * max(tc, 0.0);
+            float lod = vgl_cloud_lod(length(fwidth(hit)), u_cloud.z);
+            float cover = vgl_cloud_alpha(texture2DLod(u_clouds, vgl_cloud_uv(hit), lod).r);
+            if (tc > 0.0 && cover > 0.0)
+            {
+                vec3 near_inscatter;
+                vec3 near_transmittance;
+                vgl_atmosphere(u_camera.xyz, u_camera.w, direction, tc, u_sun_planet.xyz, 6,
+                               near_inscatter, near_transmittance);
+                vec3 cloud = vgl_cloud_light(hit, u_sun_planet.xyz, cover, u_camera.w < u_cloud.y);
+                lit = mix(lit, cloud * near_transmittance + vgl_expose(near_inscatter * vgl_sky_brightness), cover);
+            }
+        }
     }
     vec4 colour = vec4(lit, 1.0);
     if ((debug & 1) != 0 && cells > 0.0)
@@ -359,6 +387,8 @@ inline constexpr const char* sky_fragment_shader = R"shader(
 #include <OgreUnifiedShader.h>
 //@vgl_atmosphere
 
+SAMPLER2D(u_clouds, 0);
+
 OGRE_UNIFORMS(
     uniform mat4 u_inverse_projection; // Ogre's, flipped for render textures as it draws them.
     uniform vec4 u_to_planet0;
@@ -366,6 +396,7 @@ OGRE_UNIFORMS(
     uniform vec4 u_to_planet2;
     uniform vec4 u_camera;
     uniform vec4 u_sun_planet;
+    uniform vec4 u_cloud;
 )
 
 vec3 to_planet(vec3 v)
@@ -387,7 +418,25 @@ MAIN_DECLARATION
                    transmittance);
     float disc = smoothstep(0.999955, 0.999975, dot(direction, u_sun_planet.xyz));
     vec3 colour = vgl_expose(inscatter * vgl_sky_brightness) + transmittance * disc;
-    gl_FragColor = vec4(colour, (transmittance.r + transmittance.g + transmittance.b) / 3.0);
+    float clear = (transmittance.r + transmittance.g + transmittance.b) / 3.0;
+    if (u_cloud.x > 0.5)
+    {
+        float tc = vgl_cloud_distance(u_camera.xyz, u_camera.w, direction, u_cloud.y, 1.0e9);
+        vec3 hit = u_camera.xyz + direction * max(tc, 0.0);
+        float lod = vgl_cloud_lod(length(fwidth(hit)), u_cloud.z);
+        float cover = vgl_cloud_alpha(texture2DLod(u_clouds, vgl_cloud_uv(hit), lod).r);
+        if (tc > 0.0 && cover > 0.0)
+        {
+            vec3 near_inscatter;
+            vec3 near_transmittance;
+            vgl_atmosphere(u_camera.xyz, u_camera.w, direction, tc, u_sun_planet.xyz, 8,
+                           near_inscatter, near_transmittance);
+            vec3 cloud = vgl_cloud_light(hit, u_sun_planet.xyz, cover, u_camera.w < u_cloud.y);
+            colour = mix(colour, cloud * near_transmittance + vgl_expose(near_inscatter * vgl_sky_brightness), cover);
+            clear *= 1.0 - cover;
+        }
+    }
+    gl_FragColor = vec4(colour, clear);
 }
 )shader";
 

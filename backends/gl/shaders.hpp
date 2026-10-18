@@ -103,6 +103,11 @@ uniform vec3 u_camera_km;
 uniform float u_camera_height;
 uniform vec3 u_sun_planet;
 
+// The clouds (atmosphere.glsl), with the atmosphere: their coverage, and whether they are drawn,
+// the shell's height and the image's texels at the equator, in kilometres.
+uniform sampler2D u_clouds;
+uniform vec3 u_cloud;
+
 // Up to four imagery layers, bottom first (docs/render-interface.md, section 5). Separate
 // samplers rather than an array: GLSL ES 3.00 indexes sampler arrays by constants only.
 uniform int u_layer_count;
@@ -313,6 +318,15 @@ void main()
         float mu_s = dot(p, u_sun_planet) / r;
         sunlight = vgl_sun_transmittance(r, mu_s) / vgl_zenith_transmittance;
         ambient = vgl_daylight(mu_s);
+        if (u_cloud.x > 0.5)
+        {
+            // The clouds' shadow, where the sunlight crosses the shell.
+            float t = vgl_cloud_shadow_distance(p, u_sun_planet, u_cloud.y);
+            vec3 crossing = p + u_sun_planet * max(t, 0.0);
+            float lod = vgl_cloud_lod(length(fwidth(crossing)), u_cloud.z);
+            float cover = vgl_cloud_alpha(textureLod(u_clouds, vgl_cloud_uv(crossing), lod).r);
+            sunlight *= t > 0.0 ? 1.0 - 0.75 * cover : 1.0;
+        }
     }
     vec3 lit = albedo * (0.3 * ambient + 0.7 * diffuse * sunlight);
     // Skirts take the colour of the edge above them, as without the sea, so that they do not
@@ -334,9 +348,29 @@ void main()
         float distance = length(offset);
         vec3 inscatter;
         vec3 transmittance;
-        vgl_atmosphere(u_camera_km, u_camera_height, offset / max(distance, 1e-9), distance,
-                       u_sun_planet, 8, inscatter, transmittance);
+        vec3 direction = offset / max(distance, 1e-9);
+        vgl_atmosphere(u_camera_km, u_camera_height, direction, distance, u_sun_planet, 8,
+                       inscatter, transmittance);
         lit = lit * transmittance + vgl_expose(inscatter * vgl_sky_brightness);
+        if (u_cloud.x > 0.5)
+        {
+            // The clouds between the camera and the terrain, with the haze before them.
+            float t = vgl_cloud_distance(u_camera_km, u_camera_height, direction, u_cloud.y,
+                                         distance);
+            vec3 hit = u_camera_km + direction * max(t, 0.0);
+            float lod = vgl_cloud_lod(length(fwidth(hit)), u_cloud.z);
+            float cover = vgl_cloud_alpha(textureLod(u_clouds, vgl_cloud_uv(hit), lod).r);
+            if (t > 0.0 && cover > 0.0)
+            {
+                vec3 near_inscatter;
+                vec3 near_transmittance;
+                vgl_atmosphere(u_camera_km, u_camera_height, direction, t, u_sun_planet, 6,
+                               near_inscatter, near_transmittance);
+                vec3 cloud = vgl_cloud_light(hit, u_sun_planet, cover, u_camera_height < u_cloud.y);
+                lit = mix(lit, cloud * near_transmittance + vgl_expose(near_inscatter * vgl_sky_brightness),
+                          cover);
+            }
+        }
     }
     o_color = vec4(lit, 1.0);
     if ((u_debug & 1) != 0 && u_cells > 0.0)
@@ -437,6 +471,8 @@ uniform vec3 u_camera_km;
 uniform float u_camera_height;
 uniform vec3 u_sun_planet;
 uniform float u_mid_depth; // A depth between the near and far planes.
+uniform sampler2D u_clouds;
+uniform vec3 u_cloud;
 
 layout(location = 0) out vec4 o_color;
 
@@ -452,8 +488,28 @@ void main()
     // The sun's disc, half a degree across, softened over a pixel or so.
     float disc = smoothstep(0.999955, 0.999975, dot(direction, u_sun_planet));
     vec3 color = vgl_expose(inscatter * vgl_sky_brightness) + transmittance * disc;
+    float clear = (transmittance.r + transmittance.g + transmittance.b) / 3.0;
+    if (u_cloud.x > 0.5)
+    {
+        // The clouds overhead, or along the limb from space, which hide the sky and the stars.
+        float t = vgl_cloud_distance(u_camera_km, u_camera_height, direction, u_cloud.y, 1.0e9);
+        vec3 hit = u_camera_km + direction * max(t, 0.0);
+        float lod = vgl_cloud_lod(length(fwidth(hit)), u_cloud.z);
+        float cover = vgl_cloud_alpha(textureLod(u_clouds, vgl_cloud_uv(hit), lod).r);
+        if (t > 0.0 && cover > 0.0)
+        {
+            vec3 near_inscatter;
+            vec3 near_transmittance;
+            vgl_atmosphere(u_camera_km, u_camera_height, direction, t, u_sun_planet, 8,
+                           near_inscatter, near_transmittance);
+            vec3 cloud = vgl_cloud_light(hit, u_sun_planet, cover, u_camera_height < u_cloud.y);
+            color = mix(color, cloud * near_transmittance + vgl_expose(near_inscatter * vgl_sky_brightness),
+                        cover);
+            clear *= 1.0 - cover;
+        }
+    }
     // Over what the framebuffer holds, which shows through as far as the sky is clear.
-    o_color = vec4(color, (transmittance.r + transmittance.g + transmittance.b) / 3.0);
+    o_color = vec4(color, clear);
 }
 )glsl";
 

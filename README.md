@@ -96,12 +96,12 @@ an Ogre scene (`--rs gl` or `--rs d3d11`), and `vgl-c`, the OpenGL sample's core
 disk about its centre), scroll or double-click to
 zoom to the cursor, drag with Shift or the middle button to orbit and tilt, with Ctrl to look
 around, and with the right button to zoom; arrows or WASD move, Shift with them orbits, Page
-Up and Page Down zoom, and N, U and R turn north up, look straight down, or both. 1 to 7 jump
-to places.
+Up and Page Down zoom, and N, U and R turn north up, look straight down, or both. 1 to 7 fly
+to places. Those keys move the camera smoothly, on an s-curve, rising over long flights.
 Its panel (F1) shows the runtime statistics and the
 debug views: wireframe (F2), colours by tile level (F3), the imagery source (F4), a frozen
 selection (F5) to inspect level of detail and culling from outside, the heightmap (F6),
-contour lines (F7), a sea surface (F8), the atmosphere (F9) and generated stars, with the sun
+contour lines (F7), a sea surface (F8), the atmosphere (F9) with clouds, and generated stars, with the sun
 and the sky set by the time of day, the day of the year and the year, or by the current time. `--stars <file>` draws the real sky
 instead, from a copy of the Yale Bright Star Catalogue that you download yourself, since its
 licence keeps it out of the repository: CDS catalogue V/50's

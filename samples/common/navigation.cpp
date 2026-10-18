@@ -811,6 +811,7 @@ void globe_navigation::start_throw(const camera& c)
 
 void globe_navigation::scroll(double steps, double x, double y, const camera& c)
 {
+    flying_ = false;
     settle();
     zoom_point_ = grab_anchor(c, x, y);
     focus_ = zoom_point_;
@@ -821,6 +822,7 @@ void globe_navigation::scroll(double steps, double x, double y, const camera& c)
 
 void globe_navigation::double_click(double x, double y, const camera& c)
 {
+    flying_ = false;
     settle();
     vgl_dvec3 p{};
     if (grab(c, x, y, p))
@@ -835,6 +837,7 @@ void globe_navigation::double_click(double x, double y, const camera& c)
 
 void globe_navigation::stop()
 {
+    flying_ = false;
     released_ = false;
     throwing_ = false;
     throw_rate_ = 0.0;
@@ -844,11 +847,91 @@ void globe_navigation::stop()
     settle();
 }
 
+// A camera's place as a direction from the latitude and longitude it holds, so that a flight
+// along the great circle between two places ends exactly at the second.
+vgl_dvec3 place_direction(const camera& c)
+{
+    const double lat = vgl::degrees_to_radians(c.latitude);
+    const double lon = vgl::degrees_to_radians(c.longitude);
+    return {std::cos(lat) * std::cos(lon), std::cos(lat) * std::sin(lon), std::sin(lat)};
+}
+
+void globe_navigation::fly_to(const camera& from, const camera& to)
+{
+    stop();
+    fly_from_ = from;
+    fly_target_ = to;
+    fly_time_ = 0.0;
+    // The ground covered, along the great circle, and the turn of the view.
+    const double angle =
+        std::acos(std::clamp(dot(place_direction(from), place_direction(to)), -1.0, 1.0));
+    const double ground = angle * semi_major;
+    const double turn = std::max(std::fabs(std::remainder(to.heading - from.heading, 360.0)),
+                                 std::fabs(to.pitch - from.pitch));
+    const double zoom =
+        std::fabs(std::log(std::max(to.altitude, 1.0) / std::max(from.altitude, 1.0)));
+    // Over long distances the camera rises to about a third of the ground covered, so that the
+    // way shows; the rise is a factor on the altitude at the middle of the flight.
+    const double straight = std::sqrt(std::max(from.altitude, 1.0) * std::max(to.altitude, 1.0));
+    fly_rise_ = std::max(std::log(std::max(ground / 3.0, 1.0) / straight), 0.0);
+    // Half a second for a turn in place, and up to about four seconds, more for the farther
+    // flights and the deeper zooms.
+    fly_duration_ =
+        std::clamp(0.5 + 0.004 * turn + 0.35 * std::log1p(ground / 1000.0) + 0.15 * zoom, 0.5, 4.0);
+    flying_ = true;
+}
+
+camera globe_navigation::flight_at(double s) const
+{
+    camera c = fly_target_;
+    // Along the great circle between the two places.
+    const vgl_dvec3 a = place_direction(fly_from_);
+    const vgl_dvec3 b = place_direction(fly_target_);
+    const double angle = std::acos(std::clamp(dot(a, b), -1.0, 1.0));
+    vgl_dvec3 p = b;
+    if (angle > 1e-12)
+    {
+        const double sa = std::sin(angle);
+        p = add(scale(a, std::sin((1.0 - s) * angle) / sa), scale(b, std::sin(s * angle) / sa));
+    }
+    c.latitude = vgl::radians_to_degrees(std::asin(std::clamp(p.z, -1.0, 1.0)));
+    c.longitude = vgl::radians_to_degrees(std::atan2(p.y, p.x));
+    // The altitude on a logarithmic scale, raised in an arc in the middle.
+    const double from_log = std::log(std::max(fly_from_.altitude, 1.0));
+    const double to_log = std::log(std::max(fly_target_.altitude, 1.0));
+    c.altitude = std::exp(from_log + (to_log - from_log) * s + fly_rise_ * 4.0 * s * (1.0 - s));
+    c.altitude = std::max(c.altitude, latest_ground_ + min_clearance);
+    // The heading the short way round, and the pitch.
+    c.heading =
+        fly_from_.heading + std::remainder(fly_target_.heading - fly_from_.heading, 360.0) * s;
+    c.heading = std::fmod(c.heading + 360.0, 360.0);
+    c.pitch = fly_from_.pitch + (fly_target_.pitch - fly_from_.pitch) * s;
+    return c;
+}
+
 void globe_navigation::update(double dt, const navigation_keys& keys, camera& c)
 {
     if (dt <= 0.0)
     {
         return;
+    }
+    if (flying_)
+    {
+        // Keys that move the camera take over from the flight.
+        if (keys.left || keys.right || keys.up || keys.down || keys.zoom_in || keys.zoom_out)
+        {
+            flying_ = false;
+        }
+        else
+        {
+            fly_time_ += dt;
+            const double u = std::min(fly_time_ / fly_duration_, 1.0);
+            // Smootherstep: at rest at both ends, without a jolt.
+            const double s = u * u * u * (u * (u * 6.0 - 15.0) + 10.0);
+            c = u < 1.0 ? flight_at(s) : fly_target_;
+            flying_ = u < 1.0;
+            return;
+        }
     }
     // The moves since the last update happened during the dt that has just passed. During a pan,
     // every update counts, moved or not, so that holding still slows it; after its release, only

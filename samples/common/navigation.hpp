@@ -82,8 +82,18 @@ public:
     // Advances throws, smooth zooms and keys by dt seconds.
     void update(double dt, const navigation_keys& keys, camera& c);
 
-    // Stops any movement, as when jumping to another place.
+    // Stops any movement, a flight among them.
     void stop();
+
+    // Flies the camera from where it is to another place and view, which the following updates
+    // move it along: on the great circle between the two, with the altitude eased on a
+    // logarithmic scale and raised in an arc over long distances, so that the globe shows on
+    // the way, and the heading turned the short way round, all on an s-curve that starts and
+    // ends at rest. The flight takes longer the farther it goes, from half a second for a turn
+    // in place to about four seconds across the globe. Any other movement stops it.
+    void fly_to(const camera& from, const camera& to);
+
+    [[nodiscard]] bool flying() const { return flying_; }
 
     [[nodiscard]] bool dragging() const { return mode_ != drag::none; }
 
@@ -176,6 +186,16 @@ private:
     double throw_stop_ = 0.0; // The rate at which it stops.
 
     bool keys_moving_ = false; // Keys moved the camera at the last update.
+    // A flight (fly_to): where it goes from and to, how long it takes and how far it has come,
+    // in seconds, and how much the altitude rises above the straight path, as a factor.
+    bool flying_ = false;
+    camera fly_from_;
+    camera fly_target_;
+    double fly_time_ = 0.0;
+    double fly_duration_ = 0.0;
+    double fly_rise_ = 0.0;
+    // Where the flight is at a share of its way, from 0 to 1 eased.
+    [[nodiscard]] camera flight_at(double s) const;
     // The speed of key movement forward and to the right, in view heights per second, and how
     // fast each changes.
     double walk_forward_ = 0.0;
