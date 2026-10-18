@@ -223,3 +223,108 @@ TEST_CASE(matrix_operations)
     CHECK_EQ(c.m[12], 10.0);
     CHECK(dmat4::from_c(c) == m);
 }
+
+namespace
+{
+
+// What a request made with vgl_io_request_create delivered.
+struct received
+{
+    int calls = 0;
+    vgl_result result = VGL_RESULT_SUCCESS;
+    std::string data;
+    bool null_data = false;
+
+    static void callback(void* user_data, vgl_result result, const void* data, std::size_t size)
+    {
+        auto* self = static_cast<received*>(user_data);
+        ++self->calls;
+        self->result = result;
+        self->null_data = data == nullptr;
+        self->data.assign(static_cast<const char*>(data), size);
+    }
+};
+
+// Counts live allocations.
+struct counting_allocator
+{
+    int live = 0;
+    vgl_allocator_interface table{VGL_ALLOCATOR_INTERFACE_VERSION, 0, this, &allocate, &deallocate};
+
+    static void* allocate(void* user_data, std::size_t size, std::size_t alignment)
+    {
+        ++static_cast<counting_allocator*>(user_data)->live;
+        return allocator().allocate(size, alignment);
+    }
+
+    static void deallocate(void* user_data, void* memory, std::size_t size, std::size_t alignment)
+    {
+        --static_cast<counting_allocator*>(user_data)->live;
+        allocator().deallocate(memory, size, alignment);
+    }
+};
+
+} // namespace
+
+TEST_CASE(io_request_create_calls_back_on_completion)
+{
+    counting_allocator memory;
+    received r;
+    vgl_io_request_create_info info{};
+    info.struct_size = sizeof(info);
+    info.complete = &received::callback;
+    info.user_data = &r;
+    info.allocator = &memory.table;
+
+    vgl_io_request* request = nullptr;
+    REQUIRE(vgl_io_request_create(&info, &request) == VGL_RESULT_SUCCESS);
+    CHECK_EQ(memory.live, 1);
+    const std::string bytes = "range of a shard";
+    CHECK_EQ(vgl_io_request_complete(request, VGL_RESULT_SUCCESS, bytes.data(), bytes.size()),
+             VGL_RESULT_SUCCESS);
+    CHECK_EQ(r.calls, 1);
+    CHECK_EQ(r.result, VGL_RESULT_SUCCESS);
+    CHECK(r.data == bytes);
+    CHECK_EQ(memory.live, 0); // Completing frees it.
+
+    // A failure delivers no data, whatever the completer passes.
+    REQUIRE(vgl_io_request_create(&info, &request) == VGL_RESULT_SUCCESS);
+    CHECK_EQ(vgl_io_request_complete(request, VGL_RESULT_NOT_FOUND, bytes.data(), bytes.size()),
+             VGL_RESULT_SUCCESS);
+    CHECK_EQ(r.calls, 2);
+    CHECK_EQ(r.result, VGL_RESULT_NOT_FOUND);
+    CHECK(r.null_data);
+    CHECK(r.data.empty());
+    CHECK_EQ(memory.live, 0);
+
+    // The C++ wrapper, on the C heap.
+    vgl::expected<vgl::io_request*> made = vgl::io_request_create(&received::callback, &r);
+    REQUIRE(made.has_value());
+    CHECK(vgl::io_request_complete(*made, vgl::result::success) == vgl::result::success);
+    CHECK_EQ(r.calls, 3);
+    CHECK(r.data.empty());
+}
+
+TEST_CASE(io_request_create_arguments)
+{
+    received r;
+    vgl_io_request_create_info info{};
+    info.struct_size = sizeof(info);
+    info.complete = &received::callback;
+    info.user_data = &r;
+    vgl_io_request* request = nullptr;
+    CHECK_EQ(vgl_io_request_create(&info, nullptr), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_io_request_create(nullptr, &request), VGL_RESULT_INVALID_ARGUMENT);
+    info.complete = nullptr;
+    CHECK_EQ(vgl_io_request_create(&info, &request), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK(request == nullptr);
+    info.complete = &received::callback;
+    info.struct_size = 4;
+    CHECK_EQ(vgl_io_request_create(&info, &request), VGL_RESULT_INVALID_ARGUMENT);
+    info.struct_size = sizeof(info);
+    vgl_allocator_interface future{
+        VGL_ALLOCATOR_INTERFACE_VERSION + 1, 0, nullptr, nullptr, nullptr};
+    info.allocator = &future;
+    CHECK_EQ(vgl_io_request_create(&info, &request), VGL_RESULT_VERSION_MISMATCH);
+    CHECK_EQ(r.calls, 0);
+}

@@ -119,6 +119,16 @@ The pack format has its own version number, independent of the library version.
   backend, pixel for pixel but for anti-aliased wireframe lines on Direct3D 11. CI runs it on
   Linux with Mesa on full runs.
 - The samples in a GLFW window share their controls (`samples/common/glfw_controls.hpp`).
+- Chainable I/O: `vgl_io_request_create` (`vgl::io_request_create`) makes a request whose
+  completion calls its creator back, so that an I/O interface can pass reads on to another and
+  handle what comes back.
+- Disk cache in the defaults module (`vgl_disk_cache`, `vgl::disk_cache`): wraps an I/O
+  interface, such as the HTTP reader, and keeps what it reads from web servers in a directory
+  within a budget, least recently used first out. Shards are read from the disk once stored;
+  manifests from the server first, and from the disk when it cannot be reached, so that packs
+  seen once load offline. Entries are written atomically with their key and a checksum, and
+  damaged ones are read again. Statistics count hits, misses, offline hits and evictions. The
+  C++ samples take `--cache <directory>`, and `--cache-budget <MiB>` (1024 by default).
 - WebAssembly build with Emscripten (preset `emscripten`, Emscripten 6.0.11), static and with
   threads: the core, the defaults module, the OpenGL backend on WebGL 2 and the samples. The
   tests and the headless check run on Node.js. The OpenGL sample becomes a page

@@ -6,8 +6,8 @@
 // targets; vgl draws into them. It does what the OpenGL sample does, with the same controls
 // (samples/gl/main.cpp lists them) and the same overlay.
 //
-//   vgl-d3d11 [--data <directory> | --pack <uri>...] [--depth logarithmic|reversed|conventional]
-//             [--warp] [--check] [--save <directory>]
+//   vgl-d3d11 [--data <directory> | --pack <uri>...] [--cache <directory> [--cache-budget <MiB>]]
+//             [--depth logarithmic|reversed|conventional] [--warp] [--check] [--save <directory>]
 //
 // It draws the sample set (samples/data/README.md) from the directory given with --data, or else
 // from the one in the environment variable VGL_SAMPLE_DATA, or else from the source tree's
@@ -466,6 +466,8 @@ struct options
 {
     std::string data;               // The sample set's directory, from --data.
     std::vector<std::string> packs; // From --pack.
+    std::string cache;              // From --cache.
+    std::uint64_t cache_budget = 0; // From --cache-budget, in bytes; 0 for the default.
     std::string stars;              // A star catalogue, from --stars.
     bool warp = false;
     bool check = false;
@@ -837,7 +839,8 @@ bool swap_target_create(const gpu& g, HWND window, swap_target& st)
 int run_interactive(const options& o,
                     const gpu& g,
                     vgl::context& ctx,
-                    const std::vector<sample::layer_control>& layers)
+                    const std::vector<sample::layer_control>& layers,
+                    const sample::pack_reader& reader)
 {
     const HINSTANCE instance = GetModuleHandleW(nullptr);
     WNDCLASSEXW wc{};
@@ -1021,6 +1024,7 @@ int run_interactive(const options& o,
             panel.focus_strength = focus_strength;
         }
         panel.credits = ctx.attribution_get();
+        panel.cache = reader.cache_info();
         // The frozen frustum reaches to about the frozen camera's horizon.
         const double reach = std::sqrt(s.frozen.altitude * (2.0 * 6371000.0 + s.frozen.altitude));
         ui.frame(ctx.statistics_get(),
@@ -1089,6 +1093,17 @@ bool parse(int argc, char** argv, options& o)
         {
             o.packs.emplace_back(argv[++i]);
         }
+        else if (std::strcmp(a, "--cache") == 0 && i + 1 < argc)
+        {
+            o.cache = argv[++i];
+        }
+        else if (std::strcmp(a, "--cache-budget") == 0 && i + 1 < argc)
+        {
+            if (!sample::parse_cache_budget(argv[++i], o.cache_budget))
+            {
+                return false;
+            }
+        }
         else if (std::strcmp(a, "--save") == 0 && i + 1 < argc)
         {
             o.save = argv[++i];
@@ -1130,9 +1145,12 @@ int main(int argc, char** argv)
     if (!parse(argc, argv, o))
     {
         std::fprintf(stderr,
-                     "usage: vgl-d3d11 [--data <directory> | --pack <uri>...] "
+                     "usage: vgl-d3d11 [--data <directory> | --pack <uri>...] [--cache <directory> "
+                     "[--cache-budget <MiB>]] "
                      "[--depth logarithmic|reversed|conventional] [--warp] [--check] "
                      "[--save <directory>] [--stars <catalog>]\n"
+                     "--cache keeps what comes from web servers in a directory, for next time "
+                     "and offline, within --cache-budget mebibytes (1024 by default). "
                      "--pack, repeated, replaces the sample set, and cannot be combined with "
                      "--data or --check. Without either, the sample set is read from "
                      "$%s, or else from %s. --stars draws the stars of the Yale Bright Star "
@@ -1176,7 +1194,8 @@ int main(int argc, char** argv)
         std::fprintf(stderr, "could not create the thread pool\n");
         return 1;
     }
-    vgl::expected<sample::pack_reader> reader = sample::pack_reader::create(*pool);
+    vgl::expected<sample::pack_reader> reader =
+        sample::pack_reader::create(*pool, o.cache, o.cache_budget);
     if (!reader)
     {
         std::fprintf(stderr, "could not create the file reader\n");
@@ -1219,8 +1238,9 @@ int main(int argc, char** argv)
     }
     std::printf("\n");
 
-    const int code = o.check ? run_check(o, g, *ctx)
-                             : run_interactive(o, g, *ctx, sample::layer_controls(sources, packs));
+    const int code =
+        o.check ? run_check(o, g, *ctx)
+                : run_interactive(o, g, *ctx, sample::layer_controls(sources, packs), *reader);
 
     // Leave in order: the backend went with its run; then packs and context, the reader and
     // the pool, and last the device.

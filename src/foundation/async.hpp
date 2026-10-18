@@ -121,12 +121,16 @@ struct io_target
 
 } // namespace vgl::internal
 
-// The public request handle (vgl/foundation.h).
+// The public request handle (vgl/foundation.h): a context's, completed through its core, or
+// one made with vgl_io_request_create, completed through its callback.
 struct vgl_io_request : vgl::internal::async_item
 {
     vgl_io_request() noexcept : async_item(kind::io) {}
 
     vgl::internal::async_core* core = nullptr;
+    vgl_io_complete_fn complete = nullptr; // Set for a request made with vgl_io_request_create.
+    void* complete_user_data = nullptr;
+    vgl::internal::allocator memory;
     std::uint64_t id = 0;
     vgl::internal::io_target target;
     vgl::internal::buffer<char> uri;

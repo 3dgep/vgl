@@ -5,6 +5,7 @@
 // and closes it again, so the reader keeps no file handles between reads.
 
 #include "common/host_memory.hpp"
+#include "defaults/files.hpp"
 
 #include <vgl/defaults.h>
 
@@ -42,84 +43,12 @@ const char* uri_path(const char* uri) noexcept
 
 #if defined(_WIN32)
 
-// Converts UTF-8 to UTF-16 for _wfopen. Returns false for invalid UTF-8.
-bool utf8_to_utf16(const char* in, const memory& m, wchar_t*& out, std::size_t& out_count) noexcept
-{
-    const std::size_t length = std::strlen(in);
-    out_count = length + 1; // UTF-16 never needs more units than UTF-8 has bytes.
-    out = static_cast<wchar_t*>(m.allocate(out_count * sizeof(wchar_t), alignof(wchar_t)));
-    if (out == nullptr)
-    {
-        return false;
-    }
-    std::size_t o = 0;
-    for (std::size_t i = 0; i < length;)
-    {
-        const auto b = static_cast<unsigned char>(in[i]);
-        std::uint32_t cp = 0;
-        std::size_t extra = 0;
-        if (b < 0x80)
-        {
-            cp = b;
-        }
-        else if ((b & 0xE0) == 0xC0)
-        {
-            cp = b & 0x1Fu;
-            extra = 1;
-        }
-        else if ((b & 0xF0) == 0xE0)
-        {
-            cp = b & 0x0Fu;
-            extra = 2;
-        }
-        else if ((b & 0xF8) == 0xF0)
-        {
-            cp = b & 0x07u;
-            extra = 3;
-        }
-        else
-        {
-            return false;
-        }
-        if (extra != 0 && i + extra >= length)
-        {
-            return false; // Truncated sequence.
-        }
-        for (std::size_t k = 1; k <= extra; ++k)
-        {
-            const auto c = static_cast<unsigned char>(in[i + k]);
-            if ((c & 0xC0) != 0x80)
-            {
-                return false;
-            }
-            cp = (cp << 6) | (c & 0x3Fu);
-        }
-        i += extra + 1;
-        if (cp > 0x10FFFF)
-        {
-            return false;
-        }
-        if (cp >= 0x10000)
-        {
-            cp -= 0x10000;
-            out[o++] = static_cast<wchar_t>(0xD800 + (cp >> 10));
-            out[o++] = static_cast<wchar_t>(0xDC00 + (cp & 0x3FF));
-        }
-        else
-        {
-            out[o++] = static_cast<wchar_t>(cp);
-        }
-    }
-    out[o] = L'\0';
-    return true;
-}
-
 std::FILE* open_file(const char* path, const memory& m, vgl_result& error) noexcept
 {
     wchar_t* wide = nullptr;
     std::size_t count = 0;
     std::FILE* f = nullptr;
-    if (!utf8_to_utf16(path, m, wide, count))
+    if (!vgl::defaults::utf8_to_utf16(path, m, wide, count))
     {
         error = wide == nullptr ? VGL_RESULT_OUT_OF_MEMORY : VGL_RESULT_IO_ERROR;
     }

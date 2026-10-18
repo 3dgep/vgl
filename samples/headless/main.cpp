@@ -7,7 +7,8 @@
 // reader. With --check, it also verifies what it sees and exits with 1 on a failure, so that
 // it doubles as a test.
 //
-//   vgl-headless [--data <directory> | --pack <uri>...] [--check]
+//   vgl-headless [--data <directory> | --pack <uri>...]
+//                [--cache <directory> [--cache-budget <MiB>]] [--check]
 //
 // It loads the sample set (samples/data/README.md) from the directory given with --data, or else
 // from the one in the environment variable VGL_SAMPLE_DATA, or else from the source tree's
@@ -138,6 +139,8 @@ int main(int argc, char** argv)
 {
     std::string data;
     std::vector<std::string> named;
+    std::string cache;              // From --cache.
+    std::uint64_t cache_budget = 0; // From --cache-budget, in bytes; 0 for the default.
     bool check = false;
     bool usage = false;
     for (int i = 1; i < argc; ++i)
@@ -154,6 +157,14 @@ int main(int argc, char** argv)
         {
             named.emplace_back(argv[++i]);
         }
+        else if (std::strcmp(argv[i], "--cache") == 0 && i + 1 < argc)
+        {
+            cache = argv[++i];
+        }
+        else if (std::strcmp(argv[i], "--cache-budget") == 0 && i + 1 < argc)
+        {
+            usage = usage || !sample::parse_cache_budget(argv[++i], cache_budget);
+        }
         else
         {
             usage = true;
@@ -163,7 +174,10 @@ int main(int argc, char** argv)
     if (usage || (!named.empty() && (!data.empty() || check)))
     {
         std::fprintf(stderr,
-                     "usage: vgl-headless [--data <directory> | --pack <uri>...] [--check]\n"
+                     "usage: vgl-headless [--data <directory> | --pack <uri>...] "
+                     "[--cache <directory> [--cache-budget <MiB>]] [--check]\n"
+                     "--cache keeps what comes from web servers in a directory, for next time "
+                     "and offline, within --cache-budget mebibytes (1024 by default). "
                      "--pack, repeated, replaces the sample set, and cannot be combined with "
                      "--data or --check. Without either, the sample set is read from $%s, or "
                      "else from %s.\n",
@@ -181,7 +195,8 @@ int main(int argc, char** argv)
             stderr, "could not create the thread pool: %s\n", vgl::result_name_get(pool.error()));
         return 1;
     }
-    vgl::expected<sample::pack_reader> reader = sample::pack_reader::create(*pool);
+    vgl::expected<sample::pack_reader> reader =
+        sample::pack_reader::create(*pool, cache, cache_budget);
     if (!reader)
     {
         std::fprintf(

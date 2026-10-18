@@ -54,7 +54,9 @@ target_link_libraries(vgl_test_context PRIVATE Threads::Threads)
 # can build packs with the library internals in shared builds too.
 if(TARGET vgl_defaults)
     vgl_add_internal_test(defaults defaults_test.cpp
+        "${PROJECT_SOURCE_DIR}/src/defaults/disk_cache.cpp"
         "${PROJECT_SOURCE_DIR}/src/defaults/file_reader.cpp"
+        "${PROJECT_SOURCE_DIR}/src/defaults/files.cpp"
         "${PROJECT_SOURCE_DIR}/src/defaults/thread_pool.cpp"
         WRITER)
     target_compile_definitions(vgl_test_defaults PRIVATE VGL_DEFAULTS_BUILDING)
@@ -70,7 +72,9 @@ if(TARGET vgl_defaults AND VGL_DEFAULTS_HTTP AND NOT EMSCRIPTEN)
         find_package(CURL REQUIRED)
     endif()
     vgl_add_internal_test(http http_test.cpp
+        "${PROJECT_SOURCE_DIR}/src/defaults/disk_cache.cpp"
         "${PROJECT_SOURCE_DIR}/src/defaults/file_reader.cpp"
+        "${PROJECT_SOURCE_DIR}/src/defaults/files.cpp"
         "${PROJECT_SOURCE_DIR}/src/defaults/http_reader.cpp"
         "${PROJECT_SOURCE_DIR}/src/defaults/thread_pool.cpp"
         WRITER)

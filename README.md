@@ -33,7 +33,8 @@ easily in a C code base as in a C++ one.
 - **Offline data pipeline.** A bundled baking tool turns free global datasets (Copernicus DEM,
   GEBCO) and your own imagery into sharded, range-readable tile packs. The runtime reads them
   from local disk or from any web server that supports HTTP range requests, such as an object
-  store or the reference server configuration for Caddy ([hosting guide](docs/hosting.md)).
+  store or the reference server configuration for Caddy ([hosting guide](docs/hosting.md)). A
+  disk cache keeps what was read, so that areas seen once load again offline.
 - **In the browser too.** An Emscripten build runs the OpenGL sample on WebGL 2, with threads,
   streaming packs from any server that allows it ([web sample](samples/gl/web/README.md)).
 - **Easy to extend.** Backends, data providers, decoders, task scheduling, I/O, allocators and

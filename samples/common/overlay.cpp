@@ -390,6 +390,32 @@ void overlay::panel(const vgl_context_statistics& s, const panel_info& info, deb
     {
         budget_bar("CPU", s.cpu_used, s.cpu_budget);
         budget_bar("GPU", s.gpu_used, s.gpu_budget);
+        if (info.cache.enabled)
+        {
+            budget_bar("Disk", info.cache.bytes, info.cache.budget);
+        }
+    }
+
+    if (info.cache.enabled &&
+        ImGui::CollapsingHeader("Disk cache", ImGuiTreeNodeFlags_DefaultOpen) &&
+        begin_table("cache"))
+    {
+        const disk_cache_info& dc = info.cache;
+        const std::uint64_t reads = dc.hits + dc.misses;
+        row("Entries",
+            "%llu (%.1f MiB)",
+            static_cast<unsigned long long>(dc.entries),
+            mib(dc.bytes));
+        row("Hits, misses",
+            "%llu, %llu",
+            static_cast<unsigned long long>(dc.hits),
+            static_cast<unsigned long long>(dc.misses));
+        row("Hit rate",
+            "%.0f %%",
+            reads != 0 ? 100.0 * static_cast<double>(dc.hits) / static_cast<double>(reads) : 0.0);
+        row("Offline manifests", "%llu", static_cast<unsigned long long>(dc.offline_hits));
+        row("Evictions", "%llu", static_cast<unsigned long long>(dc.evictions));
+        ImGui::EndTable();
     }
 
     if (ImGui::CollapsingHeader("Tiles and resources", ImGuiTreeNodeFlags_DefaultOpen) &&

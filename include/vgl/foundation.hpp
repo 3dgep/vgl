@@ -82,6 +82,28 @@ io_request_complete(io_request* request, result r, std::span<const std::byte> da
         vgl_io_request_complete(request, static_cast<vgl_result>(r), data.data(), data.size()));
 }
 
+using io_complete_fn = vgl_io_complete_fn;
+
+// Creates a request whose completion calls complete(user_data, result, data, size), for passing
+// a read on to another I/O interface. alloc may be null for the C heap.
+[[nodiscard]] inline expected<io_request*>
+io_request_create(io_complete_fn complete,
+                  void* user_data,
+                  const vgl_allocator_interface* alloc = nullptr) noexcept
+{
+    auto info = init<vgl_io_request_create_info>();
+    info.complete = complete;
+    info.user_data = user_data;
+    info.allocator = alloc;
+    io_request* request = nullptr;
+    const auto r = static_cast<result>(vgl_io_request_create(&info, &request));
+    if (failed(r))
+    {
+        return unexpected(r);
+    }
+    return request;
+}
+
 // Base class for host I/O. Derive from it and pass c_interface() as
 // vgl_context_create_info::io. The object must outlive every context that uses it.
 class io_interface

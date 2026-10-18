@@ -702,6 +702,94 @@ TEST_CASE(deferred_io_and_tasks)
     CHECK_EQ(memory.live.load(), 0);
 }
 
+namespace
+{
+
+// An I/O interface that passes every read on to another one through a request of its own, as a
+// cache does, and completes the context's request with what comes back.
+struct relaying_io
+{
+    const vgl_io_interface* inner = nullptr;
+    const vgl_allocator_interface* memory = nullptr;
+    int relayed = 0;
+    vgl_io_interface table{VGL_IO_INTERFACE_VERSION, 0, this, &read, nullptr, nullptr};
+
+    struct relay
+    {
+        relaying_io* self = nullptr;
+        vgl_io_request* outer = nullptr;
+        std::string uri;
+        vgl_io_read read{};
+    };
+
+    static void read(void* user_data, vgl_io_request* outer, const vgl_io_read* r)
+    {
+        auto* self = static_cast<relaying_io*>(user_data);
+        auto* link = new relay{self, outer, r->uri, {}};
+        link->read = {link->uri.c_str(), r->offset, r->size};
+        vgl_io_request_create_info info{};
+        info.struct_size = sizeof(info);
+        info.complete = &done;
+        info.user_data = link;
+        info.allocator = self->memory;
+        vgl_io_request* inner = nullptr;
+        if (vgl_io_request_create(&info, &inner) != VGL_RESULT_SUCCESS)
+        {
+            delete link;
+            static_cast<void>(vgl_io_request_complete(outer, VGL_RESULT_OUT_OF_MEMORY, nullptr, 0));
+            return;
+        }
+        ++self->relayed;
+        self->inner->read(self->inner->user_data, inner, &link->read);
+    }
+
+    static void done(void* user_data, vgl_result result, const void* data, std::size_t size)
+    {
+        auto* link = static_cast<relay*>(user_data);
+        static_cast<void>(vgl_io_request_complete(link->outer, result, data, size));
+        delete link;
+    }
+};
+
+} // namespace
+
+TEST_CASE(io_relays_through_requests_of_its_own)
+{
+    const test_pack pack = make_pack();
+    test_allocator memory;
+    {
+        memory_io server;
+        server.packs["mem://a"] = &pack;
+        relaying_io relay;
+        relay.inner = &server.table;
+        relay.memory = &memory.table;
+        vgl_context_create_info info = context_info();
+        info.allocator = &memory.table;
+        info.io = &relay.table;
+        vgl_context* ctx = nullptr;
+        REQUIRE(vgl_context_create(&info, &ctx) == VGL_RESULT_SUCCESS);
+        vgl_pack* p = add_pack(ctx, "mem://a");
+        vgl_pack* missing = add_pack(ctx, "mem://missing");
+        for (std::uint32_t x = 6; x < 10; ++x)
+        {
+            const tile_id t{3, x, 3};
+            const position at = inside(t);
+            double h = 0.0;
+            CHECK_EQ(query(ctx, at, h), VGL_RESULT_SUCCESS);
+            CHECK_NEAR(h, expected_height(pack, t, at.lat, at.lon), 1e-9);
+        }
+        vgl_result why = VGL_RESULT_SUCCESS;
+        CHECK_EQ(state_of(missing, &why), VGL_PACK_STATE_FAILED);
+        CHECK_EQ(why, VGL_RESULT_NOT_FOUND);
+        CHECK(relay.relayed > 0);
+        CHECK_EQ(static_cast<std::size_t>(relay.relayed), server.uris.size());
+        CHECK_EQ(vgl_pack_destroy(p), VGL_RESULT_SUCCESS);
+        CHECK_EQ(vgl_pack_destroy(missing), VGL_RESULT_SUCCESS);
+        CHECK_EQ(vgl_context_destroy(ctx), VGL_RESULT_SUCCESS);
+    }
+    CHECK_EQ(memory.live.load(), 0);
+}
+
 TEST_CASE(io_and_tasks_on_another_thread)
 {
     const test_pack pack = make_pack();

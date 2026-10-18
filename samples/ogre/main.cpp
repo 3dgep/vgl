@@ -7,8 +7,9 @@
 // Ogre draws into it. The panel is the samples' shared overlay, drawn by Ogre's Dear ImGui
 // overlay.
 //
-//   vgl-ogre [--data <directory> | --pack <uri>...] [--rs gl|d3d11]
-//            [--depth logarithmic|reversed|conventional] [--check] [--save <directory>]
+//   vgl-ogre [--data <directory> | --pack <uri>...] [--cache <directory> [--cache-budget <MiB>]]
+//            [--rs gl|d3d11] [--depth logarithmic|reversed|conventional] [--check]
+//            [--save <directory>]
 //
 // It draws the sample set (samples/data/README.md) from the directory given with --data, or else
 // from the one in the environment variable VGL_SAMPLE_DATA, or else from the source tree's
@@ -84,6 +85,8 @@ struct options
 {
     std::string data;               // The sample set's directory, from --data.
     std::vector<std::string> packs; // From --pack.
+    std::string cache;              // From --cache.
+    std::uint64_t cache_budget = 0; // From --cache-budget, in bytes; 0 for the default.
     std::string stars;              // A star catalogue, from --stars.
     std::string rs = "gl";          // Ogre's render system: gl or d3d11.
     bool check = false;
@@ -537,7 +540,8 @@ void presenter_resize(ogre_app& a, presenter& p, int width, int height)
 
 int run_interactive(const options& o,
                     vgl::context& ctx,
-                    const std::vector<sample::layer_control>& layers)
+                    const std::vector<sample::layer_control>& layers,
+                    const sample::pack_reader& reader)
 {
     GLFWwindow* window = window_create(1280, 720, true);
     if (window == nullptr)
@@ -684,6 +688,7 @@ int run_interactive(const options& o,
                 panel.focus_strength = focus_strength;
             }
             panel.credits = ctx.attribution_get();
+            panel.cache = reader.cache_info();
             const double reach =
                 std::sqrt(s.frozen.altitude * (2.0 * 6371000.0 + s.frozen.altitude));
             ui.frame(
@@ -758,6 +763,17 @@ bool parse(int argc, char** argv, options& o)
         {
             o.packs.emplace_back(argv[++i]);
         }
+        else if (std::strcmp(a, "--cache") == 0 && i + 1 < argc)
+        {
+            o.cache = argv[++i];
+        }
+        else if (std::strcmp(a, "--cache-budget") == 0 && i + 1 < argc)
+        {
+            if (!sample::parse_cache_budget(argv[++i], o.cache_budget))
+            {
+                return false;
+            }
+        }
         else if (std::strcmp(a, "--save") == 0 && i + 1 < argc)
         {
             o.save = argv[++i];
@@ -798,9 +814,13 @@ int main(int argc, char** argv)
     if (!parse(argc, argv, o))
     {
         std::fprintf(stderr,
-                     "usage: vgl-ogre [--data <directory> | --pack <uri>...] [--rs gl|d3d11] "
+                     "usage: vgl-ogre [--data <directory> | --pack <uri>...] [--cache <directory> "
+                     "[--cache-budget <MiB>]] "
+                     "[--rs gl|d3d11] "
                      "[--depth logarithmic|reversed|conventional] [--check] [--save <directory>] "
                      "[--stars <catalog>]\n"
+                     "--cache keeps what comes from web servers in a directory, for next time "
+                     "and offline, within --cache-budget mebibytes (1024 by default). "
                      "--pack, repeated, replaces the sample set, and cannot be combined with "
                      "--data or --check. Without either, the sample set is read from "
                      "$%s, or else from %s. --stars draws the stars of the Yale Bright Star "
@@ -840,7 +860,7 @@ int main(int argc, char** argv)
 
     vgl::expected<vgl::thread_pool> pool = vgl::thread_pool::create();
     vgl::expected<sample::pack_reader> reader =
-        pool ? sample::pack_reader::create(*pool)
+        pool ? sample::pack_reader::create(*pool, o.cache, o.cache_budget)
              : vgl::expected<sample::pack_reader>(vgl::unexpected(pool.error()));
     if (!pool || !reader)
     {
@@ -884,8 +904,9 @@ int main(int argc, char** argv)
     }
     std::printf("\n");
 
-    const int code = o.check ? run_check(o, *ctx)
-                             : run_interactive(o, *ctx, sample::layer_controls(sources, packs));
+    const int code =
+        o.check ? run_check(o, *ctx)
+                : run_interactive(o, *ctx, sample::layer_controls(sources, packs), *reader);
 
     packs.clear();
     ctx->reset();

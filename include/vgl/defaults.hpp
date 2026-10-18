@@ -9,6 +9,7 @@
 #include <vgl/base.hpp>
 #include <vgl/defaults.h>
 
+#include <cstdint>
 #include <utility>
 
 namespace vgl
@@ -190,6 +191,86 @@ public:
 
 private:
     vgl_http_reader* handle_ = nullptr;
+};
+
+// Owns a vgl_disk_cache.
+class disk_cache
+{
+public:
+    disk_cache() noexcept = default;
+    explicit disk_cache(vgl_disk_cache* handle) noexcept : handle_(handle) {}
+    disk_cache(const disk_cache&) = delete;
+    disk_cache& operator=(const disk_cache&) = delete;
+    disk_cache(disk_cache&& other) noexcept : handle_(other.release()) {}
+    disk_cache& operator=(disk_cache&& other) noexcept
+    {
+        if (this != &other)
+        {
+            reset(other.release());
+        }
+        return *this;
+    }
+    ~disk_cache() { reset(); }
+
+    [[nodiscard]] static expected<disk_cache>
+    create(const vgl_disk_cache_create_info& info) noexcept
+    {
+        vgl_disk_cache* handle = nullptr;
+        const auto r = static_cast<result>(vgl_disk_cache_create(&info, &handle));
+        if (failed(r))
+        {
+            return unexpected(r);
+        }
+        return disk_cache(handle);
+    }
+
+    // Caches what source reads in directory, within budget bytes (0 for 1 GiB), with disk work
+    // on pool if it is not null. source's object must outlive the cache and its reads.
+    [[nodiscard]] static expected<disk_cache> create(const char* directory,
+                                                     const vgl_io_interface& source,
+                                                     std::uint64_t budget = 0,
+                                                     thread_pool* pool = nullptr) noexcept
+    {
+        auto info = init<vgl_disk_cache_create_info>();
+        info.directory = directory;
+        info.source = &source;
+        info.budget = budget;
+        info.pool = pool != nullptr ? pool->get() : nullptr;
+        return create(info);
+    }
+
+    [[nodiscard]] vgl_disk_cache* get() const noexcept { return handle_; }
+    [[nodiscard]] explicit operator bool() const noexcept { return handle_ != nullptr; }
+
+    [[nodiscard]] vgl_disk_cache* release() noexcept { return std::exchange(handle_, nullptr); }
+
+    void reset(vgl_disk_cache* handle = nullptr) noexcept
+    {
+        static_cast<void>(vgl_disk_cache_destroy(std::exchange(handle_, handle)));
+    }
+
+    // The cache must be valid.
+    [[nodiscard]] vgl_io_interface io_interface_get() const noexcept
+    {
+        vgl_io_interface table{};
+        static_cast<void>(vgl_disk_cache_io_interface_get(handle_, &table));
+        return table;
+    }
+
+    [[nodiscard]] vgl_disk_cache_statistics statistics_get() const noexcept
+    {
+        auto s = init<vgl_disk_cache_statistics>();
+        static_cast<void>(vgl_disk_cache_statistics_get(handle_, &s));
+        return s;
+    }
+
+    [[nodiscard]] result clear() const noexcept
+    {
+        return static_cast<result>(vgl_disk_cache_clear(handle_));
+    }
+
+private:
+    vgl_disk_cache* handle_ = nullptr;
 };
 
 } // namespace vgl

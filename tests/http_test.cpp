@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <random>
 #include <string>
@@ -481,4 +482,57 @@ TEST_CASE(http_reader_cancels_reads_in_progress)
         CHECK_EQ(vgl_pack_destroy(p), VGL_RESULT_SUCCESS);
     }
     CHECK_EQ(memory.live.load(), 0);
+}
+
+TEST_CASE(http_reader_behind_a_disk_cache_works_offline)
+{
+    const test_pack pack = make_pack();
+    const std::filesystem::path root = std::filesystem::temp_directory_path() /
+                                       ("vgl-http-cache-" + std::to_string(std::random_device{}()));
+    const std::string cache_dir = root.generic_string();
+    std::string uri;
+    for (int run = 0; run < 2; ++run)
+    {
+        // The first run reads through a server; the second has none, at the same address.
+        std::unique_ptr<http_server> server;
+        if (run == 0)
+        {
+            server = std::make_unique<http_server>(server_mode::ranges);
+            uri = server->add(pack, "dem");
+        }
+        vgl_http_reader_create_info reader_info{};
+        reader_info.struct_size = sizeof(reader_info);
+        reader_info.timeout = 2.0;
+        vgl_http_reader* reader = nullptr;
+        REQUIRE(vgl_http_reader_create(&reader_info, &reader) == VGL_RESULT_SUCCESS);
+        vgl_io_interface http{};
+        REQUIRE(vgl_http_reader_io_interface_get(reader, &http) == VGL_RESULT_SUCCESS);
+        vgl_disk_cache_create_info cache_info{};
+        cache_info.struct_size = sizeof(cache_info);
+        cache_info.directory = cache_dir.c_str();
+        cache_info.source = &http;
+        vgl_disk_cache* cache = nullptr;
+        REQUIRE(vgl_disk_cache_create(&cache_info, &cache) == VGL_RESULT_SUCCESS);
+        vgl_io_interface io{};
+        REQUIRE(vgl_disk_cache_io_interface_get(cache, &io) == VGL_RESULT_SUCCESS);
+        vgl_context_create_info info{};
+        info.struct_size = sizeof(info);
+        info.io = &io;
+        vgl_context* ctx = nullptr;
+        REQUIRE(vgl_context_create(&info, &ctx) == VGL_RESULT_SUCCESS);
+        vgl_pack* p = add_pack(ctx, uri);
+        CHECK_EQ(wait_for(ctx, p), VGL_PACK_STATE_READY);
+        check_heights(ctx, pack);
+        vgl_disk_cache_statistics st{};
+        st.struct_size = sizeof(st);
+        CHECK_EQ(vgl_disk_cache_statistics_get(cache, &st), VGL_RESULT_SUCCESS);
+        CHECK_EQ(st.offline_hits, run == 0 ? 0u : 1u);
+        CHECK(run == 0 ? st.hits == 0 : st.hits > 0);
+        CHECK_EQ(vgl_pack_destroy(p), VGL_RESULT_SUCCESS);
+        CHECK_EQ(vgl_context_destroy(ctx), VGL_RESULT_SUCCESS);
+        CHECK_EQ(vgl_disk_cache_destroy(cache), VGL_RESULT_SUCCESS);
+        CHECK_EQ(vgl_http_reader_destroy(reader), VGL_RESULT_SUCCESS);
+    }
+    std::error_code ignored;
+    std::filesystem::remove_all(root, ignored);
 }

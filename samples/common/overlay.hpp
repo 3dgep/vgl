@@ -70,6 +70,19 @@ std::vector<layer_control> layer_controls(const std::vector<pack_source>& source
                                           const std::vector<vgl::pack>& packs);
 
 // What the panel shows besides the statistics.
+// A disk cache's statistics (vgl_disk_cache_statistics), for a sample that caches.
+struct disk_cache_info
+{
+    bool enabled = false;
+    std::uint64_t hits = 0;
+    std::uint64_t misses = 0;
+    std::uint64_t offline_hits = 0;
+    std::uint64_t entries = 0;
+    std::uint64_t bytes = 0;
+    std::uint64_t budget = 0;
+    std::uint64_t evictions = 0;
+};
+
 struct panel_info
 {
     const char* api = "";    // The graphics API and its version.
@@ -79,6 +92,7 @@ struct panel_info
     camera frozen;
     std::vector<const char*> credits;
     std::vector<layer_control> layers; // Changed through the panel.
+    disk_cache_info cache;             // Shown when enabled.
     // The point the mouse orbits or zooms around, in window coordinates, and how strongly to
     // show its reticle (0 for none).
     double focus_x = 0.0;

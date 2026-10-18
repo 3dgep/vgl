@@ -2,10 +2,10 @@
  * SPDX-License-Identifier: MIT
  * Copyright (c) 2026 Jeremiah van Oosten
  *
- * vgl defaults: a thread pool, a filesystem reader and an HTTP reader that implement the task
- * and I/O interfaces of vgl/foundation.h, so that the common case needs no callbacks (design
- * document, section 7.5). This module is optional and linked separately, as vgl_defaults:
- * unlike the core library, it creates threads, opens files and connects to servers.
+ * vgl defaults: a thread pool, a filesystem reader, an HTTP reader and a disk cache that
+ * implement the task and I/O interfaces of vgl/foundation.h, so that the common case needs no
+ * callbacks (design document, section 7.5). This module is optional and linked separately, as
+ * vgl_defaults: unlike the core library, it creates threads, opens files and connects to servers.
  *
  * A minimal host:
  *
@@ -290,6 +290,146 @@ VGL_DEFAULTS_API vgl_result vgl_http_reader_destroy(vgl_http_reader* reader);
  */
 VGL_DEFAULTS_API vgl_result vgl_http_reader_io_interface_get(vgl_http_reader* reader,
                                                              vgl_io_interface* out_interface);
+
+/* ---------------------------------------------------------------------------------------- */
+/* Disk cache                                                                               */
+/* ---------------------------------------------------------------------------------------- */
+
+/*
+ * Keeps what another I/O interface reads from web servers in a directory, so that areas seen
+ * once load again without the network, and offline (design document, section 8.6). It wraps
+ * the interface: put it between a context and an HTTP reader, or a host's own network layer.
+ * Only "http://" and "https://" URIs are cached; others go straight to the wrapped interface.
+ *
+ * Each read is an entry, by its URI and byte range. Shards are kept as they are, since their
+ * names hold a digest of their content (pack format, section 5.2): a cached shard is never
+ * stale, and is read from the disk. A manifest (pack.vglm) changes in place when a pack is
+ * rebaked, so it is always read from the server, and from the disk only when the server
+ * cannot be reached. When the entries exceed the budget, the least recently used go.
+ *
+ * Cancelling a read completes it with VGL_RESULT_CANCELLED at once; a download in progress
+ * goes on and is stored. Entries are written to a temporary name and renamed, so a cache
+ * left by a crash holds only whole entries, and one that does not match its key or checksum
+ * is read again. One process at a time may use a directory.
+ */
+typedef struct vgl_disk_cache vgl_disk_cache;
+
+typedef struct vgl_disk_cache_create_info
+{
+    uint32_t struct_size;
+    uint32_t reserved;
+    /* The directory, UTF-8; created if missing. Required. */
+    const char* directory;
+    VGL_POINTER_PADDING(directory_padding)
+    /* The interface whose reads are cached, copied. Required. It must stay valid until the
+     * cache is destroyed and its reads have completed. */
+    const vgl_io_interface* source;
+    VGL_POINTER_PADDING(source_padding)
+    /* Bytes the entries may take on disk. 0 selects 1 GiB. */
+    uint64_t budget;
+    /* Optional. Reads and writes the disk on the pool's threads. Null does it in
+     * vgl_io_interface.read and on the thread that completes the source's reads. */
+    vgl_thread_pool* pool;
+    VGL_POINTER_PADDING(pool_padding)
+    /* Optional. Allocator for the cache and its reads; must be thread-safe. */
+    const vgl_allocator_interface* allocator;
+    VGL_POINTER_PADDING(allocator_padding)
+} vgl_disk_cache_create_info;
+
+/* What the cache has done since it was created, and what it holds. */
+typedef struct vgl_disk_cache_statistics
+{
+    uint32_t struct_size;
+    uint32_t reserved;
+    uint64_t hits;         /* Reads served from the disk. */
+    uint64_t misses;       /* Reads of shards that went to the source. */
+    uint64_t offline_hits; /* Manifests served from the disk because the source failed. */
+    uint64_t entries;      /* Entries on disk. */
+    uint64_t bytes;        /* Bytes the entries take on disk. */
+    uint64_t budget;       /* Bytes they may take. */
+    uint64_t evictions;    /* Entries removed to keep to the budget. */
+} vgl_disk_cache_statistics;
+
+/**
+ * Creates a disk cache, reading what the directory already holds.
+ *
+ * @param info       The directory, the source and the budget.
+ * @param out_cache  Receives the cache.
+ *
+ * @retval VGL_RESULT_SUCCESS            The cache was created.
+ * @retval VGL_RESULT_INVALID_ARGUMENT   A pointer is null, or info has no directory or source,
+ *                                       or the source has no read callback.
+ * @retval VGL_RESULT_NOT_SUPPORTED      info has fields from a newer version set.
+ * @retval VGL_RESULT_VERSION_MISMATCH   The source or allocator interface has an unknown
+ *                                       version.
+ * @retval VGL_RESULT_OUT_OF_MEMORY      Allocation failed.
+ * @retval VGL_RESULT_IO_ERROR           The directory could not be created or read.
+ *
+ * @par Thread safety
+ * Free-threaded.
+ */
+VGL_DEFAULTS_API vgl_result vgl_disk_cache_create(const vgl_disk_cache_create_info* info,
+                                                  vgl_disk_cache** out_cache);
+
+/**
+ * Destroys the cache, after the disk work in progress, so that what was read is stored. Reads
+ * of the source that are still in progress complete later, without storing what they read;
+ * the source and the pool must outlive them.
+ *
+ * @param cache  The cache, or null.
+ *
+ * @retval VGL_RESULT_SUCCESS  Always.
+ *
+ * @par Thread safety
+ * Externally synchronized.
+ */
+VGL_DEFAULTS_API vgl_result vgl_disk_cache_destroy(vgl_disk_cache* cache);
+
+/**
+ * Gets an I/O interface that reads through the cache, for vgl_context_create_info.io. The
+ * interface has no destroy callback: the cache must outlive every context that uses it.
+ *
+ * @param cache          The cache.
+ * @param out_interface  Receives the interface.
+ *
+ * @retval VGL_RESULT_SUCCESS           The interface was written.
+ * @retval VGL_RESULT_INVALID_ARGUMENT  A pointer is null.
+ *
+ * @par Thread safety
+ * Free-threaded.
+ */
+VGL_DEFAULTS_API vgl_result vgl_disk_cache_io_interface_get(vgl_disk_cache* cache,
+                                                            vgl_io_interface* out_interface);
+
+/**
+ * Gets the cache's statistics.
+ *
+ * @param cache           The cache.
+ * @param out_statistics  Receives them. Set its struct_size first; at least 8.
+ *
+ * @retval VGL_RESULT_SUCCESS           The statistics were written.
+ * @retval VGL_RESULT_INVALID_ARGUMENT  A pointer is null, or struct_size is below 8.
+ *
+ * @par Thread safety
+ * Free-threaded.
+ */
+VGL_DEFAULTS_API vgl_result
+vgl_disk_cache_statistics_get(vgl_disk_cache* cache, vgl_disk_cache_statistics* out_statistics);
+
+/**
+ * Removes every entry. Reads in progress complete, and may store what they read.
+ *
+ * @param cache  The cache.
+ *
+ * @retval VGL_RESULT_SUCCESS           The entries were removed.
+ * @retval VGL_RESULT_INVALID_ARGUMENT  cache is null.
+ * @retval VGL_RESULT_OUT_OF_MEMORY     Allocation failed; nothing was removed.
+ * @retval VGL_RESULT_IO_ERROR          Some entries could not be removed; the others were.
+ *
+ * @par Thread safety
+ * Free-threaded.
+ */
+VGL_DEFAULTS_API vgl_result vgl_disk_cache_clear(vgl_disk_cache* cache);
 
 #ifdef __cplusplus
 }

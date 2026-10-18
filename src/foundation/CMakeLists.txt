@@ -18,4 +18,5 @@ target_sources(vgl_objects PRIVATE
     log.hpp
     math.hpp
     result.cpp
-    version.cpp)
+    version.cpp
+    versioned.hpp)

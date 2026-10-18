@@ -299,6 +299,8 @@ The optional defaults module provides a small thread pool and a filesystem reade
 
 The defaults module also has an HTTP reader (`vgl_http_reader`), which reads `http://` and `https://` URIs with range requests and hands other URIs to a file reader (section 8.6). On Emscripten it is built on the browser's fetch instead, with the same API: fetches start and finish on the main thread, reads that arrive on other threads are passed to it, reads that fail without an answer are tried again (as when Chrome's cache refuses a range of a file it is still storing), and without a file reader, relative URIs are fetched from the page's address. It is built on libcurl and only with `VGL_DEFAULTS_HTTP`, off by default, so that a build without it needs no libcurl and the core never has an HTTP stack; without it, `vgl_http_reader_create` reports `VGL_RESULT_NOT_SUPPORTED`. CMake uses an installed libcurl, or else downloads curl and builds it with HTTP and HTTPS only, on the platform's TLS library (Schannel, Secure Transport or OpenSSL). The reader runs one thread of its own on libcurl's multi interface, which overlaps reads over a few connections to each server. Hosts with a network layer of their own implement the I/O interface on it instead.
 
+I/O interfaces can be chained: `vgl_io_request_create` makes a request whose completion calls its creator back instead of reaching a context, so that an interface can pass a read on to another one and handle what comes back. The defaults module's disk cache (`vgl_disk_cache`) is built that way, in front of the HTTP reader or any other interface (section 8.6); retries, logging or decryption could be added the same way, without changes to the core.
+
 A context may be destroyed while reads are outstanding or tasks are queued. The state those need is reference counted and outlives the context, so a late completion or task finds the context gone and frees itself; the host never has to drain its queues first (C API conventions, section 12).
 
 ### 7.6 Rendering
@@ -477,7 +479,9 @@ The runtime's provider interface is tile-keyed ("return the bytes of tile L/X/Y 
 | Pack on disk | Reads shards from the local filesystem | MVP |
 | Pack over HTTP | Reads the same shards through HTTP range requests, via the host's I/O callback or the defaults module's HTTP reader (section 7.5) | M3, ahead of M4 |
 | Tile endpoint | Fetches individual tiles from a web API, for example to add access control | Later |
-| Disk cache | Wraps a remote provider and keeps visited tiles available offline | After MVP |
+| Disk cache | Wraps a remote provider and keeps visited tiles available offline: the defaults module's `vgl_disk_cache` (below) | M3, ahead of M4 |
+
+The disk cache wraps an I/O interface and keeps what it reads from web servers in a directory, one file per read, by URI and byte range, within a budget (1 GiB by default) from which the least recently used entries go. Eviction takes entries out of the index under the cache's lock and removes their files after releasing it, so that the context's thread, which takes the lock for every read, never waits for the disk; an entry stored again in between is lost and read again. Shards are never stale, since their names hold their digests (pack format, section 5.2), so a cached shard is read from the disk; a manifest changes in place, so it is read from the server first and from the disk only when the server cannot be reached, which keeps an installation that has seen an area working offline. Entries are written under a temporary name and renamed, and carry their key and a checksum, so a damaged or colliding entry reads as a miss. Cancelling a read completes it at once while the download goes on and is stored, which keeps tiles fetched during fast flights. Reads at the source hold a reference to the cache, so destroying it waits only for the disk, never for the network. In a browser, the browser's own HTTP cache plays this part.
 
 ---
 
@@ -618,7 +622,7 @@ The repository is public at github.com/3dgep/vgl, with continuous integration th
 | M1: Data pipeline | Baker with GDAL input, datum conversion, elevation and imagery encoding, sharded packs; regional test bake to settle tile size, deepest level and shard level |
 | M2: MVP runtime | LOD selection and culling, cache and budgets, pack-on-disk provider, mesh builder, OpenGL / GLES and Direct3D 11 backends, a global imagery layer, height queries, attribution; OpenGL, Direct3D 11, pure-C and headless samples; macOS, Android and iOS builds in CI |
 | M3: Integration | Ogre backend and sample on desktop (Windows, Linux, macOS), Android and iOS, GLES sample in CI, multiple imagery layers, picking, atmosphere, a WebAssembly build with the OpenGL sample in a browser |
-| M4: Distribution | HTTP pack provider and reference server (delivered during M3: the defaults module's HTTP reader and a Caddy configuration), disk cache, full global bake, hosting setup |
+| M4: Distribution | HTTP pack provider, reference server and disk cache (delivered during M3: the defaults module's HTTP reader and disk cache, and a Caddy configuration), full global bake, hosting setup |
 | Later | Compressed GPU textures, vector overlays rasterized into tiles, Vulkan backend, a limited subset of 3D Tiles |
 
 Within M2, the OpenGL / OpenGL ES backend comes first: it runs on every target platform and the pure-C sample needs it. The Direct3D 11 backend follows. The client integrates vgl themselves, so the order does not wait for their choice of graphics API.

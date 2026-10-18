@@ -128,7 +128,8 @@ typedef struct vgl_io_interface
  * The library copies data before the function returns, so the host may free it afterwards.
  * The request handle is invalid once the function returns.
  *
- * @param request  The request, from vgl_io_interface.read.
+ * @param request  The request, from vgl_io_interface.read, or one made with
+ *                 vgl_io_request_create, whose callback then receives the result.
  * @param result   VGL_RESULT_SUCCESS if data holds what was read; otherwise the reason it
  *                 could not be read, such as VGL_RESULT_NOT_FOUND, VGL_RESULT_IO_ERROR or
  *                 VGL_RESULT_CANCELLED.
@@ -146,6 +147,57 @@ VGL_API vgl_result vgl_io_request_complete(vgl_io_request* request,
                                            vgl_result result,
                                            const void* data,
                                            size_t size);
+
+/*
+ * Receives the completion of a request made with vgl_io_request_create: the result, and on
+ * success the bytes read, valid only during the call.
+ *
+ * Thread safety: called on the thread that completes the request, inside
+ * vgl_io_request_complete.
+ */
+typedef void (*vgl_io_complete_fn)(void* user_data,
+                                   vgl_result result,
+                                   const void* data,
+                                   size_t size);
+
+typedef struct vgl_io_request_create_info
+{
+    uint32_t struct_size;
+    uint32_t reserved;
+    /* Receives the completion. Required. */
+    vgl_io_complete_fn complete;
+    VGL_POINTER_PADDING(complete_padding)
+    void* user_data;
+    VGL_POINTER_PADDING(user_data_padding)
+    /* Optional. Allocator for the request; must be thread-safe if the request completes on
+     * another thread. */
+    const vgl_allocator_interface* allocator;
+    VGL_POINTER_PADDING(allocator_padding)
+} vgl_io_request_create_info;
+
+/**
+ * Creates a request whose completion goes to a callback rather than to a context, so that an
+ * I/O interface can pass a read on to another one and handle what it delivers, as a cache or
+ * any other wrapper does (design document, section 7.5). The request goes to another
+ * interface's read with a vgl_io_read the creator keeps valid until completion, and is
+ * completed exactly once with vgl_io_request_complete, which calls complete and frees the
+ * request. A request that never reaches a read is freed by completing it too.
+ *
+ * @param info         The callback and its user data, and the allocator.
+ * @param out_request  Receives the request.
+ *
+ * @retval VGL_RESULT_SUCCESS            The request was created.
+ * @retval VGL_RESULT_INVALID_ARGUMENT   A pointer is null, or info has no complete callback or
+ *                                       an invalid allocator.
+ * @retval VGL_RESULT_NOT_SUPPORTED      info has fields from a newer version set.
+ * @retval VGL_RESULT_VERSION_MISMATCH   The allocator interface has an unknown version.
+ * @retval VGL_RESULT_OUT_OF_MEMORY      Allocation failed.
+ *
+ * @par Thread safety
+ * Free-threaded.
+ */
+VGL_API vgl_result vgl_io_request_create(const vgl_io_request_create_info* info,
+                                         vgl_io_request** out_request);
 
 /* ---------------------------------------------------------------------------------------- */
 /* Tasks                                                                                    */

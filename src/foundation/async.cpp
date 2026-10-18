@@ -3,6 +3,8 @@
 
 #include "foundation/async.hpp"
 
+#include "foundation/versioned.hpp"
+
 #include <cstring>
 
 namespace vgl::internal
@@ -151,6 +153,17 @@ extern "C" VGL_API vgl_result vgl_io_request_complete(vgl_io_request* request,
     {
         return VGL_RESULT_INVALID_ARGUMENT;
     }
+    if (request->complete != nullptr)
+    {
+        // Made with vgl_io_request_create: its creator takes the result, and the request goes.
+        request->complete(request->complete_user_data,
+                          result,
+                          result == VGL_RESULT_SUCCESS ? data : nullptr,
+                          result == VGL_RESULT_SUCCESS ? size : 0);
+        const vgl::internal::allocator memory = request->memory;
+        memory.destroy(request);
+        return VGL_RESULT_SUCCESS;
+    }
     vgl::internal::async_core* core = request->core;
     vgl_result r = VGL_RESULT_SUCCESS;
     request->result = result;
@@ -176,4 +189,49 @@ extern "C" VGL_API vgl_result vgl_io_request_complete(vgl_io_request* request,
         core->release();
     }
     return r;
+}
+
+extern "C" VGL_API vgl_result vgl_io_request_create(const vgl_io_request_create_info* info,
+                                                    vgl_io_request** out_request)
+{
+    if (out_request == nullptr)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    *out_request = nullptr;
+    if (info == nullptr)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    vgl_io_request_create_info settings;
+    vgl_result r =
+        vgl::internal::read_versioned(info, sizeof(vgl_io_request_create_info), settings);
+    if (r != VGL_RESULT_SUCCESS)
+    {
+        return r;
+    }
+    if (settings.complete == nullptr)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    vgl::internal::allocator memory;
+    if (settings.allocator != nullptr)
+    {
+        r = vgl::internal::validate_allocator_interface(settings.allocator);
+        if (r != VGL_RESULT_SUCCESS)
+        {
+            return r;
+        }
+        memory = vgl::internal::allocator(*settings.allocator);
+    }
+    auto* request = memory.create<vgl_io_request>();
+    if (request == nullptr)
+    {
+        return VGL_RESULT_OUT_OF_MEMORY;
+    }
+    request->complete = settings.complete;
+    request->complete_user_data = settings.user_data;
+    request->memory = memory;
+    *out_request = request;
+    return VGL_RESULT_SUCCESS;
 }

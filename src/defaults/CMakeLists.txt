@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Jeremiah van Oosten
 
-# Optional defaults: thread pool and filesystem reader, used by the samples and
-# available to hosts. Built as a separate vgl_defaults target linking vgl, so
+# Optional defaults: thread pool, filesystem reader, HTTP reader and disk cache, used
+# by the samples and available to hosts. Built as a separate vgl_defaults target linking vgl, so
 # the core library itself never creates threads (NFR-02). It uses vgl only
 # through the C API, so it works with a shared vgl as well.
 
@@ -10,7 +10,10 @@ find_package(Threads REQUIRED)
 
 add_library(vgl_defaults
     ../common/host_memory.hpp
+    disk_cache.cpp
     file_reader.cpp
+    files.cpp
+    files.hpp
     http_reader.cpp
     thread_pool.cpp)
 add_library(vgl::defaults ALIAS vgl_defaults)
