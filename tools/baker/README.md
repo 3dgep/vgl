@@ -4,12 +4,12 @@
 
 ## Building
 
-Configure with `-DVGL_BUILD_BAKER=ON`. The baker needs GDAL 3.7 or later (for warping one band of a multi-band source); nlohmann/json is used if installed and downloaded otherwise.
+Configure with `-DVGL_BUILD_BAKER=ON`. The baker needs GDAL 3.7 or later (for warping one band of a multi-band source); nlohmann/json is used if installed and downloaded otherwise. Its `check` command needs libcurl, which it shares with the defaults module's HTTP reader: the baker presets turn `VGL_DEFAULTS_HTTP` on, and Linux needs `libcurl4-openssl-dev` for it.
 
 **Linux.** Install the packages, then use the baker preset:
 
 ```sh
-sudo apt-get install libgdal-dev nlohmann-json3-dev libzstd-dev ninja-build
+sudo apt-get install libgdal-dev nlohmann-json3-dev libzstd-dev libcurl4-openssl-dev ninja-build
 cmake --workflow --preset linux-gcc-baker-release
 ```
 
@@ -30,12 +30,14 @@ vgl-bake bake <config.json> [--jobs N] [--resume] [--max-level L] [--cache MB] [
 vgl-bake inspect <pack>
 vgl-bake validate <pack>
 vgl-bake query <pack> < points.txt
+vgl-bake check <url> [--sample N] [--timeout S]
 ```
 
 - **bake** builds the pack a configuration describes. Work is split by shard and runs on all cores. Finished shards are recorded in `<output>/.bake`, so an interrupted bake continues with `--resume`. `--max-level` makes a quick preview with fewer levels. Bakes are deterministic: the same sources and configuration give byte-identical packs, whatever the number of threads.
 - **inspect** prints the manifest, the tile count and size of every level, and the shard counts and sizes that every other shard level would give.
 - **validate** reads and decodes every tile, which checks every CRC and structure. For heights, it then checks that shared borders are identical (across the antimeridian too), that pole rows are uniform, and that child masks and child height bounds agree with the tiles. For imagery, it checks that each image has the tile's size with its border, that borders repeat the neighbouring tiles' pixels (to within a mean difference of 12 per channel, which JPEG's losses stay well inside), and that child masks agree. It exits with 1 if any check fails.
 - **query** reads `latitude longitude` lines in degrees and prints the height at each from the deepest tile, with the level it came from.
+- **check** checks a pack on a web server, by the URL of its directory, as vgl and browsers read it ([hosting guide](../../docs/hosting.md#checking-a-host)): the manifest, byte ranges, compression, CORS and caching headers, every shard's size and digest (or `--sample N` of them, spread over the pack), and one shard's directory and a tile. Errors are what stops vgl reading the pack, or makes every read download a whole shard; warnings are what stops browsers on other sites, or caches, from doing their part. It exits with 1 if there is an error.
 
 ## Configuration
 

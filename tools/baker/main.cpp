@@ -5,6 +5,7 @@
 
 #include "bake_config.hpp"
 #include "baker.hpp"
+#include "host_check.hpp"
 #include "inspect.hpp"
 #include "pack_file.hpp"
 #include "source.hpp"
@@ -31,6 +32,9 @@ usage:
                                            child masks. Exits with 1 if a check fails.
   vgl-bake query <pack>                    Read "latitude longitude" lines (degrees) from
                                            standard input and print heights.
+  vgl-bake check <url> [options]           Check that a web server serves a pack as vgl and
+                                           browsers read it (docs/hosting.md). Exits with 1
+                                           if a check fails.
   vgl-bake --version
 
 bake options:
@@ -39,6 +43,10 @@ bake options:
   --max-level <l>   Preview: bake only down to level l.
   --cache <MB>      GDAL raster cache size (default: 2048).
   --verbose         Report every shard.
+
+check options:
+  --sample <n>      Check n shards spread over the pack (default: every shard).
+  --timeout <s>     Seconds a request may take (default: 30).
 )";
 
 unsigned long parse_number(std::string_view option, const char* value)
@@ -119,6 +127,36 @@ int run(const std::vector<std::string_view>& args)
                     static_cast<double>(s.bytes) / 1e6,
                     s.seconds);
         return 0;
+    }
+    if (command == "check")
+    {
+        vgl::bake::host_check_options options;
+        for (std::size_t i = 2; i < args.size(); ++i)
+        {
+            const std::string_view a = args[i];
+            if (i + 1 >= args.size())
+            {
+                throw std::runtime_error(std::string(a) + " needs a value");
+            }
+            const char* v = args[++i].data();
+            if (a == "--sample")
+            {
+                options.sample = static_cast<std::uint32_t>(parse_number(a, v));
+            }
+            else if (a == "--timeout")
+            {
+                options.timeout = static_cast<double>(parse_number(a, v));
+            }
+            else
+            {
+                throw std::runtime_error("unknown option " + std::string(a) +
+                                         "; see vgl-bake --help");
+            }
+        }
+        const vgl::bake::host_check_report r =
+            vgl::bake::check_host(std::string(args[1]), options, std::cout);
+        std::printf("\n%u error(s), %u warning(s)\n", r.errors, r.warnings);
+        return r.ok() ? 0 : 1;
     }
     if (command == "inspect")
     {

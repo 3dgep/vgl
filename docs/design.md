@@ -34,7 +34,7 @@ This library takes a different position in two ways. First, it renders: it ships
 | Elevation data | Free global datasets (Copernicus GLO-30, GEBCO), baked offline; oceans with their bathymetry, and an optional sea surface (section 7.6) |
 | Imagery | Free datasets: NASA Blue Marble Next Generation as the global base, Sentinel-2 cloudless 2016 for detail (section 9) |
 | Runtime data format | Custom, sharded, range-readable tile packs |
-| Data access | Local disk first; web hosting later, through the same interface, recommended on an object store without egress fees (section 10.2) |
+| Data access | Local disk or any web server that serves range requests, through the same interface; consumers bake and host their own data (section 10.2) |
 | Tiling scheme | Geographic (latitude/longitude) quadtree with two root tiles |
 | Geoid | EGM2008 2.5′ grid, baked into a geoid pack and streamed like terrain |
 | License | MIT |
@@ -536,7 +536,9 @@ The extrapolations scale Norway by the number of GLO-30 source tiles, and are ro
 
 At this size, streaming from a web server becomes the main way most installations receive data. Desktop installations stream tiles and keep a local disk cache. Fully offline installations receive selected shards, as a regional download or on a drive.
 
-Because shards are plain range-readable files, the first version of the client's web API needs no server code. Any web server, CDN or object store that supports HTTP range requests works. On a small budget, data transfer fees typically matter more than storage costs. The recommended host is therefore an object store without egress fees that serves HTTP range requests, such as Cloudflare R2; at the rates published in 2026 (about $0.015 per GB and month, to be confirmed when the host is set up), a global GLO-30 and GEBCO dataset of about 150 GB costs a few dollars a month to store, and nothing to serve. Since packs are plain files, moving to another host only means copying them. A tile endpoint can be added later if access control or per-tile caching is needed, without changes to the runtime core.
+vgl is an open-source library, not a data service: the project hosts no data. Consumers bake the elevation and imagery they need with the baker and host the packs themselves, where they choose; the sample set in the repository (section 11) shows the whole path on a small scale. The project's part is the tools for it: the baker, a pack format made for plain file hosting, the reference server below, the HTTP reader and disk cache (section 7.5), the [hosting guide](hosting.md), and `vgl-bake check`, which checks that a host serves a pack as vgl and browsers read it.
+
+Because shards are plain range-readable files, hosting them needs no server code. Any web server, CDN or object store that supports HTTP range requests works. Data transfer is usually what matters most when choosing one, so an object store without egress fees is a good fit for public data. Since packs are plain files, moving to another host only means copying them. A tile endpoint can be added later if access control or per-tile caching is needed, without changes to the runtime core.
 
 For installations that host packs themselves, vgl provides a reference server: a configuration for Caddy (`tools/server/Caddyfile`), not server code of its own, so that the repository gains no toolchain and the code facing the internet is a widely used web server. It serves only pack files, with `GET` and `HEAD` and one range per request, over HTTPS with certificates Caddy obtains itself, and lets caches keep shards forever because their names hold their digests. Rate limiting is left to a CDN or firewall in front. `tools/server/check.sh` checks it in CI against the HTTP reader, and the [hosting guide](hosting.md) covers deployment and the operator's part of its security.
 
@@ -622,7 +624,7 @@ The repository is public at github.com/3dgep/vgl, with continuous integration th
 | M1: Data pipeline | Baker with GDAL input, datum conversion, elevation and imagery encoding, sharded packs; regional test bake to settle tile size, deepest level and shard level |
 | M2: MVP runtime | LOD selection and culling, cache and budgets, pack-on-disk provider, mesh builder, OpenGL / GLES and Direct3D 11 backends, a global imagery layer, height queries, attribution; OpenGL, Direct3D 11, pure-C and headless samples; macOS, Android and iOS builds in CI |
 | M3: Integration | Ogre backend and sample on desktop (Windows, Linux, macOS), Android and iOS, GLES sample in CI, multiple imagery layers, picking, atmosphere, a WebAssembly build with the OpenGL sample in a browser |
-| M4: Distribution | HTTP pack provider, reference server and disk cache (delivered during M3: the defaults module's HTTP reader and disk cache, and a Caddy configuration), full global bake, hosting setup |
+| M4: Distribution | HTTP pack provider, reference server and disk cache (delivered during M3: the defaults module's HTTP reader and disk cache, and a Caddy configuration); a checker of hosted packs (`vgl-bake check`) and the hosting guide's publishing steps. Global bakes and their hosting are the consumers' (section 10.2) |
 | Later | Compressed GPU textures, vector overlays rasterized into tiles, Vulkan backend, a limited subset of 3D Tiles |
 
 Within M2, the OpenGL / OpenGL ES backend comes first: it runs on every target platform and the pure-C sample needs it. The Direct3D 11 backend follows. The client integrates vgl themselves, so the order does not wait for their choice of graphics API.
@@ -633,7 +635,7 @@ Within M2, the OpenGL / OpenGL ES backend comes first: it runs on every target p
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Dataset size and bake time exceed expectations | Delays, hosting cost | Early regional test bake; partitioned, resumable bakes; preview mode |
+| Dataset size and bake time exceed expectations | Long bakes and large hosting needs for consumers | Early regional test bake; partitioned, resumable bakes; preview mode; size estimates (section 10.1) |
 | Surface-model artifacts (forests, buildings) | Unrealistic terrain for ground-level use | Document the limitation; NASADEM as alternative source; review bare-earth options |
 | Oversampling at high latitudes | Larger datasets | Measure in test bake; per-tile depth limits |
 | Graphics state interference with the host | Rendering bugs in the host application | Documented and restored state; integration tests in a host-like sample |
@@ -656,7 +658,7 @@ These questions were waiting on the client. The client integrates vgl themselves
 | 3 | Minimum OS versions, Intel Macs, 32-bit ARM? | Windows 10, macOS 11 with universal binaries, Android 7.0 (API 24), iOS 15; no 32-bit ARM (section 4) |
 | 4 | Which imagery? | Blue Marble Next Generation as the global base, Sentinel-2 cloudless 2016 for detail (section 9) |
 | 5 | Bathymetry or a flat sea? | Both: terrain includes the ocean floor, and backends offer a sea surface at mean sea level (section 7.6) |
-| 6 | Which hosting? | An object store without egress fees that serves range requests, such as Cloudflare R2 (section 10.2) |
+| 6 | Which hosting? | None by the project: consumers bake and host their own packs on any server that serves range requests, and vgl provides the tools, the reference server and the hosting guide (section 10.2) |
 | 7 | Deepest elevation level and shard level | Answered by the test bake: level 12 for GLO-30, level 8 for GEBCO, and shard level `max_level` − 5 ([report](test-bake.md)) |
 
 ---

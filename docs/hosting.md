@@ -1,18 +1,18 @@
 # Hosting packs
 
-Packs are plain files that are read with HTTP range requests ([pack format](pack-format.md)), so hosting them needs no server code of vgl's own (design document, section 10.2). This page covers the two recommended ways to publish them: an object store, and the reference server in `tools/server`, a configuration for [Caddy](https://caddyserver.com) that is safe to expose on a public endpoint. Hosts read the packs with the defaults module's HTTP reader (`vgl_http_reader`) or with an I/O interface of their own.
+vgl hosts no data: an application that uses it bakes the elevation and imagery it needs with the baker, and publishes the packs where it chooses (design document, section 10.2). Packs are plain files that are read with HTTP range requests ([pack format](pack-format.md)), so hosting them needs no server code. This page covers the two recommended ways to publish them, an object store and the reference server in `tools/server` (a configuration for [Caddy](https://caddyserver.com) that is safe to expose on a public endpoint), how to upload a bake, and how to check the result with `vgl-bake check`. Applications read the packs with the defaults module's HTTP reader (`vgl_http_reader`), with its disk cache in front, or with an I/O interface of their own.
 
 ## Choosing a host
 
 | | Object store | Reference server |
 |---|---|---|
 | Examples | Cloudflare R2, Amazon S3, Backblaze B2 | Caddy with `tools/server/Caddyfile`, on a machine you run |
-| Cost | Storage, and egress unless the store waives it | The machine and its traffic |
+| Billed for | Storage and requests, and downloads unless the store waives them | The machine and its traffic |
 | HTTPS | Provided | Automatic, from Let's Encrypt or ZeroSSL |
 | Maintenance | None | Updates to Caddy and the operating system |
 | Suits | Public datasets, most installations | Local networks, private or offline sites, development, full control |
 
-An object store without egress fees, such as R2, is the recommended host for the global dataset (design document, section 10.2). The reference server suits everything else, and is also how to try a pack over HTTP locally.
+For public data read by many users, downloads usually outweigh storage, so an object store that does not charge for them is a good fit. The reference server suits everything else, and is also how to try a pack over HTTP locally.
 
 Any other web server works too, if it:
 
@@ -108,6 +108,36 @@ The configuration covers what a web server can enforce on its own. On a public e
 - **Mind the logs.** Access logs hold clients' IP addresses, which are personal data in the EU. Keep them only as long as needed, or remove the `log` block.
 - **Publish the attribution** that each dataset's license requires (design document, section 9). vgl reads it from the manifests (`vgl_context_attribution_get`), so hosts can show it.
 
+## Publishing a bake
+
+1. Check the pack where it was baked: `vgl-bake validate <pack>` reads every tile.
+2. Upload the pack's directory as it is, keeping its paths (`pack.vglm`, `base-*.vgls`, `shards/<y>/<x>-*.vgls`). Send pack files as `application/octet-stream`, uncompressed, with long caching for shards and short caching for the manifest. With [rclone](https://rclone.org), which uploads to every common object store, that is two passes, shards first:
+
+   ```sh
+   rclone copy packs/glo30 store:bucket/glo30 --include "*.vgls"        --header-upload "Content-Type: application/octet-stream"        --header-upload "Cache-Control: public, max-age=31536000, immutable"
+   rclone copy packs/glo30 store:bucket/glo30 --include "pack.vglm"        --header-upload "Content-Type: application/octet-stream"        --header-upload "Cache-Control: public, max-age=60"
+   ```
+
+   For the reference server, copy the directory under `VGL_PACKS`; its configuration sets the headers itself.
+3. If browsers on other sites read the packs, as vgl's web build does, allow them with the store's CORS rules. In the form the S3 API takes, which object stores generally accept:
+
+   ```json
+   {
+     "CORSRules": [
+       {
+         "AllowedOrigins": ["*"],
+         "AllowedMethods": ["GET", "HEAD"],
+         "AllowedHeaders": ["Range", "If-None-Match", "If-Range"],
+         "ExposeHeaders": ["Accept-Ranges", "Content-Length", "Content-Range", "ETag"],
+         "MaxAgeSeconds": 86400
+       }
+     ]
+   }
+   ```
+
+   Name your sites instead of `*` to keep other sites from using the packs from browsers. A CDN in front must not compress pack files, which most leave alone as `application/octet-stream`.
+4. Check the result as vgl reads it: `vgl-bake check https://packs.example.org/glo30` (below).
+
 ## Updating packs
 
 A rebaked shard gets a new name, and the manifest is the only file that changes in place ([pack format](pack-format.md), section 5.2). To update a pack without readers ever seeing a mix of old and new:
@@ -116,9 +146,32 @@ A rebaked shard gets a new name, and the manifest is the only file that changes 
 2. Replace the manifest at once: upload it under a temporary name and rename it, or rely on the object store's atomic writes.
 3. After caches have moved on (a minute for the reference server's manifests, longer behind a CDN), delete the shards that the new manifest no longer names.
 
-## Checking a server
+## Checking a host
 
-`tools/server/check.sh` checks the reference server: it serves a copy of the sample packs with Caddy, checks that range requests work and that everything listed above is refused, and loads the packs over HTTP with the headless sample, which must report the same heights as from disk. CI runs it on Linux.
+`vgl-bake check <url>` checks any host, by the URL of a pack's directory, as vgl and browsers read it ([baker](../tools/baker/README.md#commands)):
+
+- the manifest loads and parses, and is not compressed;
+- byte ranges get `206` with the right bytes, and a range past the end `416`;
+- browsers on other sites may read it: `Access-Control-Allow-Origin`, and an answer to a CORS preflight for `Range`;
+- the manifest is not cached for long, and shards are;
+- every shard the manifest names exists, with its size and digest (`--sample N` checks N of them, for large packs);
+- one shard's directory and a tile, read with ranges as vgl reads them, match their checksums.
+
+It reports each check as `ok`, `warning` or `error`, and exits with 1 on an error: something that stops vgl reading the pack, or makes every read download a whole shard. Warnings are what stops browsers on other sites, or caches, from doing their part.
+
+```
+$ vgl-bake check https://packs.example.org/gebco
+ok       manifest: GEBCO 2026 (elevation, levels 0 to 8, 129 shards)
+ok       CORS: Access-Control-Allow-Origin: *
+ok       byte ranges: 206 Partial Content, Content-Range: bytes 0-31/1843
+ok       CORS preflight for Range: 204
+ok       shards: 129 of 129 checked exist with the size and digest the manifest gives
+ok       a shard read as vgl reads it: header, directory and a tile check out
+
+0 error(s), 0 warning(s)
+```
+
+`tools/server/check.sh` checks the reference server itself: it serves a copy of the sample packs with Caddy, checks that range requests work and that everything listed above is refused, and loads the packs over HTTP with the headless sample, which must report the same heights as from disk. CI runs it on Linux.
 
 ```sh
 tools/server/check.sh "$(command -v caddy)" build/linux-gcc-shared/bin/Release/vgl-headless

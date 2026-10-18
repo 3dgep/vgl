@@ -55,6 +55,8 @@ add_library(vgl_bake OBJECT
     bake_config.hpp
     baker.cpp
     baker.hpp
+    host_check.cpp
+    host_check.hpp
     image_codec.cpp
     image_codec.hpp
     inspect.cpp
@@ -66,6 +68,19 @@ add_library(vgl_bake OBJECT
 target_include_directories(vgl_bake PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(vgl_bake PUBLIC vgl_pack_writer vgl_objects GDAL::GDAL nlohmann_json::nlohmann_json)
 vgl_target_options(vgl_bake)
+
+# The check command reads hosted packs with libcurl: the one the defaults module's HTTP reader
+# uses (VGL_DEFAULTS_HTTP). Without it, the command says so.
+get_property(vgl_curl_target GLOBAL PROPERTY VGL_CURL_TARGET)
+if(vgl_curl_target)
+    if(vgl_curl_target STREQUAL "CURL::libcurl")
+        find_package(CURL REQUIRED) # Its imported target is visible only where it was found.
+    endif()
+    target_link_libraries(vgl_bake PUBLIC ${vgl_curl_target})
+    target_compile_definitions(vgl_bake PUBLIC VGL_BAKE_HAS_CURL=1)
+else()
+    message(STATUS "vgl: vgl-bake check needs VGL_DEFAULTS_HTTP; it is built without it")
+endif()
 
 add_executable(vgl-bake main.cpp)
 target_link_libraries(vgl-bake PRIVATE vgl_bake vgl_pack_writer vgl_objects)

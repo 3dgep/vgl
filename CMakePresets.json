@@ -139,6 +139,7 @@
       "cacheVariables": {
         "BUILD_SHARED_LIBS": "OFF",
         "VGL_BUILD_BAKER": "ON",
+        "VGL_DEFAULTS_HTTP": "ON",
         "CMAKE_PREFIX_PATH": "$env{CONDA_PREFIX}/Library"
       }
     },
@@ -148,7 +149,8 @@
       "inherits": "linux-gcc-base",
       "cacheVariables": {
         "BUILD_SHARED_LIBS": "OFF",
-        "VGL_BUILD_BAKER": "ON"
+        "VGL_BUILD_BAKER": "ON",
+        "VGL_DEFAULTS_HTTP": "ON"
       }
     },
     {

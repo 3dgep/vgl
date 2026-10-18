@@ -119,6 +119,15 @@ The pack format has its own version number, independent of the library version.
   backend, pixel for pixel but for anti-aliased wireframe lines on Direct3D 11. CI runs it on
   Linux with Mesa on full runs.
 - The samples in a GLFW window share their controls (`samples/common/glfw_controls.hpp`).
+- `vgl-bake check <url>` checks a hosted pack as vgl and browsers read it: the manifest, byte
+  ranges, compression, CORS and its preflight, caching headers, every shard's size and digest
+  (or `--sample N`), and one shard's directory and a tile, with the runtime's readers. Errors
+  are what stops vgl or makes it download whole shards; warnings are for browsers and caches.
+  It uses the HTTP reader's libcurl, which the baker presets now turn on. The hosting guide gains
+  the steps of publishing a bake, and the HTTP test's server moves to `tests/http_server.hpp`
+  for the check's tests.
+- The project hosts no data: consumers bake and host their own packs with vgl's tools (design
+  document, sections 10.2, 14 and 16).
 - The OpenGL sample's page has a check in headless Chrome (`tests/browser/page_check.mjs`,
   test `browser` with `VGL_TEST_BROWSER`): served by Caddy and driven over the DevTools
   protocol, it must come up cross-origin isolated on WebGL 2, draw tiles, and fly to the
