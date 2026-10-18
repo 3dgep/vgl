@@ -97,6 +97,11 @@ struct globe_settings
     // RENDER_QUEUE_SKIES_LATE, where nothing was drawn before it, at the far depth, and the haze
     // and the sun's colour on the terrain.
     bool atmosphere = false;
+    // The stars set with globe::stars_set, behind the sky, in the render queue group before
+    // RENDER_QUEUE_SKIES_LATE (vgl_gl_draw_info.stars), turned by the Earth rotation angle in
+    // radians (vgl_earth_rotation_angle_get).
+    bool stars = false;
+    double sidereal_angle = 0.0;
 };
 
 class globe final : public Ogre::MovableObject
@@ -114,6 +119,11 @@ public:
     static void destroy(globe* g) noexcept;
 
     void settings_set(const globe_settings& settings) noexcept;
+
+    // Sets the stars the globe draws when its settings ask for them, replacing those set
+    // before, as vgl_gl_backend_stars_set does: copied, drawn as small quads. vgl ships no
+    // stars. Fails with invalid_argument for an invalid star or too many, and out_of_memory.
+    [[nodiscard]] vgl::result stars_set(const vgl_star* stars, std::uint32_t count) noexcept;
 
     // Forgets the globe's Ogre objects and the context's render resources, which are uploaded
     // again over the next frames: after Ogre's render system lost its device, and the like.

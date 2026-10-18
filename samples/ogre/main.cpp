@@ -26,6 +26,7 @@
 #include "sample_camera.hpp"
 #include "sample_check.hpp"
 #include "sample_data.hpp"
+#include "stars.hpp"
 
 #include <vgl/defaults.hpp>
 #include <vgl/ogre.hpp>
@@ -81,6 +82,7 @@ struct options
 {
     std::string data;               // The sample set's directory, from --data.
     std::vector<std::string> packs; // From --pack.
+    std::string stars;              // A star catalogue, from --stars.
     std::string rs = "gl";          // Ogre's render system: gl or d3d11.
     bool check = false;
     std::string save;
@@ -267,6 +269,9 @@ vgl::ogre::globe_settings settings_for(const scene& s)
     g.contour_interval = s.debug.contour_interval;
     g.sea_surface = s.debug.sea;
     g.atmosphere = s.debug.atmosphere;
+    g.stars = s.debug.stars;
+    g.sidereal_angle =
+        sample::sidereal_angle(s.debug.time_of_day, s.debug.day_of_year, s.debug.year);
     return g;
 }
 
@@ -280,6 +285,10 @@ globe_create(vgl::context& ctx, ogre_app& a, vgl_depth_convention depth, vgl::og
     if (r == vgl::result::success)
     {
         a.scene->getRootSceneNode()->attachObject(globe);
+        const std::vector<vgl_star> stars = sample::sky_stars();
+        expect(globe->stars_set(stars.data(), static_cast<std::uint32_t>(stars.size())) ==
+                   vgl::result::success,
+               "the stars are set");
     }
     return r;
 }
@@ -399,6 +408,7 @@ int run_check(const options& o, vgl::context& ctx)
                 // With the atmosphere, the same with every convention.
                 scene air = s;
                 air.debug.atmosphere = true;
+                air.debug.stars = true;
                 globe->settings_set(settings_for(air));
                 a.root->renderOneFrame();
                 image sky = read_image(target);
@@ -535,6 +545,7 @@ int run_interactive(const options& o,
         }
         scene s;
         s.debug.atmosphere = true;
+        s.debug.stars = true;
         s.depth = o.depth;
         s.camera = places[0].camera;
         vgl::ogre::globe* globe = nullptr;
@@ -729,6 +740,10 @@ bool parse(int argc, char** argv, options& o)
         {
             o.data = argv[++i];
         }
+        else if (std::strcmp(a, "--stars") == 0 && i + 1 < argc)
+        {
+            o.stars = argv[++i];
+        }
         else if (std::strcmp(a, "--pack") == 0 && i + 1 < argc)
         {
             o.packs.emplace_back(argv[++i]);
@@ -774,13 +789,25 @@ int main(int argc, char** argv)
     {
         std::fprintf(stderr,
                      "usage: vgl-ogre [--data <directory> | --pack <uri>...] [--rs gl|d3d11] "
-                     "[--depth logarithmic|reversed|conventional] [--check] [--save <directory>]\n"
+                     "[--depth logarithmic|reversed|conventional] [--check] [--save <directory>] "
+                     "[--stars <catalog>]\n"
                      "--pack, repeated, replaces the sample set, and cannot be combined with "
                      "--data or --check. Without either, the sample set is read from "
-                     "$%s, or else from %s.\n",
+                     "$%s, or else from %s. --stars draws the stars of the Yale Bright Star "
+                     "Catalogue's file \"catalog\" (CDS V/50, decompressed) instead of "
+                     "generated ones.\n",
                      sample::data_variable,
                      VGL_SAMPLE_DATA_DIR);
         return 2;
+    }
+    if (!o.stars.empty())
+    {
+        std::string error;
+        if (!sample::stars_load(o.stars, error))
+        {
+            std::fprintf(stderr, "--stars: %s\n", error.c_str());
+            return 1;
+        }
     }
 #if !defined(_WIN32)
     // Ogre's OpenGL draws into X11 windows.

@@ -7,6 +7,7 @@
 // (terrain.hlsl) are compiled at build time.
 
 #include "backends/common/atmosphere_view.hpp"
+#include "backends/common/stars.hpp"
 #include "common/host_memory.hpp"
 #include "common/pointer_map.hpp"
 
@@ -15,6 +16,8 @@
 // The compiled shaders, from terrain.hlsl (CMakeLists.txt).
 #include "sky_ps.h"
 #include "sky_vs.h"
+#include "stars_ps.h"
+#include "stars_vs.h"
 #include "terrain_ps.h"
 #include "terrain_ps_log.h"
 #include "terrain_vs.h"
@@ -79,8 +82,11 @@ struct frame_constants
     std::array<float, 16> inverse_projection = {};
     float far_depth = 0.0f;
     std::array<float, 3> sky_pad = {};
+    std::array<float, 12> celestial = {}; // Three rows of four.
+    std::array<float, 2> viewport = {};
+    std::array<float, 2> stars_pad = {};
 };
-static_assert(sizeof(frame_constants) == 256, "frame_constants must match terrain.hlsl");
+static_assert(sizeof(frame_constants) == 320, "frame_constants must match terrain.hlsl");
 
 struct item_constants
 {
@@ -166,6 +172,15 @@ struct vgl_d3d11_backend
     ID3D11DepthStencilState* sky_depth_state = nullptr;
     ID3D11RasterizerState* sky_rasterizer = nullptr;
     ID3D11BlendState* sky_blend = nullptr;
+    // The stars: the host's, as quads (backends/common/stars.hpp), kept on the CPU to be
+    // uploaded again after a reset; the buffer is made when they are first drawn.
+    ID3D11VertexShader* stars_vertex_shader = nullptr;
+    ID3D11PixelShader* stars_pixel_shader = nullptr;
+    ID3D11InputLayout* stars_layout = nullptr;
+    ID3D11BlendState* stars_blend = nullptr;
+    ID3D11Buffer* stars_buffer = nullptr;
+    vgl::backends::star_vertex* star_vertices = nullptr;
+    std::uint32_t star_count = 0;
 
     vgl::common::pointer_map<d3d_resource> resources;
 };
@@ -235,7 +250,57 @@ vgl_result build_pipeline(vgl_d3d11_backend& b, const char* function)
         failed(b,
                d->CreatePixelShader(g_sky_ps, sizeof(g_sky_ps), nullptr, &b.sky_pixel_shader),
                function,
-               "the sky's pixel shader"))
+               "the sky's pixel shader") ||
+        failed(
+            b,
+            d->CreateVertexShader(g_stars_vs, sizeof(g_stars_vs), nullptr, &b.stars_vertex_shader),
+            function,
+            "the stars' vertex shader") ||
+        failed(b,
+               d->CreatePixelShader(g_stars_ps, sizeof(g_stars_ps), nullptr, &b.stars_pixel_shader),
+               function,
+               "the stars' pixel shader"))
+    {
+        return VGL_RESULT_BACKEND_ERROR;
+    }
+    const std::array<D3D11_INPUT_ELEMENT_DESC, 4> star_layout = {{
+        {"TEXCOORD",
+         0,
+         DXGI_FORMAT_R32G32B32_FLOAT,
+         0,
+         vgl::backends::star_direction_offset,
+         D3D11_INPUT_PER_VERTEX_DATA,
+         0},
+        {"TEXCOORD",
+         1,
+         DXGI_FORMAT_R32G32_FLOAT,
+         0,
+         vgl::backends::star_corner_offset,
+         D3D11_INPUT_PER_VERTEX_DATA,
+         0},
+        {"TEXCOORD",
+         2,
+         DXGI_FORMAT_R32G32_FLOAT,
+         0,
+         vgl::backends::star_light_offset,
+         D3D11_INPUT_PER_VERTEX_DATA,
+         0},
+        {"TEXCOORD",
+         3,
+         DXGI_FORMAT_R32G32B32_FLOAT,
+         0,
+         vgl::backends::star_color_offset,
+         D3D11_INPUT_PER_VERTEX_DATA,
+         0},
+    }};
+    if (failed(b,
+               d->CreateInputLayout(star_layout.data(),
+                                    static_cast<UINT>(star_layout.size()),
+                                    g_stars_vs,
+                                    sizeof(g_stars_vs),
+                                    &b.stars_layout),
+               function,
+               "the stars' input layout"))
     {
         return VGL_RESULT_BACKEND_ERROR;
     }
@@ -366,6 +431,12 @@ vgl_result build_pipeline(vgl_d3d11_backend& b, const char* function)
     {
         return VGL_RESULT_BACKEND_ERROR;
     }
+    // The stars are added to the render target, keeping its alpha.
+    blend.RenderTarget[0].DestBlend = D3D11_BLEND_ONE;
+    if (failed(b, d->CreateBlendState(&blend, &b.stars_blend), function, "the stars' blend state"))
+    {
+        return VGL_RESULT_BACKEND_ERROR;
+    }
     return VGL_RESULT_SUCCESS;
 }
 
@@ -381,10 +452,30 @@ void forget_resources(vgl_d3d11_backend& b)
     b.resources.clear();
 }
 
+// Frees the CPU copy of the stars, and their buffer.
+void free_stars(vgl_d3d11_backend& b)
+{
+    release(b.stars_buffer);
+    if (b.star_vertices != nullptr)
+    {
+        b.mem.deallocate(b.star_vertices,
+                         std::size_t{b.star_count} * vgl::backends::star_vertex_count *
+                             sizeof(vgl::backends::star_vertex),
+                         alignof(vgl::backends::star_vertex));
+    }
+    b.star_vertices = nullptr;
+    b.star_count = 0;
+}
+
 // Releases everything the backend holds of its device, and the device itself.
 void stop(vgl_d3d11_backend& b)
 {
     forget_resources(b);
+    release(b.stars_buffer);
+    release(b.stars_blend);
+    release(b.stars_layout);
+    release(b.stars_pixel_shader);
+    release(b.stars_vertex_shader);
     release(b.sky_blend);
     release(b.sky_rasterizer);
     release(b.sky_depth_state);
@@ -746,7 +837,28 @@ bool write_constants(ID3D11DeviceContext* dc, ID3D11Buffer* buffer, const T& val
     return true;
 }
 
-void draw_items(const vgl_d3d11_backend& b,
+// Creates the stars' vertex buffer, once after each set or reset; false if there is none.
+bool upload_stars(vgl_d3d11_backend& b)
+{
+    if (b.stars_buffer != nullptr)
+    {
+        return true;
+    }
+    D3D11_BUFFER_DESC desc{};
+    desc.ByteWidth =
+        static_cast<UINT>(std::size_t{b.star_count} * vgl::backends::star_vertex_count *
+                          sizeof(vgl::backends::star_vertex));
+    desc.Usage = D3D11_USAGE_IMMUTABLE;
+    desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+    D3D11_SUBRESOURCE_DATA data{};
+    data.pSysMem = b.star_vertices;
+    return !failed(b,
+                   b.device->CreateBuffer(&desc, &data, &b.stars_buffer),
+                   "vgl_d3d11_backend_draw",
+                   "the stars' vertex buffer");
+}
+
+void draw_items(vgl_d3d11_backend& b,
                 const vgl_frame* frame,
                 const vgl_d3d11_draw_info& info,
                 const vgl_dmat4& projection,
@@ -781,8 +893,25 @@ void draw_items(const vgl_d3d11_backend& b,
         fc.sun_planet = air.sun_planet;
         fc.atmosphere = 1;
         fc.inverse_projection = to_float(inverse);
-        // The far plane's depth: 0 for reversed-Z, else 1, the logarithmic convention's too.
-        fc.far_depth = b.depth == VGL_DEPTH_CONVENTION_REVERSED_Z ? 0.0f : 1.0f;
+    }
+    // The far plane's depth: 0 for reversed-Z, else 1, the logarithmic convention's too.
+    fc.far_depth = b.depth == VGL_DEPTH_CONVENTION_REVERSED_Z ? 0.0f : 1.0f;
+    const bool stars = info.stars != VGL_FALSE && view != nullptr && b.star_count != 0;
+    if (stars)
+    {
+        const std::array<float, 9> c =
+            vgl::backends::celestial_to_camera(*view, info.sidereal_angle);
+        for (std::size_t i = 0; i < 3; ++i)
+        {
+            for (std::size_t j = 0; j < 3; ++j)
+            {
+                fc.celestial[i * 4 + j] = c[j * 3 + i];
+            }
+        }
+        UINT viewports = 1;
+        D3D11_VIEWPORT vp{};
+        dc->RSGetViewports(&viewports, &vp);
+        fc.viewport = {std::max(vp.Width, 1.0f), std::max(vp.Height, 1.0f)};
     }
     // The sun in camera space: only the view's rotation applies to a direction.
     if (view != nullptr && (sun.x != 0.0 || sun.y != 0.0 || sun.z != 0.0))
@@ -899,6 +1028,20 @@ void draw_items(const vgl_d3d11_backend& b,
         dc->IASetVertexBuffers(0, 1, &vertices, &stride, &offset);
         dc->DrawIndexed(item.index_count, 0, 0);
     }
+    if (stars && upload_stars(b))
+    {
+        // A quad per star, where nothing was drawn, added to the render target.
+        const UINT stride = sizeof(vgl::backends::star_vertex);
+        const UINT offset = 0;
+        dc->IASetInputLayout(b.stars_layout);
+        dc->IASetVertexBuffers(0, 1, &b.stars_buffer, &stride, &offset);
+        dc->VSSetShader(b.stars_vertex_shader, nullptr, 0);
+        dc->PSSetShader(b.stars_pixel_shader, nullptr, 0);
+        dc->RSSetState(b.sky_rasterizer);
+        dc->OMSetDepthStencilState(b.sky_depth_state, 0);
+        dc->OMSetBlendState(b.stars_blend, nullptr, 0xFFFFFFFF);
+        dc->Draw(b.star_count * vgl::backends::star_vertex_count, 0);
+    }
     if (sky)
     {
         // One triangle, without vertex buffers, where nothing was drawn.
@@ -981,10 +1124,55 @@ extern "C" VGL_D3D11_API vgl_result vgl_d3d11_backend_destroy(vgl_d3d11_backend*
         return VGL_RESULT_SUCCESS;
     }
     stop(*backend);
+    free_stars(*backend);
     // A later consumer of the context must receive every resource again.
     static_cast<void>(vgl_context_resources_reset(backend->context));
     const memory mem = backend->mem;
     mem.destroy(backend);
+    return VGL_RESULT_SUCCESS;
+}
+
+extern "C" VGL_D3D11_API vgl_result vgl_d3d11_backend_stars_set(vgl_d3d11_backend* backend,
+                                                                const vgl_star* stars,
+                                                                std::uint32_t star_count)
+{
+    if (backend == nullptr || (stars == nullptr && star_count != 0) ||
+        star_count > vgl::backends::max_stars)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    vgl_d3d11_backend& b = *backend;
+    for (std::uint32_t i = 0; i < star_count; ++i)
+    {
+        if (!vgl::backends::star_is_valid(stars[i]))
+        {
+            log(b,
+                VGL_LOG_LEVEL_ERROR,
+                "vgl_d3d11_backend_stars_set: star %u is invalid: check that its direction is of "
+                "unit length, that its values are finite, its colour from 0 to 1, and reserved 0",
+                static_cast<unsigned>(i));
+            return VGL_RESULT_INVALID_ARGUMENT;
+        }
+    }
+    const std::size_t count = std::size_t{star_count} * vgl::backends::star_vertex_count;
+    vgl::backends::star_vertex* vertices = nullptr;
+    if (count != 0)
+    {
+        vertices = static_cast<vgl::backends::star_vertex*>(b.mem.allocate(
+            count * sizeof(vgl::backends::star_vertex), alignof(vgl::backends::star_vertex)));
+        if (vertices == nullptr)
+        {
+            return VGL_RESULT_OUT_OF_MEMORY;
+        }
+        for (std::uint32_t i = 0; i < star_count; ++i)
+        {
+            vgl::backends::star_quad(stars[i],
+                                     vertices + std::size_t{i} * vgl::backends::star_vertex_count);
+        }
+    }
+    free_stars(b);
+    b.star_vertices = vertices;
+    b.star_count = star_count;
     return VGL_RESULT_SUCCESS;
 }
 
@@ -1038,7 +1226,8 @@ extern "C" VGL_D3D11_API vgl_result vgl_d3d11_backend_draw(vgl_d3d11_backend* ba
         VGL_D3D11_DEBUG_FLAG_IMAGERY_SOURCE | VGL_D3D11_DEBUG_FLAG_HEIGHT_COLORS |
         VGL_D3D11_DEBUG_FLAG_CONTOURS;
     if ((info.debug_flags & ~known_flags) != 0 || info.reserved != 0 || info.reserved2 != 0 ||
-        info.reserved3 != 0 || !std::isfinite(info.contour_interval) || info.contour_interval < 0.0)
+        info.reserved3 != 0 || info.reserved4 != 0 || !std::isfinite(info.sidereal_angle) ||
+        !std::isfinite(info.contour_interval) || info.contour_interval < 0.0)
     {
         log(b,
             VGL_LOG_LEVEL_ERROR,

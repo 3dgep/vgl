@@ -391,6 +391,65 @@ MAIN_DECLARATION
 }
 )shader";
 
+// The stars (backends/gl/shaders.hpp): a quad per star at the far depth, widened in pixels
+// around the star's direction.
+inline constexpr const char* stars_vertex_shader = R"shader(
+#include <OgreUnifiedShader.h>
+//@vgl_atmosphere
+
+OGRE_UNIFORMS(
+    uniform mat4 u_projection; // Ogre's, flipped for render textures as it draws them.
+    uniform vec4 u_viewport;   // Width and height in pixels, and their inverses.
+    uniform vec4 u_celestial0; // The celestial frame to camera space, a row in each.
+    uniform vec4 u_celestial1;
+    uniform vec4 u_celestial2;
+    uniform vec4 u_sky;        // The far plane's depth in normalized device coordinates; unused.
+    uniform vec4 u_to_planet0;
+    uniform vec4 u_to_planet1;
+    uniform vec4 u_to_planet2;
+    uniform vec4 u_camera;
+    uniform vec4 u_sun_planet;
+)
+
+MAIN_PARAMETERS
+IN(vec4 vertex, POSITION) // The direction, in the celestial frame.
+IN(vec2 uv0, TEXCOORD0)   // The corner: -1 or 1 on each axis.
+IN(vec2 uv1, TEXCOORD1)   // Intensity, radius in pixels.
+IN(vec3 uv2, TEXCOORD2)   // Colour.
+OUT(vec2 v_corner, TEXCOORD0)
+OUT(vec3 v_color, TEXCOORD1)
+MAIN_DECLARATION
+{
+    vec3 a = vertex.xyz;
+    vec3 d = vec3(dot(u_celestial0.xyz, a), dot(u_celestial1.xyz, a), dot(u_celestial2.xyz, a));
+    vec4 clip = mul(u_projection, vec4(d, 0.0));
+    float visible = 1.0;
+    if (u_sun_planet.w > 0.5)
+    {
+        vec3 p = vec3(dot(u_to_planet0.xyz, d), dot(u_to_planet1.xyz, d), dot(u_to_planet2.xyz, d));
+        visible = vgl_star_visibility(u_camera.xyz, u_camera.w, normalize(p), u_sun_planet.xyz);
+    }
+    v_color = uv2 * (uv1.x * visible);
+    v_corner = uv0;
+    clip.xy += uv0 * uv1.y * 2.0 * u_viewport.zw * clip.w;
+    clip.z = u_sky.x * clip.w;
+    gl_Position = clip.w > 0.0 ? clip : vec4(0.0, 0.0, 2.0, 1.0);
+}
+)shader";
+
+inline constexpr const char* stars_fragment_shader = R"shader(
+#include <OgreUnifiedShader.h>
+
+MAIN_PARAMETERS
+IN(vec2 v_corner, TEXCOORD0)
+IN(vec3 v_color, TEXCOORD1)
+MAIN_DECLARATION
+{
+    float glow = exp(-3.0 * dot(v_corner, v_corner));
+    gl_FragColor = vec4(v_color * glow, 0.0);
+}
+)shader";
+
 } // namespace vgl::ogre::detail
 
 #endif // VGL_BACKENDS_OGRE_SHADERS_HPP

@@ -64,6 +64,13 @@ public:
         return static_cast<result>(vgl_gl_backend_draw(handle_, info));
     }
 
+    // Sets the stars it draws when asked to (vgl_gl_backend_stars_set).
+    [[nodiscard]] result stars_set(std::span<const vgl_star> stars) noexcept
+    {
+        return static_cast<result>(vgl_gl_backend_stars_set(
+            handle_, stars.data(), static_cast<std::uint32_t>(stars.size())));
+    }
+
     // Recovers from a lost OpenGL context, on the new one.
     [[nodiscard]] result context_lost() noexcept
     {

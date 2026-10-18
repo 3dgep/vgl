@@ -37,7 +37,9 @@ foreach(variant
         "terrain_ps|ps_5_0|ps_main|"
         "terrain_ps_log|ps_5_0|ps_main|/DVGL_LOGARITHMIC_DEPTH=1"
         "sky_vs|vs_5_0|sky_vs_main|"
-        "sky_ps|ps_5_0|sky_ps_main|")
+        "sky_ps|ps_5_0|sky_ps_main|"
+        "stars_vs|vs_5_0|stars_vs_main|"
+        "stars_ps|ps_5_0|stars_ps_main|")
     string(REPLACE "|" ";" parts "${variant}")
     list(GET parts 0 name)
     list(GET parts 1 profile)

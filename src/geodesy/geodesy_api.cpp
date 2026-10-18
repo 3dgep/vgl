@@ -106,3 +106,22 @@ extern "C" VGL_API vgl_result vgl_ellipsoid_enu_frame_get(const vgl_ellipsoid* e
     }
     return VGL_RESULT_SUCCESS;
 }
+
+extern "C" VGL_API vgl_result vgl_earth_rotation_angle_get(double julian_date, double* out_angle)
+{
+    if (out_angle == nullptr || !std::isfinite(julian_date))
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    // IERS Conventions (2010), equation 5.15, with the day's fraction apart from the whole
+    // days, so that the turns keep their precision.
+    const double days = julian_date - 2451545.0;
+    const double turns = 0.7790572732640 + 0.00273781191135448 * days + std::fmod(days, 1.0);
+    double angle = 2.0 * vgl::internal::pi * std::fmod(turns, 1.0);
+    if (angle < 0.0)
+    {
+        angle += 2.0 * vgl::internal::pi;
+    }
+    *out_angle = angle;
+    return VGL_RESULT_SUCCESS;
+}

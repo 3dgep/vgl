@@ -18,7 +18,9 @@ add_library(vgl_sample_common STATIC
     common/sample_camera.hpp
     common/sample_check.cpp
     common/sample_check.hpp
-    common/sample_data.hpp)
+    common/sample_data.hpp
+    common/stars.cpp
+    common/stars.hpp)
 target_include_directories(vgl_sample_common PUBLIC common)
 target_link_libraries(vgl_sample_common PUBLIC vgl::vgl)
 vgl_target_options(vgl_sample_common)

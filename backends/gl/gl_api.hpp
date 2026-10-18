@@ -57,6 +57,7 @@ inline constexpr GLenum GL_DEPTH_TEST = 0x0B71;
 inline constexpr GLenum GL_DEPTH_WRITEMASK = 0x0B72;
 inline constexpr GLenum GL_DEPTH_FUNC = 0x0B74;
 inline constexpr GLenum GL_BLEND = 0x0BE2;
+inline constexpr GLenum GL_VIEWPORT = 0x0BA2;
 inline constexpr GLenum GL_ZERO = 0;
 inline constexpr GLenum GL_ONE = 1;
 inline constexpr GLenum GL_SRC_ALPHA = 0x0302;
@@ -162,6 +163,7 @@ inline constexpr GLenum GL_ZERO_TO_ONE = 0x935F;
     X(void, UseProgram, (GLuint program))                                                          \
     X(GLint, GetUniformLocation, (GLuint program, const GLchar* name))                             \
     X(void, Uniform1f, (GLint location, GLfloat v0))                                               \
+    X(void, Uniform2f, (GLint location, GLfloat v0, GLfloat v1))                                   \
     X(void, Uniform3f, (GLint location, GLfloat v0, GLfloat v1, GLfloat v2))                       \
     X(void,                                                                                        \
       UniformMatrix4fv,                                                                            \

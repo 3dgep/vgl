@@ -182,3 +182,15 @@ vec3 vgl_expose(vec3 c)
 {
     return vec3(1.0, 1.0, 1.0) - exp(-c);
 }
+
+// How much of a star shows through the sky in a direction from the camera: all of it where the
+// sky is dark, fading to none where it is a little brighter than a faint star, as by day. The
+// sky pass then dims what shows by the transmittance.
+float vgl_star_visibility(vec3 origin, float height, vec3 direction, vec3 sun)
+{
+    vec3 inscatter;
+    vec3 transmittance;
+    vgl_atmosphere(origin, height, direction, 1.0e9, sun, 8, inscatter, transmittance);
+    vec3 sky = vgl_expose(inscatter * vgl_sky_brightness);
+    return clamp(1.0 - 8.0 * dot(sky, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
+}

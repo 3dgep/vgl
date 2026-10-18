@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <limits>
 #include <random>
 
 namespace
@@ -378,4 +379,25 @@ TEST_CASE(bounding_box_of_small_tile_is_tight)
     CHECK_NEAR(box.half_extents.y * 2.0, 4892.0, 10.0);
     CHECK(box.half_extents.z * 2.0 < 102.0);
     CHECK(box.half_extents.z * 2.0 > 100.0);
+}
+
+TEST_CASE(earth_rotation_angle_follows_the_iers_definition)
+{
+    // At J2000.0, 2 pi times 0.7790572732640; a sidereal day later, the same; half a day later,
+    // half a turn on.
+    double a = 0.0;
+    REQUIRE(vgl_earth_rotation_angle_get(2451545.0, &a) == VGL_RESULT_SUCCESS);
+    CHECK_NEAR(a, 2.0 * pi * 0.7790572732640, 1e-12);
+    const double sidereal_day = 1.0 / 1.00273781191135448;
+    double b = 0.0;
+    REQUIRE(vgl_earth_rotation_angle_get(2451545.0 + sidereal_day, &b) == VGL_RESULT_SUCCESS);
+    CHECK_NEAR(b, a, 1e-8); // A Julian date as a double is exact to about 5e-10 days.
+    REQUIRE(vgl_earth_rotation_angle_get(2451545.0 + 0.5 * sidereal_day, &b) == VGL_RESULT_SUCCESS);
+    CHECK_NEAR(b, std::fmod(a + pi, 2.0 * pi), 1e-8);
+    // Decades on, the angle stays in [0, 2 pi) and keeps its precision.
+    REQUIRE(vgl_earth_rotation_angle_get(2461041.5 + 0.25, &b) == VGL_RESULT_SUCCESS);
+    CHECK(b >= 0.0 && b < 2.0 * pi);
+    CHECK_EQ(vgl_earth_rotation_angle_get(2451545.0, nullptr), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_earth_rotation_angle_get(std::numeric_limits<double>::infinity(), &b),
+             VGL_RESULT_INVALID_ARGUMENT);
 }

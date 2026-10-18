@@ -153,6 +153,12 @@ typedef struct vgl_d3d11_draw_info
      * the haze and the sun's colour on the terrain. */
     vgl_bool atmosphere;
     uint32_t reserved3;
+    /* VGL_TRUE draws the stars set with vgl_d3d11_backend_stars_set, behind the sky, as
+     * vgl_gl_draw_info.stars describes. */
+    vgl_bool stars;
+    uint32_t reserved4;
+    /* The Earth rotation angle in radians (vgl_earth_rotation_angle_get). */
+    double sidereal_angle;
 } vgl_d3d11_draw_info;
 
 /* Debug views of vgl_d3d11_draw_info.debug_flags, the same as the OpenGL backend's
@@ -192,6 +198,28 @@ typedef enum vgl_d3d11_debug_flag
  */
 VGL_D3D11_API vgl_result vgl_d3d11_backend_draw(vgl_d3d11_backend* backend,
                                                 const vgl_d3d11_draw_info* info);
+
+/**
+ * Sets the stars the backend draws when vgl_d3d11_draw_info.stars asks for them, replacing those
+ * set before, as vgl_gl_backend_stars_set does: copied, kept for vgl_d3d11_backend_reset, and
+ * drawn as small quads. vgl ships no stars.
+ *
+ * @param backend     The backend.
+ * @param stars       The stars, or null with star_count 0 to remove them.
+ * @param star_count  How many, at most 400,000.
+ *
+ * @retval VGL_RESULT_SUCCESS           The stars were set.
+ * @retval VGL_RESULT_INVALID_ARGUMENT  backend is null, stars is null with stars, there are
+ *                                      too many, or a star is invalid (vgl_gl_backend_stars_set).
+ * @retval VGL_RESULT_OUT_OF_MEMORY     The copy could not be allocated; the stars set before
+ *                                      stay.
+ *
+ * @par Thread safety
+ * Render thread.
+ */
+VGL_D3D11_API vgl_result vgl_d3d11_backend_stars_set(vgl_d3d11_backend* backend,
+                                                     const vgl_star* stars,
+                                                     uint32_t star_count);
 
 /**
  * Recovers from a removed device: forgets the backend's objects of the old device without

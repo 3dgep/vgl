@@ -10,6 +10,8 @@
 #include <vgl/context.hpp>
 #include <vgl/d3d11.h>
 
+#include <cstdint>
+#include <span>
 #include <utility>
 
 namespace vgl
@@ -62,6 +64,13 @@ public:
     [[nodiscard]] result draw(const vgl_d3d11_draw_info* info = nullptr) noexcept
     {
         return static_cast<result>(vgl_d3d11_backend_draw(handle_, info));
+    }
+
+    // Sets the stars it draws when asked to (vgl_d3d11_backend_stars_set).
+    [[nodiscard]] result stars_set(std::span<const vgl_star> stars) noexcept
+    {
+        return static_cast<result>(vgl_d3d11_backend_stars_set(
+            handle_, stars.data(), static_cast<std::uint32_t>(stars.size())));
     }
 
     // Recovers from a removed device, on the new one.

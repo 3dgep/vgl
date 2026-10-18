@@ -3,6 +3,8 @@
 
 #include "overlay.hpp"
 
+#include "stars.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdarg>
@@ -166,6 +168,10 @@ void overlay::frame(const vgl_context_statistics& s,
 {
     frame_ms_[next_] = static_cast<float>(frame_seconds * 1000.0);
     next_ = (next_ + 1) % frame_ms_.size();
+    if (settings.current_time)
+    {
+        current_time_get(settings.time_of_day, settings.day_of_year, settings.year);
+    }
 
     backend_.new_frame(backend_.user_data);
     if (!backend_.external_frames)
@@ -334,6 +340,7 @@ void overlay::panel(const vgl_context_statistics& s, const panel_info& info, deb
         ImGui::Checkbox("Contour lines (F7)", &d.contours);
         ImGui::Checkbox("Sea surface (F8)", &d.sea);
         ImGui::Checkbox("Atmosphere (F9)", &d.atmosphere);
+        ImGui::Checkbox("Stars", &d.stars);
         if (d.contours)
         {
             ImGui::Checkbox("Interval from altitude", &d.contour_auto);
@@ -350,8 +357,18 @@ void overlay::panel(const vgl_context_statistics& s, const panel_info& info, deb
         ImGui::Checkbox("Sunlight (L)", &d.sunlight);
         if (d.sunlight)
         {
-            ImGui::SliderFloat("Time (UTC)", &d.time_of_day, 0.0f, 24.0f, "%.2f h");
-            ImGui::SliderInt("Day of year", &d.day_of_year, 1, 365);
+            // With the current time, the sliders show it, and take over where it was when it is
+            // turned off.
+            ImGui::Checkbox("Current time", &d.current_time);
+            ImGui::BeginDisabled(d.current_time);
+            // Shown as hours and minutes: a format without a conversion is shown as it is.
+            const int clock = static_cast<int>(d.time_of_day * 60.0f);
+            std::array<char, 16> shown{};
+            std::snprintf(shown.data(), shown.size(), "%02d:%02d", (clock / 60) % 24, clock % 60);
+            ImGui::SliderFloat("Time (UTC)", &d.time_of_day, 0.0f, 24.0f, shown.data());
+            ImGui::SliderInt("Day of year", &d.day_of_year, 1, 366);
+            ImGui::SliderInt("Year", &d.year, 1900, 2100);
+            ImGui::EndDisabled();
             // The local solar time under the camera, from its longitude.
             const double local = std::fmod(d.time_of_day + info.live.longitude / 15.0 + 48.0, 24.0);
             const int minutes = static_cast<int>(local * 60.0);

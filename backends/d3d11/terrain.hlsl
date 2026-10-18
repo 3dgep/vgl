@@ -36,6 +36,11 @@ cbuffer frame_constants : register(b0)
     float4x4 u_inverse_projection;
     float u_far_depth;
     float3 u_sky_pad;
+    // The stars: the celestial frame to camera space, a row in each float4, and the viewport's
+    // size in pixels.
+    float4 u_celestial[3];
+    float2 u_viewport;
+    float2 u_stars_pad;
 };
 
 // Camera space to the atmosphere's frame.
@@ -375,4 +380,48 @@ float4 sky_ps_main(sky_varyings i) : SV_Target
     float disc = smoothstep(0.999955, 0.999975, dot(direction, u_sun_planet));
     float3 color = vgl_expose(inscatter * vgl_sky_brightness) + transmittance * disc;
     return float4(color, (transmittance.r + transmittance.g + transmittance.b) / 3.0);
+}
+
+// The stars (backends/gl/shaders.hpp): a quad per star at the far depth, widened in pixels
+// around the star's direction.
+struct star_input
+{
+    float3 direction : TEXCOORD0; // Celestial frame.
+    float2 corner : TEXCOORD1;    // -1 or 1 on each axis.
+    float2 light : TEXCOORD2;     // Intensity, radius in pixels.
+    float3 color : TEXCOORD3;
+};
+
+struct star_varyings
+{
+    float4 clip : SV_Position;
+    float2 corner : TEXCOORD0;
+    float3 color : TEXCOORD1;
+};
+
+star_varyings stars_vs_main(star_input v)
+{
+    star_varyings o;
+    float3 d = float3(dot(u_celestial[0].xyz, v.direction), dot(u_celestial[1].xyz, v.direction),
+                      dot(u_celestial[2].xyz, v.direction));
+    float4 clip = mul(u_projection, float4(d, 0.0)); // A direction: at infinity.
+    float visible = 1.0;
+    if (u_atmosphere != 0)
+    {
+        visible = vgl_star_visibility(u_camera_km, u_camera_height, normalize(to_planet(d)),
+                                      u_sun_planet);
+    }
+    o.color = v.color * (v.light.x * visible);
+    o.corner = v.corner;
+    clip.xy += v.corner * v.light.y * 2.0 / u_viewport * clip.w;
+    clip.z = u_far_depth * clip.w;
+    // Behind the camera: outside the clip volume, so nothing is drawn.
+    o.clip = clip.w > 0.0 ? clip : float4(0.0, 0.0, 2.0, 1.0);
+    return o;
+}
+
+float4 stars_ps_main(star_varyings i) : SV_Target
+{
+    float glow = exp(-3.0 * dot(i.corner, i.corner));
+    return float4(i.color * glow, 0.0);
 }

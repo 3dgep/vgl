@@ -181,6 +181,14 @@ typedef struct vgl_gl_draw_info
      * holds there, which shows through where the sky is thin, as in space. */
     vgl_bool atmosphere;
     uint32_t reserved3;
+    /* VGL_TRUE draws the stars set with vgl_gl_backend_stars_set, behind the sky: where
+     * nothing was drawn before them, at the far depth, added to what the framebuffer holds
+     * there. With the atmosphere they fade where the sky is bright, as by day. */
+    vgl_bool stars;
+    uint32_t reserved4;
+    /* The Earth rotation angle in radians (vgl_earth_rotation_angle_get), which turns the
+     * stars' celestial frame into ECEF. */
+    double sidereal_angle;
 } vgl_gl_draw_info;
 
 /* Debug views of vgl_gl_draw_info.debug_flags, for inspecting level of detail and loading. */
@@ -230,6 +238,31 @@ typedef enum vgl_gl_debug_flag
  * Render thread, with the backend's OpenGL context (or one sharing its objects) current.
  */
 VGL_GL_API vgl_result vgl_gl_backend_draw(vgl_gl_backend* backend, const vgl_gl_draw_info* info);
+
+/**
+ * Sets the stars the backend draws when vgl_gl_draw_info.stars asks for them, replacing those
+ * set before; vgl ships none, so the host supplies them from a catalogue of its choice. The
+ * stars are copied, and kept to be drawn again after vgl_gl_backend_reset. Each is drawn as a
+ * small quad of two triangles, not as a point.
+ *
+ * @param backend     The backend.
+ * @param stars       The stars, or null with star_count 0 to remove them.
+ * @param star_count  How many, at most 400,000.
+ *
+ * @retval VGL_RESULT_SUCCESS           The stars were set.
+ * @retval VGL_RESULT_INVALID_ARGUMENT  backend is null, stars is null with stars, there are
+ *                                      too many, or a star is invalid: its direction is not of
+ *                                      unit length, a value is not finite, a colour channel is
+ *                                      outside [0, 1], or reserved is not 0.
+ * @retval VGL_RESULT_OUT_OF_MEMORY     The copy could not be allocated; the stars set before
+ *                                      stay.
+ *
+ * @par Thread safety
+ * Render thread, with the backend's OpenGL context (or one sharing its objects) current.
+ */
+VGL_GL_API vgl_result vgl_gl_backend_stars_set(vgl_gl_backend* backend,
+                                               const vgl_star* stars,
+                                               uint32_t star_count);
 
 /**
  * Recovers from a lost OpenGL context, for example after an Android app returns from the

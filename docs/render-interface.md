@@ -376,7 +376,7 @@ The Ogre column is the one most worth checking against the client's project once
 
 ## 11. Not covered
 
-- **Shaders and lighting.** Each backend's material and its parameters (sun direction, the atmosphere) belong to that backend, not to the interface (design document, section 7.6).
+- **Shaders and lighting.** Each backend's material and its parameters (sun direction, the atmosphere, the stars) belong to that backend, not to the interface (design document, section 7.6). `vgl_star` sits in `vgl/render.h` only so that the backends share one type for the stars a host gives them; the core does not use it.
 - **Picking** (FR-07) uses the decoded tiles on the CPU and needs nothing from the GPU.
 - **Several views**, such as shadow maps or stereo, would need one draw list per view; the frame API can take a view index later.
 - **Overlap between update and draw** (section 9).

@@ -45,6 +45,22 @@ extern "C" {
 /* Normal in octahedral encoding: 2 x signed 16-bit normalized. */
 #define VGL_TERRAIN_SAMPLE_NORMAL_OFFSET 4
 
+/*
+ * A star, for the backends that draw a star field behind the sky (design document, section 7.6).
+ * The host supplies the stars, from a catalogue of its choice: vgl ships none.
+ */
+typedef struct vgl_star
+{
+    /* Unit direction in the celestial frame of J2000: x towards the vernal equinox, z towards
+     * the north celestial pole (vgl_earth_rotation_angle_get turns it into ECEF). */
+    float direction[3];
+    /* Apparent visual magnitude: about -1.5 for Sirius, 6.5 for the faintest seen by eye. */
+    float magnitude;
+    /* Linear RGB, 1 for the brightest channel. */
+    float color[3];
+    float reserved; /* 0 */
+} vgl_star;
+
 typedef enum vgl_texture_format
 {
     VGL_TEXTURE_FORMAT_RGBA8 = 1, /* Always supported. */

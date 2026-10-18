@@ -119,6 +119,15 @@ The pack format has its own version number, independent of the library version.
   backend, pixel for pixel but for anti-aliased wireframe lines on Direct3D 11. CI runs it on
   Linux with Mesa on full runs.
 - The samples in a GLFW window share their controls (`samples/common/glfw_controls.hpp`).
+- Stars, in every backend: `vgl_gl_backend_stars_set`, `vgl_d3d11_backend_stars_set` and
+  `vgl::ogre::globe::stars_set` take the host's stars (`vgl_star` in `vgl/render.h`), and a
+  `stars` flag and `sidereal_angle` in each draw's settings draw them behind the sky, as small
+  quads at the far depth, fading with the sky's brightness by day. vgl ships no catalogue.
+  `vgl_earth_rotation_angle_get` gives the angle for a time. The interactive samples generate a
+  random sky with the real one's numbers of stars per magnitude, and their checks draw it;
+  `--stars <file>` draws the real sky from a downloaded copy of the Yale Bright Star Catalogue.
+  Their panel's "Current time" sets the sun and the stars by the system clock, and a year
+  slider joins the time of day and the day of the year.
 - Baker: `sea_blend` on a source eases its sea, exactly 0 m, into the later sources' heights below
   sea level within a distance of where the pack's data ends, so that a regional GLO-30 pack
   meets GEBCO's seabed without a step, which the skirts showed as dark lines across the sea.

@@ -8,6 +8,7 @@
 
 #include "atmosphere_shader.hpp"
 #include "backends/common/atmosphere_view.hpp"
+#include "backends/common/stars.hpp"
 #include "common/host_memory.hpp"
 #include "common/pointer_map.hpp"
 #include "gl_api.hpp"
@@ -141,6 +142,20 @@ struct vgl_gl_backend
     std::array<GLint, max_layers> u_layers = {-1, -1, -1, -1};
     atmosphere_uniforms u_terrain_atmosphere;
 
+    // The stars: the host's, as quads (backends/common/stars.hpp), kept on the CPU to be
+    // uploaded again after a reset. The buffer is made when they are first drawn.
+    vgl::backends::star_vertex* star_vertices = nullptr;
+    std::uint32_t star_count = 0;
+    bool stars_uploaded = false;
+    GLuint stars_program = 0;
+    GLuint stars_buffer = 0;
+    GLuint stars_vertex_array = 0;
+    atmosphere_uniforms u_stars_atmosphere;
+    GLint u_stars_celestial = -1;
+    GLint u_stars_projection = -1;
+    GLint u_stars_viewport = -1;
+    GLint u_stars_far_depth = -1;
+
     // The sky, drawn as one triangle without vertex buffers, from an empty vertex array.
     GLuint sky_program = 0;
     GLuint sky_vertex_array = 0;
@@ -183,7 +198,7 @@ GLuint compile_shader(const vgl_gl_backend& b, const char* function, GLenum type
     const std::array<const GLchar*, 4> sources{
         b.dev.es ? es_preamble : desktop_preamble,
         b.depth == VGL_DEPTH_CONVENTION_LOGARITHMIC ? logarithmic_define : "",
-        type == GL_FRAGMENT_SHADER ? vgl::backends::atmosphere_shader : "",
+        vgl::backends::atmosphere_shader,
         body,
     };
     const GLuint shader = gl.CreateShader(type);
@@ -270,11 +285,24 @@ vgl_result build_program(vgl_gl_backend& b, const char* function)
         return VGL_RESULT_BACKEND_ERROR;
     }
     const GLuint sky = link_program(b, function, "sky", sky_vertex_shader, sky_fragment_shader);
-    if (sky == 0)
+    const GLuint stars =
+        sky == 0 ? 0
+                 : link_program(b, function, "stars", stars_vertex_shader, stars_fragment_shader);
+    if (stars == 0)
     {
         gl.DeleteProgram(program);
+        if (sky != 0)
+        {
+            gl.DeleteProgram(sky);
+        }
         return VGL_RESULT_BACKEND_ERROR;
     }
+    b.stars_program = stars;
+    b.u_stars_atmosphere = atmosphere_locations(gl, stars);
+    b.u_stars_celestial = gl.GetUniformLocation(stars, "u_celestial");
+    b.u_stars_projection = gl.GetUniformLocation(stars, "u_projection");
+    b.u_stars_viewport = gl.GetUniformLocation(stars, "u_viewport");
+    b.u_stars_far_depth = gl.GetUniformLocation(stars, "u_far_depth");
     b.program = program;
     b.sky_program = sky;
     b.u_terrain_atmosphere = atmosphere_locations(gl, program);
@@ -380,6 +408,21 @@ void forget_resources(vgl_gl_backend& b, bool delete_objects)
     b.resources.clear();
 }
 
+// Frees the CPU copy of the stars.
+void free_stars(vgl_gl_backend& b)
+{
+    if (b.star_vertices != nullptr)
+    {
+        b.mem.deallocate(b.star_vertices,
+                         std::size_t{b.star_count} * vgl::backends::star_vertex_count *
+                             sizeof(vgl::backends::star_vertex),
+                         alignof(vgl::backends::star_vertex));
+    }
+    b.star_vertices = nullptr;
+    b.star_count = 0;
+    b.stars_uploaded = false;
+}
+
 void stop(vgl_gl_backend& b, bool delete_objects)
 {
     forget_resources(b, delete_objects && b.ready);
@@ -388,11 +431,21 @@ void stop(vgl_gl_backend& b, bool delete_objects)
         b.gl.DeleteProgram(b.program);
         b.gl.DeleteProgram(b.sky_program);
         b.gl.DeleteVertexArrays(1, &b.sky_vertex_array);
+        b.gl.DeleteProgram(b.stars_program);
+        if (b.stars_vertex_array != 0)
+        {
+            b.gl.DeleteVertexArrays(1, &b.stars_vertex_array);
+            b.gl.DeleteBuffers(1, &b.stars_buffer);
+        }
         b.gl.DeleteSamplers(1, &b.sampler);
     }
     b.program = 0;
     b.sky_program = 0;
     b.sky_vertex_array = 0;
+    b.stars_program = 0;
+    b.stars_buffer = 0;
+    b.stars_vertex_array = 0;
+    b.stars_uploaded = false;
     b.sampler = 0;
     b.ready = false;
 }
@@ -751,6 +804,83 @@ void set_atmosphere(const functions& gl,
     }
 }
 
+// Uploads the stars into a buffer and vertex array, once after each set or reset.
+void upload_stars(vgl_gl_backend& b)
+{
+    const functions& gl = b.gl;
+    if (b.stars_vertex_array == 0)
+    {
+        gl.GenBuffers(1, &b.stars_buffer);
+        gl.GenVertexArrays(1, &b.stars_vertex_array);
+        gl.BindVertexArray(b.stars_vertex_array);
+        gl.BindBuffer(GL_ARRAY_BUFFER, b.stars_buffer);
+        constexpr auto stride = static_cast<GLsizei>(sizeof(vgl::backends::star_vertex));
+        gl.VertexAttribPointer(
+            0, 3, GL_FLOAT, GL_FALSE, stride, buffer_offset(vgl::backends::star_direction_offset));
+        gl.VertexAttribPointer(
+            1, 2, GL_FLOAT, GL_FALSE, stride, buffer_offset(vgl::backends::star_corner_offset));
+        gl.VertexAttribPointer(
+            2, 2, GL_FLOAT, GL_FALSE, stride, buffer_offset(vgl::backends::star_light_offset));
+        gl.VertexAttribPointer(
+            3, 3, GL_FLOAT, GL_FALSE, stride, buffer_offset(vgl::backends::star_color_offset));
+        for (GLuint i = 0; i < 4; ++i)
+        {
+            gl.EnableVertexAttribArray(i);
+        }
+    }
+    gl.BindBuffer(GL_ARRAY_BUFFER, b.stars_buffer);
+    gl.BufferData(
+        GL_ARRAY_BUFFER,
+        static_cast<GLsizeiptr>(std::size_t{b.star_count} * vgl::backends::star_vertex_count *
+                                sizeof(vgl::backends::star_vertex)),
+        b.star_vertices,
+        GL_STATIC_DRAW);
+    b.stars_uploaded = true;
+}
+
+// The stars, after the terrain and before the sky: quads at the far depth, where nothing was
+// drawn, added to what the framebuffer holds.
+void draw_stars(vgl_gl_backend& b,
+                const vgl_gl_draw_info& info,
+                const vgl_dmat4& projection,
+                const vgl_dmat4& view,
+                bool atmosphere,
+                const atmosphere_view& a)
+{
+    if (b.star_count == 0)
+    {
+        return;
+    }
+    const functions& gl = b.gl;
+    if (!b.stars_uploaded)
+    {
+        upload_stars(b);
+    }
+    std::array<GLint, 4> viewport{};
+    gl.GetIntegerv(GL_VIEWPORT, viewport.data());
+    gl.UseProgram(b.stars_program);
+    set_atmosphere(gl, b.u_stars_atmosphere, atmosphere, a);
+    gl.UniformMatrix3fv(b.u_stars_celestial,
+                        1,
+                        GL_FALSE,
+                        vgl::backends::celestial_to_camera(view, info.sidereal_angle).data());
+    gl.UniformMatrix4fv(b.u_stars_projection, 1, GL_FALSE, to_float(projection).data());
+    gl.Uniform2f(b.u_stars_viewport,
+                 static_cast<GLfloat>(std::max(viewport[2], 1)),
+                 static_cast<GLfloat>(std::max(viewport[3], 1)));
+    const bool reversed = b.depth == VGL_DEPTH_CONVENTION_REVERSED_Z;
+    gl.Uniform1f(b.u_stars_far_depth, reversed ? 0.0f : 1.0f);
+    gl.DepthFunc(reversed ? GL_GEQUAL : GL_LEQUAL);
+    gl.DepthMask(GL_FALSE);
+    gl.Disable(GL_CULL_FACE);
+    gl.Enable(GL_BLEND);
+    gl.BlendFuncSeparate(GL_ONE, GL_ONE, GL_ZERO, GL_ONE);
+    gl.BlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
+    gl.BindVertexArray(b.stars_vertex_array);
+    gl.DrawArrays(
+        GL_TRIANGLES, 0, static_cast<GLsizei>(b.star_count * vgl::backends::star_vertex_count));
+}
+
 // The sky, after the terrain: one triangle at the far depth, where nothing was drawn, blended
 // over what the framebuffer holds by the atmosphere's transmittance.
 void draw_sky(const vgl_gl_backend& b, const vgl_dmat4& projection, const atmosphere_view& a)
@@ -779,7 +909,7 @@ void draw_sky(const vgl_gl_backend& b, const vgl_dmat4& projection, const atmosp
     gl.DrawArrays(GL_TRIANGLES, 0, 3);
 }
 
-void draw_items(const vgl_gl_backend& b,
+void draw_items(vgl_gl_backend& b,
                 const vgl_frame* frame,
                 const vgl_gl_draw_info& info,
                 const vgl_dmat4& projection,
@@ -957,6 +1087,10 @@ void draw_items(const vgl_gl_backend& b,
                         item.index_size == 2 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT,
                         nullptr);
     }
+    if (info.stars != VGL_FALSE && view != nullptr)
+    {
+        draw_stars(b, info, projection, *view, atmosphere, air);
+    }
     if (atmosphere)
     {
         draw_sky(b, projection, air);
@@ -1044,10 +1178,56 @@ extern "C" VGL_GL_API vgl_result vgl_gl_backend_destroy(vgl_gl_backend* backend)
         return VGL_RESULT_SUCCESS;
     }
     stop(*backend, true);
+    free_stars(*backend);
     // A later consumer of the context must receive every resource again.
     static_cast<void>(vgl_context_resources_reset(backend->context));
     const memory mem = backend->mem;
     mem.destroy(backend);
+    return VGL_RESULT_SUCCESS;
+}
+
+extern "C" VGL_GL_API vgl_result vgl_gl_backend_stars_set(vgl_gl_backend* backend,
+                                                          const vgl_star* stars,
+                                                          std::uint32_t star_count)
+{
+    if (backend == nullptr || (stars == nullptr && star_count != 0) ||
+        star_count > vgl::backends::max_stars)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    vgl_gl_backend& b = *backend;
+    for (std::uint32_t i = 0; i < star_count; ++i)
+    {
+        if (!vgl::backends::star_is_valid(stars[i]))
+        {
+            log(b,
+                VGL_LOG_LEVEL_ERROR,
+                "vgl_gl_backend_stars_set: star %u is invalid: check that its direction is of "
+                "unit length, that its values are finite, its colour from 0 to 1, and reserved 0",
+                static_cast<unsigned>(i));
+            return VGL_RESULT_INVALID_ARGUMENT;
+        }
+    }
+    const std::size_t count = std::size_t{star_count} * vgl::backends::star_vertex_count;
+    vgl::backends::star_vertex* vertices = nullptr;
+    if (count != 0)
+    {
+        vertices = static_cast<vgl::backends::star_vertex*>(b.mem.allocate(
+            count * sizeof(vgl::backends::star_vertex), alignof(vgl::backends::star_vertex)));
+        if (vertices == nullptr)
+        {
+            return VGL_RESULT_OUT_OF_MEMORY;
+        }
+        for (std::uint32_t i = 0; i < star_count; ++i)
+        {
+            vgl::backends::star_quad(stars[i],
+                                     vertices + std::size_t{i} * vgl::backends::star_vertex_count);
+        }
+    }
+    free_stars(b);
+    b.star_vertices = vertices;
+    b.star_count = star_count;
+    b.stars_uploaded = false;
     return VGL_RESULT_SUCCESS;
 }
 
@@ -1098,7 +1278,8 @@ extern "C" VGL_GL_API vgl_result vgl_gl_backend_draw(vgl_gl_backend* backend,
         VGL_GL_DEBUG_FLAG_IMAGERY_SOURCE | VGL_GL_DEBUG_FLAG_HEIGHT_COLORS |
         VGL_GL_DEBUG_FLAG_CONTOURS;
     if ((info.debug_flags & ~known_flags) != 0 || info.reserved != 0 || info.reserved2 != 0 ||
-        info.reserved3 != 0 || !std::isfinite(info.contour_interval) || info.contour_interval < 0.0)
+        info.reserved3 != 0 || info.reserved4 != 0 || !std::isfinite(info.sidereal_angle) ||
+        !std::isfinite(info.contour_interval) || info.contour_interval < 0.0)
     {
         log(b,
             VGL_LOG_LEVEL_ERROR,

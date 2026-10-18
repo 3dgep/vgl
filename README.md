@@ -101,8 +101,11 @@ to places.
 Its panel (F1) shows the runtime statistics and the
 debug views: wireframe (F2), colours by tile level (F3), the imagery source (F4), a frozen
 selection (F5) to inspect level of detail and culling from outside, the heightmap (F6),
-contour lines (F7), a sea surface (F8) and the atmosphere (F9), with the sun set by the time
-of day and the day of the year.
+contour lines (F7), a sea surface (F8), the atmosphere (F9) and generated stars, with the sun
+and the sky set by the time of day, the day of the year and the year, or by the current time. `--stars <file>` draws the real sky
+instead, from a copy of the Yale Bright Star Catalogue that you download yourself, since its
+licence keeps it out of the repository: CDS catalogue V/50's
+[catalog.gz](https://cdsarc.cds.unistra.fr/ftp/V/50/catalog.gz), decompressed.
 
 The samples find `samples/data` in the source tree by default; `--data <directory>` or the
 environment variable `VGL_SAMPLE_DATA` points them at a copy elsewhere, and `--pack <uri>`,

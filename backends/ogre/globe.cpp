@@ -7,6 +7,7 @@
 
 #include "atmosphere_shader.hpp"
 #include "backends/common/atmosphere_view.hpp"
+#include "backends/common/stars.hpp"
 #include "common/host_memory.hpp"
 #include "common/pointer_map.hpp"
 #include "shaders.hpp"
@@ -45,6 +46,7 @@ enum custom : std::uint8_t
     custom_camera = 14,
     custom_sun_planet = 15,
     custom_sky = 16,
+    custom_celestial = 17, // To 19.
 };
 
 enum class resource_kind : std::uint8_t
@@ -144,6 +146,16 @@ struct vgl::ogre::globe::state
     Ogre::VertexData* sky_vertices = nullptr;
     sky_renderable sky;
     bool sky_shown = false; // The last frame drew the atmosphere.
+    // The stars: the host's, as quads (backends/common/stars.hpp), kept on the CPU to be
+    // uploaded again after resources_reset; the buffer is made when they are first drawn.
+    Ogre::HighLevelGpuProgramPtr stars_vertex_program;
+    Ogre::HighLevelGpuProgramPtr stars_fragment_program;
+    Ogre::MaterialPtr stars_material;
+    Ogre::VertexData* stars_vertices = nullptr;
+    sky_renderable stars;
+    vgl::backends::star_vertex* star_vertices = nullptr;
+    std::uint32_t star_count = 0;
+    bool stars_shown = false; // The last frame drew them.
     vgl::common::pointer_map<ogre_resource> resources;
     std::uint64_t next_name = 0;
 
@@ -367,6 +379,42 @@ void build_pipeline(state& s)
     const std::array<float, 6> ndc = {-1.0f, -1.0f, 3.0f, -1.0f, -1.0f, 3.0f};
     corners->writeData(0, sizeof(ndc), ndc.data(), true);
     s.sky_vertices->vertexBufferBinding->setBinding(0, corners);
+    // The stars: their programs, and a material that adds them to the render target at the far
+    // depth only, without writing it.
+    s.stars_vertex_program = compile_program(
+        s, language, Ogre::GPT_VERTEX_PROGRAM, "stars_vs", vgl::ogre::detail::stars_vertex_shader);
+    const Ogre::GpuProgramParametersSharedPtr stars_params =
+        s.stars_vertex_program->getDefaultParameters();
+    stars_params->setNamedAutoConstant("u_projection",
+                                       Ogre::GpuProgramParameters::ACT_PROJECTION_MATRIX);
+    stars_params->setNamedAutoConstant("u_viewport", Ogre::GpuProgramParameters::ACT_VIEWPORT_SIZE);
+    for (std::size_t k = 0; k < 3; ++k)
+    {
+        stars_params->setNamedAutoConstant("u_celestial" + std::to_string(k),
+                                           Ogre::GpuProgramParameters::ACT_CUSTOM,
+                                           static_cast<std::uint32_t>(custom_celestial + k));
+    }
+    stars_params->setNamedAutoConstant("u_sky", Ogre::GpuProgramParameters::ACT_CUSTOM, custom_sky);
+    atmosphere_constants(stars_params);
+    s.stars_fragment_program = compile_program(s,
+                                               language,
+                                               Ogre::GPT_FRAGMENT_PROGRAM,
+                                               "stars_fs",
+                                               vgl::ogre::detail::stars_fragment_shader);
+    s.stars_material = Ogre::MaterialManager::getSingleton().create(s.name + "/stars", s.group);
+    Ogre::Pass* stars_pass = s.stars_material->getTechnique(0)->getPass(0);
+    stars_pass->setLightingEnabled(false);
+    stars_pass->setDepthCheckEnabled(true);
+    stars_pass->setDepthWriteEnabled(false);
+    stars_pass->setDepthFunction(Ogre::CMPF_LESS_EQUAL);
+    stars_pass->setCullingMode(Ogre::CULL_NONE);
+    stars_pass->setSeparateSceneBlending(
+        Ogre::SBF_ONE, Ogre::SBF_ONE, Ogre::SBF_ZERO, Ogre::SBF_ONE);
+    stars_pass->setVertexProgram(s.stars_vertex_program->getName(), true);
+    stars_pass->setFragmentProgram(s.stars_fragment_program->getName(), true);
+    s.stars_material->load();
+    s.stars.material = s.stars_material;
+
     s.sky.operation.operationType = Ogre::RenderOperation::OT_TRIANGLE_LIST;
     s.sky.operation.vertexData = s.sky_vertices;
     s.sky.operation.useIndexes = false;
@@ -401,8 +449,17 @@ void release(ogre_resource& r) noexcept
     }
 }
 
+// Frees the stars' buffer, which upload_stars makes again.
+void free_star_buffer(state& s) noexcept
+{
+    OGRE_DELETE s.stars_vertices;
+    s.stars_vertices = nullptr;
+    s.stars.operation.vertexData = nullptr;
+}
+
 void forget_resources(state& s) noexcept
 {
+    free_star_buffer(s);
     s.resources.for_each([&](std::uint64_t, ogre_resource* r) {
         release(*r);
         s.mem.destroy(r);
@@ -706,6 +763,70 @@ Ogre::Vector4 vec4(const float* v)
     return {v[0], v[1], v[2], v[3]};
 }
 
+// Makes the stars' vertex buffer, once after each set or reset; false if it fails.
+bool upload_stars(state& s)
+{
+    if (s.stars_vertices != nullptr)
+    {
+        return true;
+    }
+    try
+    {
+        const std::size_t count = std::size_t{s.star_count} * vgl::backends::star_vertex_count;
+        auto* data = OGRE_NEW Ogre::VertexData();
+        data->vertexStart = 0;
+        data->vertexCount = static_cast<Ogre::uint32>(count);
+        Ogre::VertexDeclaration* decl = data->vertexDeclaration;
+        decl->addElement(
+            0, vgl::backends::star_direction_offset, Ogre::VET_FLOAT3, Ogre::VES_POSITION);
+        decl->addElement(0,
+                         vgl::backends::star_corner_offset,
+                         Ogre::VET_FLOAT2,
+                         Ogre::VES_TEXTURE_COORDINATES,
+                         0);
+        decl->addElement(0,
+                         vgl::backends::star_light_offset,
+                         Ogre::VET_FLOAT2,
+                         Ogre::VES_TEXTURE_COORDINATES,
+                         1);
+        decl->addElement(0,
+                         vgl::backends::star_color_offset,
+                         Ogre::VET_FLOAT3,
+                         Ogre::VES_TEXTURE_COORDINATES,
+                         2);
+        const Ogre::HardwareVertexBufferSharedPtr buffer =
+            Ogre::HardwareBufferManager::getSingleton().createVertexBuffer(
+                sizeof(vgl::backends::star_vertex), count, Ogre::HBU_GPU_ONLY);
+        buffer->writeData(0, count * sizeof(vgl::backends::star_vertex), s.star_vertices, true);
+        data->vertexBufferBinding->setBinding(0, buffer);
+        s.stars_vertices = data;
+        s.stars.operation.operationType = Ogre::RenderOperation::OT_TRIANGLE_LIST;
+        s.stars.operation.vertexData = data;
+        s.stars.operation.useIndexes = false;
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        log(s, VGL_LOG_LEVEL_ERROR, std::string("vgl::ogre::globe: the stars failed: ") + e.what());
+        return false;
+    }
+}
+
+// Frees the CPU copy of the stars, and their buffer.
+void free_stars(state& s) noexcept
+{
+    free_star_buffer(s);
+    if (s.star_vertices != nullptr)
+    {
+        s.mem.deallocate(s.star_vertices,
+                         std::size_t{s.star_count} * vgl::backends::star_vertex_count *
+                             sizeof(vgl::backends::star_vertex),
+                         alignof(vgl::backends::star_vertex));
+    }
+    s.star_vertices = nullptr;
+    s.star_count = 0;
+}
+
 // Fills the renderables from the draw list.
 void fill_renderables(state& s, const vgl_frame* frame, const vgl_dmat4* view)
 {
@@ -730,6 +851,23 @@ void fill_renderables(state& s, const vgl_frame* frame, const vgl_dmat4* view)
         sun_planet = Ogre::Vector4(air.sun_planet[0], air.sun_planet[1], air.sun_planet[2], 1.0f);
     }
     s.sky_shown = atmosphere;
+    s.stars_shown = g.stars && view != nullptr && s.star_count != 0 && upload_stars(s);
+    if (s.stars_shown)
+    {
+        const std::array<float, 9> c = vgl::backends::celestial_to_camera(*view, g.sidereal_angle);
+        for (std::size_t i = 0; i < 3; ++i)
+        {
+            s.stars.setCustomParameter(custom_celestial + i,
+                                       Ogre::Vector4(c[i], c[3 + i], c[6 + i], 0.0f));
+            s.stars.setCustomParameter(custom_to_planet + i, to_planet[i]);
+        }
+        s.stars.setCustomParameter(custom_camera, camera);
+        s.stars.setCustomParameter(custom_sun_planet, sun_planet);
+        s.stars.setCustomParameter(
+            custom_sky,
+            Ogre::Vector4(
+                s.depth == VGL_DEPTH_CONVENTION_REVERSED_Z ? 0.0f : 1.0f, 0.0f, 0.0f, 0.0f));
+    }
     for (std::size_t i = 0; i < 3; ++i)
     {
         s.sky.setCustomParameter(custom_to_planet + i, to_planet[i]);
@@ -1012,6 +1150,10 @@ globe::~globe()
         Ogre::HighLevelGpuProgramManager::getSingleton().remove(s.fragment_program);
         Ogre::HighLevelGpuProgramManager::getSingleton().remove(s.sky_vertex_program);
         Ogre::HighLevelGpuProgramManager::getSingleton().remove(s.sky_fragment_program);
+        free_stars(s);
+        Ogre::MaterialManager::getSingleton().remove(s.stars_material);
+        Ogre::HighLevelGpuProgramManager::getSingleton().remove(s.stars_vertex_program);
+        Ogre::HighLevelGpuProgramManager::getSingleton().remove(s.stars_fragment_program);
         OGRE_DELETE s.sky_vertices;
         s.sky_vertices = nullptr;
     }
@@ -1026,6 +1168,47 @@ globe::~globe()
 void globe::settings_set(const globe_settings& settings) noexcept
 {
     state_->settings = settings;
+}
+
+vgl::result globe::stars_set(const vgl_star* stars, std::uint32_t count) noexcept
+{
+    state& s = *state_;
+    if ((stars == nullptr && count != 0) || count > vgl::backends::max_stars)
+    {
+        return vgl::result::invalid_argument;
+    }
+    for (std::uint32_t i = 0; i < count; ++i)
+    {
+        if (!vgl::backends::star_is_valid(stars[i]))
+        {
+            log(s,
+                VGL_LOG_LEVEL_ERROR,
+                "vgl::ogre::globe::stars_set: star " + std::to_string(i) +
+                    " is invalid: check that its direction is of unit length, that its values "
+                    "are finite, its colour from 0 to 1, and reserved 0");
+            return vgl::result::invalid_argument;
+        }
+    }
+    const std::size_t vertices = std::size_t{count} * vgl::backends::star_vertex_count;
+    vgl::backends::star_vertex* copy = nullptr;
+    if (vertices != 0)
+    {
+        copy = static_cast<vgl::backends::star_vertex*>(s.mem.allocate(
+            vertices * sizeof(vgl::backends::star_vertex), alignof(vgl::backends::star_vertex)));
+        if (copy == nullptr)
+        {
+            return vgl::result::out_of_memory;
+        }
+        for (std::uint32_t i = 0; i < count; ++i)
+        {
+            vgl::backends::star_quad(stars[i],
+                                     copy + std::size_t{i} * vgl::backends::star_vertex_count);
+        }
+    }
+    free_stars(s);
+    s.star_vertices = copy;
+    s.star_count = count;
+    return vgl::result::success;
 }
 
 void globe::resources_reset() noexcept
@@ -1063,6 +1246,10 @@ void globe::_updateRenderQueue(Ogre::RenderQueue* queue)
     for (std::size_t i = 0; i < s.used; ++i)
     {
         queue->addRenderable(s.renderables[i], mRenderQueueID, mRenderQueuePriority);
+    }
+    if (s.stars_shown)
+    {
+        queue->addRenderable(&s.stars, Ogre::RENDER_QUEUE_SKIES_LATE - 1, mRenderQueuePriority);
     }
     if (s.sky_shown)
     {

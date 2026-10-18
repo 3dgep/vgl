@@ -77,6 +77,18 @@ ellipsoid_enu_frame_get(const vgl_ellipsoid& ellipsoid, const vgl_geodetic& orig
     return frame;
 }
 
+// The Earth rotation angle in radians at a Julian date in UT1 (vgl_earth_rotation_angle_get).
+[[nodiscard]] inline expected<double> earth_rotation_angle_get(double julian_date) noexcept
+{
+    double angle = 0.0;
+    const auto r = static_cast<result>(vgl_earth_rotation_angle_get(julian_date, &angle));
+    if (failed(r))
+    {
+        return unexpected(r);
+    }
+    return angle;
+}
+
 } // namespace vgl
 
 #endif // VGL_GEODESY_HPP

@@ -36,6 +36,7 @@
 #include "sample_camera.hpp"
 #include "sample_check.hpp"
 #include "sample_data.hpp"
+#include "stars.hpp"
 #include <imgui_impl_opengl3.h>
 
 #include <vgl/defaults.hpp>
@@ -335,6 +336,9 @@ vgl::result draw(vgl::gl_backend& backend, const scene& s, int width, int height
     info.contour_interval = s.debug.contour_interval;
     info.sea_surface = s.debug.sea ? VGL_TRUE : VGL_FALSE;
     info.atmosphere = s.debug.atmosphere ? VGL_TRUE : VGL_FALSE;
+    info.stars = s.debug.stars ? VGL_TRUE : VGL_FALSE;
+    info.sidereal_angle =
+        sample::sidereal_angle(s.debug.time_of_day, s.debug.day_of_year, s.debug.year);
     return backend.draw(&info);
 }
 
@@ -1122,6 +1126,7 @@ struct options
 {
     std::string data;               // The sample set's directory, from --data.
     std::vector<std::string> packs; // From --pack.
+    std::string stars;              // A star catalogue, from --stars.
     bool es = false;
     bool egl = false;
     bool check = false;
@@ -1165,6 +1170,12 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
             expect(unsupported, std::string("the backend is created for ") + depth_name(s.depth));
             continue;
         }
+        const std::vector<vgl_star> stars = sample::sky_stars();
+        expect(backend->stars_set(stars) == vgl::result::success, "the stars are set");
+        // A star without a direction is refused, and the stars stay as they were.
+        const vgl_star none{};
+        expect(backend->stars_set({&none, 1}) == vgl::result::invalid_argument,
+               "an invalid star is refused");
         target t;
         expect(target_create(gl, t, width, height, s.depth == VGL_DEPTH_CONVENTION_REVERSED_Z),
                "the framebuffer is complete");
@@ -1227,6 +1238,7 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
             // every convention, and the host's state as it was.
             scene air = s;
             air.debug.atmosphere = true;
+            air.debug.stars = true;
             clear(gl, air, t);
             sentinel_state_set(gl, host_vertex_array);
             expect(draw(*backend, air, width, height) == vgl::result::success,
@@ -1304,6 +1316,7 @@ int run_interactive(const options& o,
 {
     scene s;
     s.debug.atmosphere = true;
+    s.debug.stars = true;
     s.depth = o.depth;
     s.camera = places[0].camera;
     if (!depth_mode_set(gl, s.depth))
@@ -1322,6 +1335,7 @@ int run_interactive(const options& o,
             stderr, "could not create the backend: %s\n", vgl::result_name_get(backend.error()));
         return 1;
     }
+    static_cast<void>(backend->stars_set(sample::sky_stars()));
 
     // The window's callbacks first: Dear ImGui chains to them.
     sample::overlay ui;
@@ -1515,6 +1529,10 @@ bool parse(int argc, char** argv, options& o)
         {
             o.data = argv[++i];
         }
+        else if (std::strcmp(a, "--stars") == 0 && i + 1 < argc)
+        {
+            o.stars = argv[++i];
+        }
         else if (std::strcmp(a, "--pack") == 0 && i + 1 < argc)
         {
             o.packs.emplace_back(argv[++i]);
@@ -1562,13 +1580,24 @@ int main(int argc, char** argv)
         std::fprintf(stderr,
                      "usage: vgl-gl [--data <directory> | --pack <uri>...] [--es] [--egl] "
                      "[--depth logarithmic|reversed|conventional] [--check] "
-                     "[--save <directory>]\n"
+                     "[--save <directory>] [--stars <catalog>]\n"
                      "--pack, repeated, replaces the sample set, and cannot be combined with "
                      "--data or --check. Without either, the sample set is read from "
-                     "$%s, or else from %s.\n",
+                     "$%s, or else from %s. --stars draws the stars of the Yale Bright Star "
+                     "Catalogue's file \"catalog\" (CDS V/50, decompressed) instead of "
+                     "generated ones.\n",
                      sample::data_variable,
                      VGL_SAMPLE_DATA_DIR);
         return 2;
+    }
+    if (!o.stars.empty())
+    {
+        std::string error;
+        if (!sample::stars_load(o.stars, error))
+        {
+            std::fprintf(stderr, "--stars: %s\n", error.c_str());
+            return 1;
+        }
     }
 
     glfwSetErrorCallback(

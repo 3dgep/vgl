@@ -362,6 +362,60 @@ void main()
 }
 )glsl";
 
+// The stars (backends/common/stars.hpp): a quad per star at the far depth, widened in pixels
+// around the star's direction, drawn after the terrain and before the sky, added to what the
+// framebuffer holds where nothing was drawn.
+inline constexpr const char* stars_vertex_shader = R"glsl(
+layout(location = 0) in vec3 a_direction; // Celestial frame.
+layout(location = 1) in vec2 a_corner;    // -1 or 1 on each axis.
+layout(location = 2) in vec2 a_light;     // Intensity, radius in pixels.
+layout(location = 3) in vec3 a_color;
+
+uniform mat3 u_celestial; // Celestial frame to camera space.
+uniform mat4 u_projection;
+uniform vec2 u_viewport;  // In pixels.
+uniform float u_far_depth;
+uniform int u_atmosphere;
+uniform mat3 u_to_planet;
+uniform vec3 u_camera_km;
+uniform float u_camera_height;
+uniform vec3 u_sun_planet;
+
+out vec2 v_corner;
+out vec3 v_color;
+
+void main()
+{
+    vec3 d = u_celestial * a_direction;
+    vec4 clip = u_projection * vec4(d, 0.0); // A direction: at infinity.
+    float visible = 1.0;
+    if (u_atmosphere != 0)
+    {
+        visible = vgl_star_visibility(u_camera_km, u_camera_height, normalize(u_to_planet * d),
+                                      u_sun_planet);
+    }
+    v_color = a_color * (a_light.x * visible);
+    v_corner = a_corner;
+    clip.xy += a_corner * a_light.y * 2.0 / u_viewport * clip.w;
+    clip.z = u_far_depth * clip.w;
+    // Behind the camera: outside the clip volume, so nothing is drawn.
+    gl_Position = clip.w > 0.0 ? clip : vec4(0.0, 0.0, 2.0, 1.0);
+}
+)glsl";
+
+inline constexpr const char* stars_fragment_shader = R"glsl(
+in vec2 v_corner;
+in vec3 v_color;
+layout(location = 0) out vec4 o_color;
+
+void main()
+{
+    // A soft dot: about a pixel bright, fading out to the quad's edge.
+    float glow = exp(-3.0 * dot(v_corner, v_corner));
+    o_color = vec4(v_color * glow, 0.0);
+}
+)glsl";
+
 // The sky: one triangle over the whole viewport at the far depth, so that it shows only where
 // nothing was drawn before it.
 inline constexpr const char* sky_vertex_shader = R"glsl(

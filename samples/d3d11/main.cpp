@@ -24,6 +24,7 @@
 #include "sample_camera.hpp"
 #include "sample_check.hpp"
 #include "sample_data.hpp"
+#include "stars.hpp"
 #include <dxgi1_2.h>
 #include <imgui_impl_dx11.h>
 #include <imgui_impl_win32.h>
@@ -344,6 +345,9 @@ vgl::result draw(vgl::d3d11_backend& backend, const scene& s, int width, int hei
     info.contour_interval = s.debug.contour_interval;
     info.sea_surface = s.debug.sea ? VGL_TRUE : VGL_FALSE;
     info.atmosphere = s.debug.atmosphere ? VGL_TRUE : VGL_FALSE;
+    info.stars = s.debug.stars ? VGL_TRUE : VGL_FALSE;
+    info.sidereal_angle =
+        sample::sidereal_angle(s.debug.time_of_day, s.debug.day_of_year, s.debug.year);
     return backend.draw(&info);
 }
 
@@ -354,7 +358,13 @@ backend_create(vgl::context& ctx, const gpu& g, vgl_depth_convention depth)
     info.depth_convention = depth;
     info.device = g.device.get();
     info.device_context = g.dc.get();
-    return vgl::d3d11_backend::create(ctx, info);
+    vgl::expected<vgl::d3d11_backend> backend = vgl::d3d11_backend::create(ctx, info);
+    if (backend)
+    {
+        expect(backend->stars_set(sample::sky_stars()) == vgl::result::success,
+               "the stars are set");
+    }
+    return backend;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -448,6 +458,7 @@ struct options
 {
     std::string data;               // The sample set's directory, from --data.
     std::vector<std::string> packs; // From --pack.
+    std::string stars;              // A star catalogue, from --stars.
     bool warp = false;
     bool check = false;
     std::string save;
@@ -528,6 +539,7 @@ int run_check(const options& o, const gpu& g, vgl::context& ctx)
             // was.
             scene air = s;
             air.debug.atmosphere = true;
+            air.debug.stars = true;
             clear(g, air, t);
             sentinel_set(g, host);
             expect(draw(*backend, air, width, height) == vgl::result::success,
@@ -843,6 +855,7 @@ int run_interactive(const options& o,
 
     scene s;
     s.debug.atmosphere = true;
+    s.debug.stars = true;
     s.depth = o.depth;
     s.camera = places[0].camera;
     vgl::expected<vgl::d3d11_backend> backend = backend_create(ctx, g, s.depth);
@@ -1053,6 +1066,10 @@ bool parse(int argc, char** argv, options& o)
         {
             o.data = argv[++i];
         }
+        else if (std::strcmp(a, "--stars") == 0 && i + 1 < argc)
+        {
+            o.stars = argv[++i];
+        }
         else if (std::strcmp(a, "--pack") == 0 && i + 1 < argc)
         {
             o.packs.emplace_back(argv[++i]);
@@ -1100,13 +1117,24 @@ int main(int argc, char** argv)
         std::fprintf(stderr,
                      "usage: vgl-d3d11 [--data <directory> | --pack <uri>...] "
                      "[--depth logarithmic|reversed|conventional] [--warp] [--check] "
-                     "[--save <directory>]\n"
+                     "[--save <directory>] [--stars <catalog>]\n"
                      "--pack, repeated, replaces the sample set, and cannot be combined with "
                      "--data or --check. Without either, the sample set is read from "
-                     "$%s, or else from %s.\n",
+                     "$%s, or else from %s. --stars draws the stars of the Yale Bright Star "
+                     "Catalogue's file \"catalog\" (CDS V/50, decompressed) instead of "
+                     "generated ones.\n",
                      sample::data_variable,
                      VGL_SAMPLE_DATA_DIR);
         return 2;
+    }
+    if (!o.stars.empty())
+    {
+        std::string error;
+        if (!sample::stars_load(o.stars, error))
+        {
+            std::fprintf(stderr, "--stars: %s\n", error.c_str());
+            return 1;
+        }
     }
     SetProcessDPIAware();
     gpu g;

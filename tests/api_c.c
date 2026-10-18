@@ -56,11 +56,13 @@ static void check_types(void)
     CHECK(offsetof(vgl_draw_item, model_view) == 64);
     CHECK(sizeof(vgl_frame_begin_info) == 24);
     CHECK(sizeof(vgl_depth_convention) == 4);
+    CHECK(sizeof(vgl_star) == 32 && offsetof(vgl_star, color) == 16);
 #ifdef VGL_TEST_GL_HEADER
     /* The OpenGL backend's structures (vgl/gl.h). */
     CHECK(sizeof(vgl_gl_backend_create_info) == 24);
-    CHECK(sizeof(vgl_gl_draw_info) == 96);
+    CHECK(sizeof(vgl_gl_draw_info) == 112);
     CHECK(offsetof(vgl_gl_draw_info, atmosphere) == 88);
+    CHECK(offsetof(vgl_gl_draw_info, sidereal_angle) == 104);
     CHECK(offsetof(vgl_gl_draw_info, sun_direction) == 24);
 #endif
 }

@@ -386,6 +386,14 @@ Every backend draws an optional atmosphere (`vgl_gl_draw_info::atmosphere`, `vgl
 - **Display.** The scattered light passes through an exponential curve that keeps dim values and rolls bright ones off towards white, while the lit terrain is left as it is, so that imagery keeps its colours near the camera.
 - **Sun.** The host's sun direction, or straight above the camera when it gives none, so that the atmosphere is always lit.
 
+#### Stars
+
+Every backend can draw a star field behind the sky (`vgl_gl_backend_stars_set`, `vgl_d3d11_backend_stars_set`, `vgl::ogre::globe::stars_set`, and a `stars` flag in each draw's settings). vgl ships no stars: none of the usual catalogues has terms an MIT library can take on with confidence (the Yale Bright Star Catalogue's are unclear, Hipparcos's are non-commercial, and those derived from them inherit both), so the host supplies them (`vgl_star`: a direction in the celestial frame of J2000, a visual magnitude and a colour), from a catalogue of its choice, as it does its terrain and imagery. The samples generate a deterministic random sky with the real sky's numbers of stars per magnitude down to 6.5, but not its constellations; with `--stars` they read the real sky from a copy of the Yale Bright Star Catalogue that the user downloads, which the repository does not hold.
+
+- **Drawing.** Each star is a small quad of two triangles, not a point, whose size not every API sets: its vertex shader projects the star's direction and widens the quad by a radius in pixels from the viewport's size, 1.2 to 2.6 pixels with the star's brightness, which follows the square root of its flux so that faint stars stay visible on a display. The quads are drawn after the tiles and before the sky, at the far depth, with depth writes off and added to the target, so that they show only where nothing was drawn.
+- **Daylight.** Each star fades with the sky's brightness in its direction, from the atmosphere's model, and the sky pass dims what shows by the transmittance, so that the stars disappear by day, come out through twilight, and shine in full from space.
+- **Orientation.** The stars turn with the Earth by its rotation angle, which the host passes (`sidereal_angle`); `vgl_earth_rotation_angle_get` gives it for a time, by the IAU 2000 definition, without precession and nutation, a fraction of a degree over decades.
+
 ---
 
 ## 8. Data pipeline

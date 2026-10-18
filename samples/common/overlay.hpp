@@ -34,6 +34,7 @@ struct debug_settings
     bool contours = false;           // F7.
     bool sea = false;                // F8: a sea surface over the ocean floor.
     bool atmosphere = false;         // F9: the sky and haze; the interactive samples start with it.
+    bool stars = false;              // Behind the sky; the interactive samples start with them.
     bool contour_auto = true;        // The interval follows the altitude.
     float contour_interval = 500.0f; // Metres.
     bool sunlight = true;            // L.
@@ -41,6 +42,9 @@ struct debug_settings
     // 1 January. The defaults put it over north Africa in early May, late in the morning there.
     float time_of_day = 10.55f;
     int day_of_year = 123;
+    int year = 2026;
+    // The time of day, day and year follow the system clock (UTC), for the sun and the stars.
+    bool current_time = false;
     float max_error = 2.0f; // Screen-space error in pixels.
 };
 

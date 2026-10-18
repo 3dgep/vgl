@@ -125,6 +125,25 @@ VGL_API vgl_result vgl_ellipsoid_enu_frame_get(const vgl_ellipsoid* ellipsoid,
                                                vgl_dmat4* out_enu_to_ecef,
                                                vgl_dmat4* out_ecef_to_enu);
 
+/**
+ * Gets the Earth rotation angle at a time: the angle by which the Earth has turned from the
+ * celestial frame (the equator and equinox of J2000), so that a direction d in that frame is
+ * (d.x cos(a) + d.y sin(a), -d.x sin(a) + d.y cos(a), d.z) in ECEF. It is the IAU 2000
+ * definition, which leaves out precession and nutation, a fraction of a degree over decades:
+ * enough to place stars behind the globe.
+ *
+ * @param julian_date  The time as a Julian date in UT1, which UTC is within a second of:
+ *                     2451545.0 is 1 January 2000 at 12:00.
+ * @param out_angle    Receives the angle in radians, in [0, 2 pi).
+ *
+ * @retval VGL_RESULT_SUCCESS           The angle was written.
+ * @retval VGL_RESULT_INVALID_ARGUMENT  out_angle is null, or julian_date is not finite.
+ *
+ * @par Thread safety
+ * Free-threaded.
+ */
+VGL_API vgl_result vgl_earth_rotation_angle_get(double julian_date, double* out_angle);
+
 #ifdef __cplusplus
 }
 #endif
