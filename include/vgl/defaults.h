@@ -326,7 +326,8 @@ typedef struct vgl_disk_cache_create_info
     VGL_POINTER_PADDING(directory_padding)
     /** The interface whose reads are cached. Required. The table is copied; the object behind
      * its user_data must stay valid until the cache is destroyed and its reads have
-     * completed. */
+     * completed. With a pool, the cache may call its read from the pool's threads (when an
+     * entry on the disk cannot be read), so it must accept reads from any thread. */
     const vgl_io_interface* source;
     VGL_POINTER_PADDING(source_padding)
     /** Bytes the entries may take on disk. 0 selects 1 GiB. */

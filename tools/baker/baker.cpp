@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <mutex>
@@ -262,6 +263,27 @@ private:
                 " already holds a bake; pass --resume to continue it, or remove the directory");
         }
         std::filesystem::create_directories(config_.output / ".bake");
+
+        // A resumed bake keeps finished shards, so it must make them the same way: with the
+        // same configuration and deepest level as the bake it continues.
+        const std::string settings =
+            config_.settings + "\nmax_level " + std::to_string(max_level_) + "\n";
+        const std::filesystem::path settings_path = config_.output / ".bake" / "settings.txt";
+        if (options_.resume && std::filesystem::exists(settings_path))
+        {
+            std::ifstream in(settings_path, std::ios::binary);
+            const std::string previous((std::istreambuf_iterator<char>(in)),
+                                       std::istreambuf_iterator<char>());
+            if (previous != settings)
+            {
+                throw std::runtime_error(
+                    config_.output.string() +
+                    " holds a bake with another configuration or --max-level; --resume needs "
+                    "the same ones, or remove the directory to bake again");
+            }
+        }
+        write_file_atomically(settings_path,
+                              std::as_bytes(std::span(settings.data(), settings.size())));
     }
 
     // True if a tile may hold data: inside the region and covered by a source for its level,

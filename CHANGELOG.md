@@ -463,6 +463,20 @@ The pack format has its own version number, independent of the library version.
 
 ### Fixed
 
+- `vgl_context_attribution_get` now reports a geoid pack's credits whenever terrain is in view.
+  It never did, since the geoid has no tiles of its own to select.
+- `vgl::ogre::globe::create` fails with `not_supported` when the render system compiles none of
+  the globe's shading languages, as documented, instead of `backend_error`.
+- `vgl-bake bake --resume` refuses to continue a bake whose configuration or `--max-level` has
+  changed, whose finished shards would no longer match. It continued with them.
+- The install includes curl's license when a downloaded curl is linked into a shared defaults
+  module.
+- The macOS presets build universal binaries (arm64 and x86_64) for macOS 11, as the design
+  document says; only the release archives did.
+- Documentation brought in line with the code: the design document's draw settings (now
+  features), contour heights and imagery encodings; the pack format's imagery encoding support
+  and tile edge ownership; the C API conventions' examples; the defaults module's disk cache
+  threading; and the README's status and options.
 - The installed CMake package now finds Threads for a static defaults module, and Ogre for
   `vgl::ogre`, whose consumers failed to configure or link without them. `vgl::ogre` was never
   installed, even with an installed Ogre.

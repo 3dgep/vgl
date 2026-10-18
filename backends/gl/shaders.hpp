@@ -118,8 +118,8 @@ uniform sampler2D u_layer1;
 uniform sampler2D u_layer2;
 uniform sampler2D u_layer3;
 
-// Debug views (vgl_gl_debug_flag), and what they show.
-uniform int u_debug;              // The flags.
+// Debug views (vgl_debug_view), and what they show.
+uniform int u_debug;              // The bits: the debug views, and contour lines.
 uniform float u_level;            // The tile's level.
 uniform float u_imagery_coarser;  // Levels by which the top layer is coarser than the tile.
 uniform float u_cells;            // The mesh's grid cells along a side, for the wireframe.

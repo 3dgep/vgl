@@ -62,13 +62,18 @@ install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/vgl"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 
 # Licenses (design document, section 12.3): vgl's, and those of the code compiled into it:
-# stb_image always, and Zstandard when it was downloaded. stb_image's license is the comment
-# that ends its header.
+# stb_image always, Zstandard when it was downloaded, and curl when a downloaded one is linked
+# into a shared defaults module. stb_image's license is the comment that ends its header.
 set(VGL_INSTALL_DOCDIR "${CMAKE_INSTALL_DATADIR}/doc/vgl")
 install(FILES "${PROJECT_SOURCE_DIR}/LICENSE" DESTINATION "${VGL_INSTALL_DOCDIR}")
 if(VGL_ZSTD_BUNDLED)
     install(FILES "${vgl_zstd_source_SOURCE_DIR}/LICENSE"
         DESTINATION "${VGL_INSTALL_DOCDIR}" RENAME LICENSE.zstd)
+endif()
+if(TARGET libcurl_static AND BUILD_SHARED_LIBS)
+    FetchContent_GetProperties(vgl_curl_source)
+    install(FILES "${vgl_curl_source_SOURCE_DIR}/COPYING"
+        DESTINATION "${VGL_INSTALL_DOCDIR}" RENAME LICENSE.curl)
 endif()
 file(READ "${VGL_STB_INCLUDE_DIR}/stb_image.h" vgl_stb_header)
 string(FIND "${vgl_stb_header}" "This software is available under 2 licenses" vgl_stb_license_start)

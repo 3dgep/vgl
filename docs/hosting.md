@@ -7,7 +7,6 @@ vgl hosts no data: an application that uses it bakes the elevation and imagery i
 | | Object store | Reference server |
 |---|---|---|
 | Examples | Cloudflare R2, Amazon S3, Backblaze B2 | Caddy with `tools/server/Caddyfile`, on a machine you run |
-| Billed for | Storage and requests, and downloads unless the store waives them | The machine and its traffic |
 | HTTPS | Provided | Automatic, from Let's Encrypt or ZeroSSL |
 | Maintenance | None | Updates to Caddy and the operating system |
 | Suits | Public datasets, most installations | Local networks, private or offline sites, development, full control |
@@ -101,7 +100,7 @@ The configuration has no admin endpoint, so restart Caddy to change it.
 
 The configuration covers what a web server can enforce on its own. On a public endpoint, also:
 
-- **Limit request rates.** Caddy has no rate limiting without plugins. Put a CDN in front (Cloudflare's free plan caches shards at its edge and absorbs floods), or limit connections per address in the firewall, so that one client cannot take all the bandwidth.
+- **Limit request rates.** Caddy has no rate limiting without plugins. Put a CDN in front (it caches shards at its edge and absorbs floods), or limit connections per address in the firewall, so that one client cannot take all the bandwidth.
 - **Keep Caddy updated**, and the operating system with it. Watch [Caddy's releases](https://github.com/caddyserver/caddy/releases) for security fixes.
 - **Give Caddy read-only access to the packs**, and run it as an unprivileged user, as in the unit above. Caddy follows symbolic links, so keep links that point outside the pack directory out of it.
 - **Open only ports 80 and 443** (and UDP 443 for HTTP/3). Port 80 is needed to obtain certificates and to redirect to HTTPS.

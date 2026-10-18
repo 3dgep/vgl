@@ -241,6 +241,21 @@ TEST_CASE(bakes_are_deterministic_and_resumable)
         refused = true;
     }
     CHECK(refused);
+
+    // Nor does --resume continue it to another deepest level: its shards would not match.
+    bake_options shallower = resume;
+    shallower.max_level = 3;
+    refused = false;
+    try
+    {
+        bake(load_bake_config(f.dir / "second.json"), shallower);
+    }
+    catch (const std::runtime_error&)
+    {
+        refused = true;
+    }
+    CHECK(refused);
+    CHECK(pack_files(f.dir / "first") == pack_files(f.dir / "second"));
 }
 
 TEST_CASE(filtered_levels_are_seamless_across_files)

@@ -80,6 +80,8 @@ struct bake_config
     std::filesystem::path geoid; // Geoid pack, needed for egm2008 sources.
     std::vector<std::pair<std::string, std::string>> metadata;
     std::vector<source_config> sources; // Highest priority first.
+    // The configuration as read, without comments or spacing: a resumed bake must match it.
+    std::string settings;
 };
 
 // Reads and checks a configuration file. Throws std::runtime_error with a message that names

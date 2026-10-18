@@ -23,10 +23,10 @@
  * State (NFR-08). The backend saves the following state of the device context when it draws,
  * and restores it before returning: the input layout, the primitive topology, vertex buffer 0
  * and the index buffer; the vertex shader and its constant buffers 0 and 1; the pixel shader,
- * its constant buffers 0 and 1, its shader resources 0 to 4 and its sampler 0; the rasterizer
- * state; the depth-stencil state and stencil reference; and the blend state, blend factor and
- * sample mask. It draws with the host's render targets, viewports and scissor rectangles as
- * they are, with the stencil test and blending off.
+ * its constant buffers 0 and 1, its shader resources 0 to 5 and its samplers 0 and 1; the
+ * rasterizer state; the depth-stencil state and stencil reference; and the blend state, blend
+ * factor and sample mask. It draws with the host's render targets, viewports and scissor
+ * rectangles as they are, with the stencil test and blending off.
  *
  * Projections map depth to [0, 1], as Direct3D does, and camera space is the view matrix's:
  * right-handed, like ECEF, looking along -z.

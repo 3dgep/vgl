@@ -55,6 +55,7 @@ The globe is covered by a geographic (equirectangular) quadtree on longitude and
 - Tile (*L*, *x*, *y*) covers longitudes [−180° + *x*·*s*, −180° + (*x*+1)·*s*] and latitudes [90° − (*y*+1)·*s*, 90° − *y*·*s*], where *s* = 180° / 2<sup>*L*</sup>.
 - The children of (*L*, *x*, *y*) are (*L*+1, 2*x*+*i*, 2*y*+*j*) for *i*, *j* ∈ {0, 1}. They are numbered *c* = *i* + 2*j*: 0 north-west, 1 north-east, 2 south-west, 3 south-east.
 - Valid levels are 0 to 28. A pack may use any contiguous range of them.
+- A position on the edge between tiles belongs to the tile east or south of it: each tile owns its west and north edges. Longitude 180° is longitude −180°, in column 0; the south pole belongs to the last row.
 
 Rows start at the north so that tile rows and image rows run in the same direction.
 
@@ -363,7 +364,7 @@ Imagery tiles use `layer_type` 2. The tile header is the common header only (`he
 | 4 | BC1 blocks: a Zstandard frame of 4 × 4 blocks in row-major order, 8 bytes per block |
 | 5 | BC7 blocks: a Zstandard frame of 4 × 4 blocks in row-major order, 16 bytes per block |
 
-A pack may mix encodings, for example JPEG for opaque tiles and PNG for tiles with alpha. Encodings 4 and 5 contain no mipmaps; the coarser pyramid levels take their place. The default runtime decoders handle encodings 1 and 2 through stb_image and encodings 4 and 5 by direct upload. WebP needs an additional decoder, plugged in through the decoder interface (design document, section 13.1). A runtime without a decoder for a tile's encoding reports `VGL_RESULT_NOT_SUPPORTED` for that tile.
+A pack may mix encodings, for example JPEG for opaque tiles and PNG for tiles with alpha. Encodings 4 and 5 contain no mipmaps; the coarser pyramid levels take their place. The reference runtime decodes encodings 1 and 2 through stb_image, and the baker writes only those. Encodings 3 to 5 are reserved for a decoder (WebP) and for direct upload (BC1, BC7), which neither has yet. A runtime without a decoder for a tile's encoding reports `VGL_RESULT_NOT_SUPPORTED` for that tile.
 
 ---
 

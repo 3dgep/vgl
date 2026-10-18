@@ -517,7 +517,8 @@ VGL_API vgl_result vgl_context_ray_query(vgl_context* context,
 
 /**
  * Gets the credits of the data in view (FR-08): the attribution lines of every pack whose tiles
- * the view selects or the last frame drew, in pack priority order, each distinct line once.
+ * the view selects or the last frame drew, in pack priority order, each distinct line once. A
+ * geoid pack counts as in view whenever any terrain is, since it shapes every elevation tile.
  * Hosts display them while the data is visible, as the data's licenses require. Uses the
  * two-call pattern (docs/c-api.md, section 6.3).
  *

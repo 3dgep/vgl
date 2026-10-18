@@ -11,9 +11,11 @@ which builds the C API test and the C++ wrapper test against the package and run
 | Conan recipe | `packaging/conan` | Options `with_defaults`, `with_gl` and `with_d3d11` (Windows) on by default, plus `with_http`. ConanCenter has no Ogre 14, so the Ogre backend is left out |
 
 Every form installs the CMake package (`find_package(vgl)`, with the targets `vgl::vgl`,
-`vgl::defaults`, `vgl::gl`, `vgl::d3d11` and `vgl::ogre`) and, except on Windows, the pkg-config
+`vgl::defaults`, `vgl::gl` and `vgl::d3d11`, and `vgl::ogre` from the vcpkg port's `ogre`
+feature or a source build against an installed Ogre) and, except on Windows, the pkg-config
 modules `vgl`, `vgl-defaults` and `vgl-gl`. The licenses of vgl and of the code compiled into
-it (stb_image, and Zstandard in the archives) are in `share/doc/vgl`.
+it (stb_image, Zstandard in the archives, and a downloaded curl in a shared build with the
+HTTP reader) are in `share/doc/vgl`.
 
 ## Using the packages
 

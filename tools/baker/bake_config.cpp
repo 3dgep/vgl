@@ -137,6 +137,7 @@ bake_config load_bake_config(const std::filesystem::path& file)
     }
 
     bake_config c;
+    c.settings = j.dump();
     try
     {
         if (!j.contains("output"))

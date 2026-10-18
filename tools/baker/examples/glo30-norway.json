@@ -11,7 +11,7 @@
     "geoid": "packs/egm2008-geoid",
     "metadata": {
         "name": "Copernicus GLO-30, Norway",
-        "attribution": "Produced using Copernicus WorldDEM-30 © DLR e.V.",
+        "attribution": "Produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved",
         "source": "Copernicus DEM GLO-30 2021_1 (EGM2008)"
     },
     "sources": [

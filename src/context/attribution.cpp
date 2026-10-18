@@ -3,7 +3,9 @@
 //
 // vgl_context_attribution_get (FR-08): the attribution lines of the packs whose data is in
 // view. A pack is in view when the view selects one of its tiles, or the last frame drew one;
-// the two differ only while a region's new tiles upload.
+// the two differ only while a region's new tiles upload. The geoid has no tiles of its own:
+// it turns every elevation tile's heights into heights above the ellipsoid, so it is in view
+// whenever any terrain is.
 
 #include "context/context_impl.hpp"
 
@@ -22,6 +24,10 @@ bool in_view(const vgl_context& ctx, const vgl_pack& p) noexcept
         // Selected tiles wanted its imagery in the last update, or the last frame drew it.
         return (ctx.has_view && p.imagery_wanted != 0 && p.imagery_wanted + 1 == ctx.frame) ||
                (p.imagery_drawn != 0 && p.imagery_drawn == ctx.render_frame);
+    }
+    if (p.manifest.layer().type == vgl::internal::pack::layer_type::geoid)
+    {
+        return (ctx.has_view && !ctx.selected.empty()) || !ctx.drawn.empty();
     }
     if (ctx.has_view)
     {

@@ -977,10 +977,12 @@ TEST_CASE(attribution_names_the_packs_in_view)
     const test_pack low = make_pack(layer_type::elevation, 0, "Low");
     const test_pack high = make_pack(layer_type::elevation, 40, "High");
     const test_pack twin = make_pack(layer_type::elevation, 20, "Low"); // Same lines as low.
+    const test_pack geoid = make_pack(layer_type::geoid, 0, "Geoid");
     memory_io io;
     io.packs["mem://low"] = &low;
     io.packs["mem://high"] = &high;
     io.packs["mem://twin"] = &twin;
+    io.packs["mem://geoid"] = &geoid;
     vgl_context_create_info info{};
     info.struct_size = sizeof(info);
     info.io = &io.table;
@@ -1040,11 +1042,22 @@ TEST_CASE(attribution_names_the_packs_in_view)
         CHECK_EQ(credits(ctx).size(), 2u);
     }
 
+    // The geoid has no tiles of its own, but shapes all terrain: it is credited with it.
+    create.uri = "mem://geoid";
+    vgl_pack* p_geoid = nullptr;
+    REQUIRE(vgl_pack_create(ctx, &create, &p_geoid) == VGL_RESULT_SUCCESS);
+    settle(ctx, io, gpu);
+    lines = credits(ctx);
+    CHECK_EQ(lines.size(), 4u);
+    CHECK(std::ranges::find(lines, "Geoid A") != lines.end());
+    CHECK(std::ranges::find(lines, "Geoid B") != lines.end());
+
     // Without a view or frames, nothing is credited.
     REQUIRE(vgl_context_view_set(ctx, nullptr) == VGL_RESULT_SUCCESS);
     gpu.frame(ctx);
     CHECK(credits(ctx).empty());
 
+    CHECK_EQ(vgl_pack_destroy(p_geoid), VGL_RESULT_SUCCESS);
     CHECK_EQ(vgl_pack_destroy(p_twin), VGL_RESULT_SUCCESS);
     CHECK_EQ(vgl_pack_destroy(p_low), VGL_RESULT_SUCCESS);
     CHECK_EQ(vgl_context_destroy(ctx), VGL_RESULT_SUCCESS);

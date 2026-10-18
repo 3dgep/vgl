@@ -77,10 +77,10 @@ The core and defaults headers live in `include/vgl`. Each backend's headers, its
 | Structure field | snake case | `cpu_budget` |
 | Enumeration type | `vgl_<name>` | `vgl_log_level` |
 | Enumeration value | `VGL_<TYPE>_<VALUE>` | `VGL_LOG_LEVEL_WARNING` |
-| Flags type and bits | `vgl_<name>_flags` and `VGL_<NAME>_FLAG_<BIT>` | `vgl_layer_flags`, `VGL_LAYER_FLAG_HIDDEN` |
+| Flags type and bits | `vgl_<names>` (plural) and `VGL_<NAME>_<BIT>` | `vgl_draw_features`, `VGL_DRAW_FEATURE_SEA_SURFACE` |
 | Macro or constant | `VGL_<TYPE>_<VALUE>` or `VGL_<NAME>` | `VGL_VERSION_MAJOR` |
 | Callback type | `vgl_<name>_fn` | `vgl_log_fn` |
-| Extension interface | `vgl_<name>_interface` | `vgl_provider_interface` |
+| Extension interface | `vgl_<name>_interface` | `vgl_io_interface` |
 | Creation parameters | `vgl_<object>_create_info` | `vgl_context_create_info` |
 
 All identifiers beginning with `vgl_` or `VGL_` are reserved for the library. Macros that are public only for technical reasons use the `VGL_INTERNAL_` prefix and are not part of the API. Identifiers containing a double underscore are not used, because C++ reserves them.
@@ -93,7 +93,7 @@ A function name is the object, optionally followed by a sub-object or property, 
 |---|---|---|
 | `create`, `destroy` | Create or destroy an object | `vgl_context_create` |
 | `get`, `set` | Read or write a property or a value | `vgl_context_statistics_get` |
-| `add`, `remove` | Add an item to, or remove it from, an object | `vgl_context_layer_add` |
+| `add`, `remove` | Add an item to, or remove it from, an object | none yet |
 | `query` | Compute a result that may depend on loaded data | `vgl_context_height_query` |
 | `update`, `draw` | Per-frame operations | `vgl_context_update` |
 | `complete` | Finish an asynchronous request (section 12) | `vgl_io_request_complete` |
@@ -187,7 +187,7 @@ A null pointer means "no object". Handles are not reference counted, not shared 
 
 ```c
 vgl_result vgl_context_create(const vgl_context_create_info* info, vgl_context** out_context);
-vgl_result vgl_layer_create(vgl_context* context, const vgl_layer_create_info* info, vgl_layer** out_layer);
+vgl_result vgl_pack_create(vgl_context* context, const vgl_pack_create_info* info, vgl_pack** out_pack);
 ```
 
 - The parent object, if there is one, is the first parameter. The new handle is returned through the last parameter.
@@ -214,7 +214,8 @@ vgl_result vgl_context_destroy(vgl_context* context);
 Every function returns `vgl_result`. Parameters appear in this order: the object, then inputs, then outputs.
 
 ```c
-vgl_result vgl_context_height_query(vgl_context* context, double latitude, double longitude, double* out_height);
+vgl_result vgl_context_height_query(vgl_context* context, double latitude, double longitude,
+                                    vgl_height_reference reference, double* out_height);
 ```
 
 ### 6.2 Outputs
@@ -333,14 +334,14 @@ Structures that are fixed by nature, such as `vgl_dvec3`, have no `struct_size` 
 - Fields are only ever appended. Existing fields are never removed, reordered, renamed or changed in type. A deprecated field keeps its place and is ignored.
 - Structures have no implicit padding, including at the end. Where alignment would insert padding, the header declares an explicit `uint32_t reserved` field that must be zero. Tests check the size of each public structure.
 - In a structure that also holds 64-bit fields, each pointer is followed by `VGL_POINTER_PADDING(name)` from `vgl/base.h`, which adds a `uint32_t` on targets with 32-bit pointers and nothing elsewhere. Every pointer then takes 8 bytes, and the layout is the same on 32-bit and 64-bit targets.
-- Arrays are passed as a pointer and a count: `const vgl_layer_info* layers; uint32_t layer_count;`.
+- Arrays are passed as a pointer and a count: `const vgl_star* stars, uint32_t star_count` (`vgl_gl_backend_stars_set`).
 - A versioned structure inside another one is referenced by pointer, not embedded by value, so that each can grow independently.
 
 ### 8.3 How the library reads input structures
 
 - If `struct_size` is smaller than the size of the first published version of the structure, the call fails with `VGL_RESULT_INVALID_ARGUMENT`.
 - If `struct_size` is smaller than the size the library knows, the host was compiled against an older header, and the missing fields take their defaults.
-- If `struct_size` is larger than the size the library knows, the host was compiled against a newer header. If all the unknown trailing bytes are zero, the host uses none of the newer fields and the call proceeds. Otherwise it fails with `VGL_RESULT_NOT_SUPPORTED` and logs which structure and version are involved.
+- If `struct_size` is larger than the size the library knows, the host was compiled against a newer header. If all the unknown trailing bytes are zero, the host uses none of the newer fields and the call proceeds. Otherwise it fails with `VGL_RESULT_NOT_SUPPORTED`.
 
 ### 8.4 Output structures
 
@@ -363,16 +364,16 @@ typedef void (*vgl_log_fn)(void* user_data, vgl_log_level level, const char* mes
 Extension points (design document, section 13.1) are tables of function pointers:
 
 ```c
-#define VGL_PROVIDER_INTERFACE_VERSION 1
+#define VGL_TASK_INTERFACE_VERSION 1
 
-typedef struct vgl_provider_interface
+typedef struct vgl_task_interface
 {
-    uint32_t version; /* VGL_PROVIDER_INTERFACE_VERSION */
+    uint32_t version; /* VGL_TASK_INTERFACE_VERSION */
     uint32_t reserved;
     void* user_data;
-    vgl_result (*tile_read)(void* user_data, const vgl_tile_request* request);
+    vgl_result (*submit)(void* user_data, vgl_task_fn function, void* task_data);
     void (*destroy)(void* user_data); /* Optional. */
-} vgl_provider_interface;
+} vgl_task_interface;
 ```
 
 - The first field is `uint32_t version`, set to the `VGL_<NAME>_INTERFACE_VERSION` macro of the header the extension was compiled against. It takes the place of `struct_size`: the library knows the layout and semantics of every version it supports, and supports every version within its major version.
@@ -471,7 +472,7 @@ typedef void (*vgl_log_fn)(void* user_data, vgl_log_level level, const char* mes
 - The log callback and the minimum level are set when the context is created. Without a callback, the library is silent: it never writes to standard output, standard error or a debugger itself.
 - The default minimum level is `VGL_LOG_LEVEL_WARNING`.
 - `message` is UTF-8 without a trailing newline, and is valid only during the call.
-- Messages start with the name of the API function involved, say what happened, and say how to fix it where the fix is known. For example: `vgl_context_create: info->gpu_budget (1 MiB) is below the minimum of 16 MiB; raise it or set it to 0 for the default.`
+- Messages start with the name of the API function involved, say what happened, and say how to fix it where the fix is known. For example: `vgl_pack_create: the context has no I/O interface; pass one in vgl_context_create_info::io`.
 - Libraries that work on behalf of a context, such as the backends, log through it with `vgl_context_log`, so that their messages reach the same callback, filtered by the same level, and follow the same rules.
 
 ---
@@ -542,7 +543,7 @@ The wrapper is header-only, lives in namespace `vgl`, and calls only the C API, 
 
 - **Names** map mechanically from C. The prefix is dropped and the rest stays in snake case: `vgl_context` becomes `vgl::context`, `vgl_context_statistics_get(context, ...)` becomes `context.statistics_get(...)`, and `VGL_RESULT_OUT_OF_MEMORY` becomes `vgl::result::out_of_memory`.
 - **Handles** become move-only RAII classes that destroy the object in their destructor. `get()` returns the C handle and `release()` gives up ownership.
-- **Errors** are returned, never thrown, so the wrapper works with exceptions disabled. Functions that produce a value return `vgl::expected<T>`, which is `std::expected<T, vgl::result>` when the standard library provides it and a small equivalent otherwise. Other functions return `vgl::result`. A function whose C counterpart can fail only on arguments that the C++ signature rules out, such as null pointers, returns its value directly, for example `vgl::ellipsoid_wgs84_get()`. All of them are `[[nodiscard]]`.
+- **Errors** are returned, never thrown, so the wrapper works with exceptions disabled. The only exception is the standard library's own: a function that returns a standard container (section 6.3) throws `std::bad_alloc` if the container cannot be allocated, as the standard library does. Functions that produce a value return `vgl::expected<T>`, which is `std::expected<T, vgl::result>` when the standard library provides it and a small equivalent otherwise. Other functions return `vgl::result`. A function whose C counterpart can fail only on arguments that the C++ signature rules out, such as null pointers, returns its value directly, for example `vgl::ellipsoid_wgs84_get()`. All of them are `[[nodiscard]]`.
 - **Arrays** use `std::span` in place of pointer and count pairs. The two-call pattern of section 6.3 is wrapped in functions that return a container.
 - **Strings** are passed as `const char*`, because the C API needs null-terminated strings.
 - **Versioned structures** are the C structures themselves. `vgl::init<T>()` returns a zero-initialized `T` with `struct_size` set.

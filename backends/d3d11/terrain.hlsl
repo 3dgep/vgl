@@ -20,7 +20,7 @@ cbuffer frame_constants : register(b0)
 {
     float4x4 u_projection;
     float3 u_light; // Towards the light, in camera space; zero lights from the camera.
-    int u_debug;    // The vgl_d3d11_debug_flag values.
+    int u_debug;    // The vgl_debug_view bits, and contour lines (draw_flags.hpp).
     float u_log_depth; // 2 / log2(far + 1)
     int u_sea;         // 1 raises terrain below mean sea level to it.
     float u_contour_interval;

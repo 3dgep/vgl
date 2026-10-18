@@ -9,9 +9,11 @@ through backends for OpenGL / OpenGL ES, Direct3D 11 and Ogre, on Windows, Linux
 and iOS, and in web browsers on WebGL 2. The public interface is a C API, so the library embeds as
 easily in a C code base as in a C++ one.
 
-> **Status:** early development, at milestone M2 (MVP runtime). The runtime loads baked packs,
-> selects and meshes tiles, and the OpenGL / OpenGL ES backend draws the terrain with imagery.
-> The API will change without notice before version 1.0.
+> **Status:** early development, at milestone M3 (integration). The runtime streams baked packs
+> from disk or a web server, and the OpenGL / OpenGL ES, Direct3D 11 and Ogre backends draw the
+> terrain with layered imagery, an atmosphere, stars and clouds, with picking and a WebAssembly
+> build. Version 1 follows once Ogre's Vulkan render system is verified; until then the API may
+> still change.
 
 ## Goals
 
@@ -82,14 +84,14 @@ cmake --workflow --preset linux-gcc-static-debug
 | `VGL_BUILD_TESTS` | `ON` (top level) | Build the tests |
 | `VGL_BUILD_SAMPLES` | `ON` (top level) | Build the samples |
 | `VGL_BUILD_BAKER` | `OFF` | Build the baking tool (requires GDAL) |
-| `VGL_BUILD_DEFAULTS` | `ON` | Build the optional thread pool and filesystem reader |
+| `VGL_BUILD_DEFAULTS` | `ON` | Build the optional defaults module: a thread pool, a file reader and a disk cache, and with `VGL_DEFAULTS_HTTP` an HTTP reader |
 | `VGL_DEFAULTS_HTTP` | `OFF` | Give the defaults module an HTTP reader: an installed libcurl, or else curl 8.11.1 downloaded and built with HTTP and HTTPS only |
 | `VGL_BACKEND_GL` | `ON` | Build the OpenGL / OpenGL ES backend |
 | `VGL_BACKEND_D3D11` | `ON` (Windows) | Build the Direct3D 11 backend |
 | `VGL_BACKEND_OGRE` | `OFF` | Build the Ogre backend (classic Ogre 14): an installed Ogre, or else Ogre 14.6.1 downloaded and built statically |
 | `VGL_DISABLE_EXCEPTIONS` | `OFF` | Build the library without exceptions and RTTI |
 | `VGL_WARNINGS_AS_ERRORS` | `OFF` | Treat compiler warnings as errors |
-| `VGL_FETCH_DEPENDENCIES` | `ON` | Download Zstandard, and GLFW for the samples, when they are not installed |
+| `VGL_FETCH_DEPENDENCIES` | `ON` | Download the dependencies that are not installed: Zstandard and stb_image, curl for the HTTP reader, Ogre for its backend, nlohmann/json for the baker, and GLFW and Dear ImGui for the samples |
 | `VGL_TEST_GL` | `OFF` | Run the OpenGL samples' checks as tests (needs a display) |
 | `VGL_TEST_BROWSER` | `OFF` | With Emscripten, check the OpenGL sample's page in headless Chrome, served by Caddy (`VGL_CHROME`, `VGL_CADDY`) |
 | `VGL_INSTALL` | `ON` (top level) | Generate install rules |

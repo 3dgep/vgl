@@ -1249,6 +1249,17 @@ vgl::expected<globe*> globe::create(vgl_context* context, const globe_create_inf
             mem.deallocate(place, sizeof(globe), alignof(globe));
             return vgl::unexpected(vgl::result::not_supported);
         }
+        if (shading_language() == nullptr)
+        {
+            log(*s,
+                VGL_LOG_LEVEL_ERROR,
+                "vgl::ogre::globe::create: the render system compiles none of the shading "
+                "languages");
+            s->~state();
+            mem.deallocate(s, sizeof(state), alignof(state));
+            mem.deallocate(place, sizeof(globe), alignof(globe));
+            return vgl::unexpected(vgl::result::not_supported);
+        }
         build_pipeline(*s);
         g = ::new (place) globe(s->name, s);
     }

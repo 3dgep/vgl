@@ -157,7 +157,13 @@
       "name": "macos-base",
       "hidden": true,
       "inherits": "base",
+      "description": "Universal binaries (arm64 and x86_64) for macOS 11 and later (design document, section 4). Zstandard is compiled in, since Homebrew's has one architecture only.",
       "generator": "Ninja Multi-Config",
+      "cacheVariables": {
+        "CMAKE_OSX_ARCHITECTURES": "arm64;x86_64",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "11.0",
+        "VGL_ZSTD_PROVIDER": "BUNDLED"
+      },
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",

@@ -17,7 +17,7 @@ include(GNUInstallDirs)
 option(VGL_BUILD_TESTS "Build the vgl tests" ${PROJECT_IS_TOP_LEVEL})
 option(VGL_BUILD_SAMPLES "Build the vgl samples" ${PROJECT_IS_TOP_LEVEL})
 option(VGL_BUILD_BAKER "Build the baking tool (requires GDAL)" OFF)
-option(VGL_BUILD_DEFAULTS "Build the optional defaults module (thread pool, filesystem reader)" ON)
+option(VGL_BUILD_DEFAULTS "Build the optional defaults module (thread pool, file reader, disk cache)" ON)
 option(VGL_DEFAULTS_HTTP "Give the defaults module an HTTP reader, on libcurl" OFF)
 option(VGL_INSTALL "Generate install rules, the CMake package and the pkg-config file" ${PROJECT_IS_TOP_LEVEL})
 
