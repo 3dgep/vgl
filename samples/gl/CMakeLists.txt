@@ -46,6 +46,30 @@ else()
         VGL_SAMPLE_DATA_DIR="${PROJECT_SOURCE_DIR}/samples/data")
 endif()
 
+# The page's check (tests/browser/page_check.mjs): served with Caddy, opened in headless Chrome
+# on its software renderer, and flown to the Sognefjord. It needs both, found on the path or
+# named with VGL_CHROME and VGL_CADDY, so it is a test only on request.
+if(EMSCRIPTEN AND VGL_BUILD_TESTS)
+    option(VGL_TEST_BROWSER "Check the OpenGL sample's page in headless Chrome (needs Chrome and Caddy)" OFF)
+    if(VGL_TEST_BROWSER)
+        find_program(VGL_CHROME NAMES google-chrome google-chrome-stable chromium chromium-browser chrome
+            PATHS "$ENV{ProgramFiles}/Google/Chrome/Application"
+                  "/Applications/Google Chrome.app/Contents/MacOS")
+        find_program(VGL_CADDY NAMES caddy)
+        if(NOT VGL_CHROME OR NOT VGL_CADDY)
+            message(FATAL_ERROR "vgl: VGL_TEST_BROWSER needs Chrome and Caddy 2.11; name them with "
+                                "VGL_CHROME and VGL_CADDY.")
+        endif()
+        add_test(NAME browser
+            COMMAND "${CMAKE_CROSSCOMPILING_EMULATOR}" "${PROJECT_SOURCE_DIR}/tests/browser/page_check.mjs"
+                --chrome "${VGL_CHROME}" --caddy "${VGL_CADDY}"
+                --web "$<TARGET_FILE_DIR:vgl_gl_sample>"
+                --packs "${PROJECT_SOURCE_DIR}/samples/data/packs"
+                --screenshot "${CMAKE_CURRENT_BINARY_DIR}/browser-check.png")
+        set_tests_properties(browser PROPERTIES TIMEOUT 300)
+    endif()
+endif()
+
 if(VGL_BUILD_TESTS AND VGL_TEST_GL)
     # The checks expect the sample set, wherever VGL_SAMPLE_DATA points.
     add_test(NAME gl COMMAND vgl_gl_sample --check --data "${PROJECT_SOURCE_DIR}/samples/data")

@@ -119,6 +119,11 @@ The pack format has its own version number, independent of the library version.
   backend, pixel for pixel but for anti-aliased wireframe lines on Direct3D 11. CI runs it on
   Linux with Mesa on full runs.
 - The samples in a GLFW window share their controls (`samples/common/glfw_controls.hpp`).
+- The OpenGL sample's page has a check in headless Chrome (`tests/browser/page_check.mjs`,
+  test `browser` with `VGL_TEST_BROWSER`): served by Caddy and driven over the DevTools
+  protocol, it must come up cross-origin isolated on WebGL 2, draw tiles, and fly to the
+  Sognefjord on a key press and load its tiles, without exceptions, WebGL errors or failed reads.
+  CI runs it on Linux, and keeps a screenshot.
 - Chainable I/O: `vgl_io_request_create` (`vgl::io_request_create`) makes a request whose
   completion calls its creator back, so that an I/O interface can pass reads on to another and
   handle what comes back.

@@ -91,6 +91,7 @@ cmake --workflow --preset linux-gcc-static-debug
 | `VGL_WARNINGS_AS_ERRORS` | `OFF` | Treat compiler warnings as errors |
 | `VGL_FETCH_DEPENDENCIES` | `ON` | Download Zstandard, and GLFW for the samples, when they are not installed |
 | `VGL_TEST_GL` | `OFF` | Run the OpenGL samples' checks as tests (needs a display) |
+| `VGL_TEST_BROWSER` | `OFF` | With Emscripten, check the OpenGL sample's page in headless Chrome, served by Caddy (`VGL_CHROME`, `VGL_CADDY`) |
 | `VGL_INSTALL` | `ON` (top level) | Generate install rules |
 
 The Direct3D 11 backend needs the Windows SDK's HLSL compiler, `fxc`, which compiles its shaders

@@ -244,34 +244,46 @@ jobs:
 
   # WebAssembly with Emscripten at a pinned version, with threads: the library, the samples and
   # the OpenGL sample's page, and the tests and the headless check on Node.js (design document,
-  # section 4).
+  # section 4). The page's check opens it in the runner's Chrome, served by Caddy at a pinned
+  # version and checksum, and flies it to the Sognefjord (tests/browser/page_check.mjs).
   web:
-    name: WebAssembly (Emscripten, Node.js)
+    name: WebAssembly (Emscripten, Node.js, Chrome)
     if: github.event_name != 'push'
     runs-on: ubuntu-24.04
     env:
       EMSDK_VERSION: 6.0.11
+      CADDY_VERSION: 2.11.7
+      CADDY_SHA512: a7a433a1b133efc3c8d10eb0b99d52a24b5ef5c322dc77f5282182b1c0402139ab83f3a99f0c52409df77d20123fb0b523edad8a66d8f5e49136197bf61ef0e7
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install Ninja and Emscripten
+      - name: Install Ninja, Emscripten and Caddy
         run: |
           sudo apt-get update && sudo apt-get install -y ninja-build
           git clone --depth 1 --branch "$EMSDK_VERSION" https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
           "$RUNNER_TEMP/emsdk/emsdk" install "$EMSDK_VERSION"
           "$RUNNER_TEMP/emsdk/emsdk" activate "$EMSDK_VERSION"
           echo "EMSDK=$RUNNER_TEMP/emsdk" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/caddy"
+          cd "$RUNNER_TEMP/caddy"
+          curl -fsSLO "https://github.com/caddyserver/caddy/releases/download/v$CADDY_VERSION/caddy_${CADDY_VERSION}_linux_amd64.tar.gz"
+          echo "$CADDY_SHA512  caddy_${CADDY_VERSION}_linux_amd64.tar.gz" | sha512sum -c -
+          tar -xzf "caddy_${CADDY_VERSION}_linux_amd64.tar.gz" caddy
 
       - name: Configure, build and test
         run: |
           source "$EMSDK/emsdk_env.sh"
-          cmake --workflow --preset emscripten-release
+          cmake --preset emscripten -DVGL_TEST_BROWSER=ON -DVGL_CADDY="$RUNNER_TEMP/caddy/caddy"
+          cmake --build --preset emscripten-release
+          ctest --preset emscripten-release
 
-      - name: Check the page
-        run: |
-          for f in vgl-gl.html vgl-gl.js vgl-gl.wasm vgl-gl.data; do
-            test -s "build/emscripten/bin/Release/$f"
-          done
+      - name: Keep the page's screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-check
+          path: build/emscripten/samples/gl/browser-check.png
+          if-no-files-found: ignore
 
   baker-linux:
     name: Baker (Linux, system GDAL)

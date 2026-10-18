@@ -42,6 +42,16 @@ The page takes the native sample's options from its address: a parameter with a 
 
 Relative pack URIs are fetched from the page's own address. Packs on another server load if it allows the page's origin with CORS, as the reference server does. `--check` is the native sample's only, since its loops would stop the page.
 
+## Checking
+
+`tests/browser/page_check.mjs` checks the page in headless Chrome, on its software renderer, so that it needs no GPU. It serves the page with Caddy and the Caddyfile above, drives it over the DevTools protocol as a user would, and fails if the page is not cross-origin isolated, does not draw tiles from orbit, or does not fly to the Sognefjord on the key 7 and load the tiles there, or if anything throws, a WebGL call fails or a read fails. With `VGL_TEST_BROWSER` on, it is the `browser` test of the `emscripten` build, finding Chrome and Caddy on the path or as `VGL_CHROME` and `VGL_CADDY`, and it leaves a screenshot in the build directory. CI runs it on Linux.
+
+```sh
+cmake --preset emscripten -DVGL_TEST_BROWSER=ON
+cmake --build --preset emscripten-release
+ctest --preset emscripten-release -R browser
+```
+
 ## Browsers
 
 WebGL 2 and shared memory between workers: Chrome and Edge 92, Firefox 79 and Safari 15.2, or later. The depth convention is logarithmic by default; reversed-Z needs clip control, which WebGL 2 does not have.
