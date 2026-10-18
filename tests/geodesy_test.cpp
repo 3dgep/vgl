@@ -401,3 +401,15 @@ TEST_CASE(earth_rotation_angle_follows_the_iers_definition)
     CHECK_EQ(vgl_earth_rotation_angle_get(std::numeric_limits<double>::infinity(), &b),
              VGL_RESULT_INVALID_ARGUMENT);
 }
+
+TEST_CASE(angle_conversions_match_the_macros)
+{
+    double r = 0.0;
+    REQUIRE(vgl_degrees_to_radians(180.0, &r) == VGL_RESULT_SUCCESS);
+    CHECK_EQ(r, VGL_DEGREES_TO_RADIANS(180.0));
+    double d = 0.0;
+    REQUIRE(vgl_radians_to_degrees(r, &d) == VGL_RESULT_SUCCESS);
+    CHECK_NEAR(d, 180.0, 1e-12);
+    CHECK_EQ(vgl_degrees_to_radians(1.0, nullptr), VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(vgl_radians_to_degrees(1.0, nullptr), VGL_RESULT_INVALID_ARGUMENT);
+}

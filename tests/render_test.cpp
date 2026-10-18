@@ -29,6 +29,29 @@ using namespace vgl::internal;
 using namespace vgl::test;
 
 // A consumer that "creates" resources by remembering them.
+// The stride a consumer asked for, or the size in this header.
+std::size_t stride_of(const vgl_frame_begin_info* info,
+                      std::uint32_t vgl_frame_begin_info::*size,
+                      std::size_t header_size)
+{
+    return info != nullptr && info->*size != 0 ? info->*size : header_size;
+}
+
+// Item k of a frame's list at a stride; what lies beyond this header's size must be zero, as
+// fields of a later version that the core does not know.
+template <typename T>
+T item_at(const T* list, std::uint32_t k, std::size_t stride)
+{
+    T item{};
+    const auto* bytes = reinterpret_cast<const std::byte*>(list) + std::size_t{k} * stride;
+    std::memcpy(&item, bytes, std::min(stride, sizeof(T)));
+    for (std::size_t b = sizeof(T); b < stride; ++b)
+    {
+        CHECK(bytes[b] == std::byte{0});
+    }
+    return item;
+}
+
 struct fake_gpu
 {
     struct resource
@@ -106,7 +129,12 @@ struct fake_gpu
         REQUIRE(vgl_frame_index_lists_get(f, &lists, &count) == VGL_RESULT_SUCCESS);
         for (std::uint32_t k = 0; k < count; ++k)
         {
-            const vgl_index_list_data& d = lists[k];
+            const vgl_index_list_data d =
+                item_at(lists,
+                        k,
+                        stride_of(info,
+                                  &vgl_frame_begin_info::index_list_data_size,
+                                  sizeof(vgl_index_list_data)));
             CHECK(ever.insert(d.resource).second);
             CHECK(d.index_size == 2 || d.index_size == 4);
             CHECK(d.indices != nullptr);
@@ -132,7 +160,10 @@ struct fake_gpu
         REQUIRE(vgl_frame_meshes_get(f, &meshes, &count) == VGL_RESULT_SUCCESS);
         for (std::uint32_t k = 0; k < count; ++k)
         {
-            const vgl_mesh_data& d = meshes[k];
+            const vgl_mesh_data d = item_at(
+                meshes,
+                k,
+                stride_of(info, &vgl_frame_begin_info::mesh_data_size, sizeof(vgl_mesh_data)));
             CHECK(ever.insert(d.resource).second);
             CHECK_EQ(d.vertex_size, static_cast<std::uint32_t>(VGL_TERRAIN_VERTEX_SIZE));
             CHECK(d.vertices != nullptr);
@@ -188,7 +219,11 @@ struct fake_gpu
         REQUIRE(vgl_frame_textures_get(f, &textures, &count) == VGL_RESULT_SUCCESS);
         for (std::uint32_t k = 0; k < count; ++k)
         {
-            const vgl_texture_data& d = textures[k];
+            const vgl_texture_data d = item_at(textures,
+                                               k,
+                                               stride_of(info,
+                                                         &vgl_frame_begin_info::texture_data_size,
+                                                         sizeof(vgl_texture_data)));
             CHECK(ever.insert(d.resource).second);
             if (fail.erase(d.resource) != 0)
             {
@@ -228,19 +263,22 @@ struct fake_gpu
 
         const vgl_draw_layer* layer_list = nullptr;
         REQUIRE(vgl_frame_draw_layers_get(f, &layer_list, &count) == VGL_RESULT_SUCCESS);
-        layers.assign(layer_list, layer_list + count);
+        layers.clear();
+        for (std::uint32_t k = 0; k < count; ++k)
+        {
+            layers.push_back(item_at(
+                layer_list,
+                k,
+                stride_of(info, &vgl_frame_begin_info::draw_layer_size, sizeof(vgl_draw_layer))));
+        }
 
         const vgl_draw_item* draw = nullptr;
         REQUIRE(vgl_frame_draw_list_get(f, &draw, &count) == VGL_RESULT_SUCCESS);
-        const std::size_t stride = info != nullptr && info->draw_item_size != 0
-                                       ? info->draw_item_size
-                                       : sizeof(vgl_draw_item);
+        const std::size_t stride =
+            stride_of(info, &vgl_frame_begin_info::draw_item_size, sizeof(vgl_draw_item));
         for (std::uint32_t k = 0; k < count; ++k)
         {
-            vgl_draw_item item{};
-            std::memcpy(&item,
-                        reinterpret_cast<const std::byte*>(draw) + k * stride,
-                        std::min(stride, sizeof(vgl_draw_item)));
+            const vgl_draw_item item = item_at(draw, k, stride);
             // Drawn only once created, in this frame or an earlier one; an item of a resource
             // the consumer could not create in this frame is skipped.
             if (failed_now.contains(item.mesh) || failed_now.contains(item.index_list))
@@ -707,29 +745,55 @@ TEST_CASE(a_reset_creates_everything_again)
     CHECK_EQ(gpu.items.size(), drawn);
 }
 
-TEST_CASE(older_consumers_get_shorter_draw_items)
+TEST_CASE(newer_consumers_get_their_strides)
 {
-    fixture f;
+    fixture f(0, 0, true); // With imagery, for textures and layers.
     REQUIRE(f.ctx != nullptr);
-    fake_gpu gpu;
+    fake_gpu reference;
     const position p = inside({3, 6, 2}, 0.5, 0.5);
     f.look(p.lat, p.lon, 50000.0);
-    settle(f.ctx, f.io, gpu);
-    REQUIRE(!gpu.items.empty());
-    const vgl_draw_item full = gpu.items[0];
+    settle(f.ctx, f.io, reference);
+    REQUIRE(!reference.items.empty());
+    REQUIRE(!reference.layers.empty());
 
-    // A consumer whose draw item ends before min_height.
+    // A consumer built against a later version, whose structures have grown: the same frame at
+    // its strides, with zeros in what this version does not know (item_at checks them).
+    fixture g(0, 0, true);
+    REQUIRE(g.ctx != nullptr);
+    fake_gpu gpu;
+    g.look(p.lat, p.lon, 50000.0);
     vgl_frame_begin_info info{};
     info.struct_size = sizeof(info);
-    info.draw_item_size = static_cast<std::uint32_t>(offsetof(vgl_draw_item, min_height));
-    gpu.frame(f.ctx, &info);
-    REQUIRE(!gpu.items.empty());
-    CHECK_EQ(gpu.items[0].mesh, full.mesh);
-    CHECK_EQ(gpu.items[0].min_height, 0.0); // Not written: beyond the consumer's size.
+    info.draw_item_size = sizeof(vgl_draw_item) + 24;
+    info.draw_layer_size = sizeof(vgl_draw_layer) + 8;
+    info.index_list_data_size = sizeof(vgl_index_list_data) + 16;
+    info.mesh_data_size = sizeof(vgl_mesh_data) + 8;
+    info.texture_data_size = sizeof(vgl_texture_data) + 32;
+    settle(g.ctx, g.io, gpu, &info);
+    REQUIRE(gpu.items.size() == reference.items.size());
+    CHECK_EQ(gpu.resident.size(), reference.resident.size());
+    CHECK(!gpu.layers.empty());
+    for (std::size_t k = 0; k < gpu.items.size(); ++k)
+    {
+        CHECK(gpu.items[k].tile.level == reference.items[k].tile.level);
+        CHECK_EQ(gpu.items[k].index_count, reference.items[k].index_count);
+        CHECK_EQ(gpu.items[k].layer_count, reference.items[k].layer_count);
+    }
 
-    info.draw_item_size = 8; // Too small for any version.
+    // Structures smaller than this header's: no version has them.
     vgl_frame* frame = nullptr;
-    CHECK_EQ(vgl_context_frame_begin(f.ctx, &info, &frame), VGL_RESULT_INVALID_ARGUMENT);
+    for (std::uint32_t vgl_frame_begin_info::*const size :
+         {&vgl_frame_begin_info::draw_item_size,
+          &vgl_frame_begin_info::draw_layer_size,
+          &vgl_frame_begin_info::index_list_data_size,
+          &vgl_frame_begin_info::mesh_data_size,
+          &vgl_frame_begin_info::texture_data_size})
+    {
+        vgl_frame_begin_info small{};
+        small.struct_size = sizeof(small);
+        small.*size = 8;
+        CHECK_EQ(vgl_context_frame_begin(g.ctx, &small, &frame), VGL_RESULT_INVALID_ARGUMENT);
+    }
 }
 
 TEST_CASE(a_frame_can_draw_from_another_camera)

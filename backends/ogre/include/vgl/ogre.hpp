@@ -11,16 +11,18 @@
 //
 //     vgl::ogre::globe_create_info info;
 //     info.depth_convention = VGL_DEPTH_CONVENTION_REVERSED_Z;
-//     vgl::ogre::globe* globe = nullptr;
-//     vgl::ogre::globe::create(context, info, globe);
-//     scene_manager->getRootSceneNode()->attachObject(globe);
+//     vgl::expected<vgl::ogre::globe*> globe = vgl::ogre::globe::create(context, info);
+//     scene_manager->getRootSceneNode()->attachObject(*globe);
 //
 //     // Each frame, after vgl_context_update, before Ogre renders:
-//     globe->settings_set(settings);  // Optional: the camera in double precision, debug views.
+//     (*globe)->settings_set(settings);  // Optional: the camera in double precision, features.
 //     root->renderOneFrame();
 //
-//     scene_manager->getRootSceneNode()->detachObject(globe);
-//     vgl::ogre::globe::destroy(globe);  // Before the context and Ogre's render system.
+//     scene_manager->getRootSceneNode()->detachObject(*globe);
+//     vgl::ogre::globe::destroy(*globe);  // Before the context and Ogre's render system.
+//
+// The globe's functions are called on Ogre's render thread, as Ogre's own are, and one at a
+// time with the calls on its context (docs/c-api.md, section 11).
 //
 // Ogre draws the tiles with its camera's projection only: each tile's model_view, composed by
 // the core in double precision from the context's view or from the view in the settings,
@@ -40,11 +42,13 @@
 
 #include <vgl/base.hpp>
 #include <vgl/context.h>
+#include <vgl/context.hpp>
 #include <vgl/render.h>
 
 #include <Ogre.h>
 
 #include <cstdint>
+#include <span>
 
 namespace vgl::ogre
 {
@@ -61,17 +65,6 @@ struct globe_create_info
     Ogre::String name = "vgl/globe";
 };
 
-// Debug views of globe_settings.debug_flags, the same as the other backends'
-// (vgl_gl_debug_flag in vgl/gl.h describes them).
-enum debug_flag : std::uint32_t
-{
-    debug_wireframe = 0x1,
-    debug_level_colors = 0x2,
-    debug_imagery_source = 0x4,
-    debug_height_colors = 0x8,
-    debug_contours = 0x10,
-};
-
 // How the globe draws, from the next frame on.
 struct globe_settings
 {
@@ -85,26 +78,20 @@ struct globe_settings
     // The logarithmic convention's far distance, in metres. 0 selects
     // VGL_LOGARITHMIC_DEPTH_FAR_DEFAULT.
     double logarithmic_far = 0.0;
-    // Bytes of resources to upload per frame. 0 selects 16 MiB.
+    // Bytes of resources to upload per frame. 0 selects VGL_UPLOAD_BUDGET_DEFAULT.
     std::uint64_t upload_budget = 0;
-    // A combination of debug_flag values.
-    std::uint32_t debug_flags = 0;
-    // Height between contour lines, in metres. 0 selects 500.
+    // What to draw besides the terrain and its imagery: vgl_draw_feature values (vgl/render.h).
+    // The atmosphere draws in the render queue group RENDER_QUEUE_SKIES_LATE, and the stars in
+    // the group before it.
+    vgl_draw_features features = 0;
+    // Views for inspecting level of detail and loading: vgl_debug_view values (vgl/render.h).
+    vgl_debug_views debug_views = 0;
+    // The Earth rotation angle in radians (vgl_earth_rotation_angle_get), for the stars.
+    double earth_rotation_angle = 0.0;
+    // Height between contour lines, in metres. 0 selects VGL_CONTOUR_INTERVAL_DEFAULT.
     double contour_interval = 0.0;
-    // Terrain below mean sea level raised to it and shaded as water (vgl_gl_draw_info).
-    bool sea_surface = false;
-    // The atmosphere (vgl_gl_draw_info.atmosphere): the sky, in the render queue group
-    // RENDER_QUEUE_SKIES_LATE, where nothing was drawn before it, at the far depth, and the haze
-    // and the sun's colour on the terrain.
-    bool atmosphere = false;
-    // The stars set with globe::stars_set, behind the sky, in the render queue group before
-    // RENDER_QUEUE_SKIES_LATE (vgl_gl_draw_info.stars), turned by the Earth rotation angle in
-    // radians (vgl_earth_rotation_angle_get).
-    bool stars = false;
-    double sidereal_angle = 0.0;
-    // With the atmosphere, the clouds set with globe::clouds_set (vgl_gl_draw_info.clouds), as a
-    // shell at cloud_height metres above the ellipsoid; 0 selects 6,000.
-    bool clouds = false;
+    // The cloud shell's height above the ellipsoid, in metres. 0 selects
+    // VGL_CLOUD_HEIGHT_DEFAULT.
     double cloud_height = 0.0;
 };
 
@@ -113,32 +100,40 @@ class globe final : public Ogre::MovableObject
 public:
     // Creates a globe for a context on Ogre's current render system: creates its programs and
     // material, and tells the context which texture formats it samples. The context must outlive
-    // the globe. Fails with VGL_RESULT_NOT_SUPPORTED if the render system lacks a shading
-    // language the globe has, or the reversed-Z convention without the render system's option,
-    // and with VGL_RESULT_BACKEND_ERROR if Ogre fails, as the log says.
-    [[nodiscard]] static vgl::result
-    create(vgl_context* context, const globe_create_info& info, globe*& out) noexcept;
+    // the globe. Fails with invalid_argument for an unknown depth convention, not_supported if
+    // the render system lacks a shading language the globe has, or the reversed-Z convention
+    // without the render system's option, out_of_memory, and backend_error if Ogre fails; the
+    // context's log says which.
+    [[nodiscard]] static vgl::expected<globe*> create(vgl::context& context,
+                                                      const globe_create_info& info) noexcept;
+    [[nodiscard]] static vgl::expected<globe*> create(vgl_context* context,
+                                                      const globe_create_info& info) noexcept;
 
     // Detach it from its scene node first. Null does nothing.
     static void destroy(globe* g) noexcept;
 
-    void settings_set(const globe_settings& settings) noexcept;
+    // Sets how the globe draws from the next frame on. Fails with invalid_argument, keeping the
+    // settings before, for a matrix or direction that is not finite, unknown feature or debug
+    // view bits, or a distance, interval, height or angle that is not finite or, but for the
+    // angle, negative; the context's log says which.
+    [[nodiscard]] vgl::result settings_set(const globe_settings& settings) noexcept;
 
-    // Sets the stars the globe draws when its settings ask for them, replacing those set
-    // before, as vgl_gl_backend_stars_set does: copied, drawn as small quads. vgl ships no
-    // stars. Fails with invalid_argument for an invalid star or too many, and out_of_memory.
-    [[nodiscard]] vgl::result stars_set(const vgl_star* stars, std::uint32_t count) noexcept;
+    // Sets the stars the globe draws with VGL_DRAW_FEATURE_STARS, replacing those set before, as
+    // vgl_gl_backend_stars_set does: copied, drawn as small quads. vgl ships no stars. Fails with
+    // invalid_argument for an invalid star or more than VGL_STAR_COUNT_MAX, and out_of_memory.
+    [[nodiscard]] vgl::result stars_set(std::span<const vgl_star> stars) noexcept;
 
-    // Sets the clouds the globe draws when its settings ask for them, as
+    // Sets the clouds the globe draws with VGL_DRAW_FEATURE_CLOUDS, as
     // vgl_gl_backend_clouds_set does: a coverage image of the whole globe, copied with its mip
     // levels; null with width and height 0 removes them. Fails with invalid_argument for a size
-    // outside 2 x 2 to 16,384 x 8,192, and out_of_memory.
+    // outside the limits of vgl/render.h (VGL_CLOUD_IMAGE_*), and out_of_memory.
     [[nodiscard]] vgl::result
     clouds_set(const std::uint8_t* coverage, std::uint32_t width, std::uint32_t height) noexcept;
 
     // Forgets the globe's Ogre objects and the context's render resources, which are uploaded
-    // again over the next frames: after Ogre's render system lost its device, and the like.
-    void resources_reset() noexcept;
+    // again over the next frames: after Ogre's render system lost its device, and the like, as
+    // the C backends' device_reset does.
+    void device_reset() noexcept;
 
     // Ogre::MovableObject
     [[nodiscard]] const Ogre::String& getMovableType() const override;

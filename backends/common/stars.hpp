@@ -40,8 +40,8 @@ inline constexpr std::uint32_t star_corner_offset = 12;
 inline constexpr std::uint32_t star_light_offset = 20; // Intensity, then radius.
 inline constexpr std::uint32_t star_color_offset = 28;
 
-// The most stars a backend takes, which keeps the vertex buffer under 100 MiB.
-inline constexpr std::uint32_t max_stars = 400000;
+// The most stars a backend takes (vgl/render.h).
+inline constexpr std::uint32_t max_stars = VGL_STAR_COUNT_MAX;
 
 // True if a star can be drawn: finite, with a direction of about unit length and colours
 // from 0 to 1.

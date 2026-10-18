@@ -101,9 +101,11 @@ extern "C" VGL_API vgl_result vgl_context_statistics_get(const vgl_context* cont
     s.update_time = ctx.update_seconds;
     s.frame_time = ctx.frame_seconds;
 
-    // The fields that fit in the caller's structure (docs/c-api.md, section 8.4).
-    const std::uint32_t size = out_statistics->struct_size;
+    // The fields that fit in the caller's structure, and the size written (docs/c-api.md,
+    // section 8.4).
+    const auto size =
+        static_cast<std::uint32_t>(std::min<std::size_t>(out_statistics->struct_size, sizeof(s)));
     s.struct_size = size;
-    std::memcpy(out_statistics, &s, std::min<std::size_t>(size, sizeof(s)));
+    std::memcpy(out_statistics, &s, size);
     return VGL_RESULT_SUCCESS;
 }

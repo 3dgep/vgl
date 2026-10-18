@@ -135,15 +135,10 @@ struct version
 };
 
 // Returns the version of the vgl binary.
-[[nodiscard]] inline expected<version> version_get() noexcept
+[[nodiscard]] inline version version_get() noexcept
 {
     version v;
-    const auto r =
-        static_cast<result>(vgl_version_get(&v.major_version, &v.minor_version, &v.patch_version));
-    if (failed(r))
-    {
-        return unexpected(r);
-    }
+    static_cast<void>(vgl_version_get(&v.major_version, &v.minor_version, &v.patch_version));
     return v;
 }
 

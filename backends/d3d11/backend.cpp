@@ -8,6 +8,7 @@
 
 #include "backends/common/atmosphere_view.hpp"
 #include "backends/common/clouds.hpp"
+#include "backends/common/draw_flags.hpp"
 #include "backends/common/stars.hpp"
 #include "common/host_memory.hpp"
 #include "common/pointer_map.hpp"
@@ -949,12 +950,14 @@ void draw_items(vgl_d3d11_backend& b,
     ID3D11DeviceContext* dc = b.dc;
     frame_constants fc;
     fc.projection = to_float(projection);
-    fc.debug = static_cast<std::int32_t>(info.debug_flags);
-    fc.sea = info.sea_surface != VGL_FALSE ? 1 : 0;
-    fc.contour_interval =
-        static_cast<float>(info.contour_interval > 0.0 ? info.contour_interval : 500.0);
+    fc.debug = static_cast<std::int32_t>(
+        vgl::backends::shader_debug_bits(info.debug_views, info.features));
+    fc.sea = vgl::backends::has(info.features, VGL_DRAW_FEATURE_SEA_SURFACE) ? 1 : 0;
+    fc.contour_interval = static_cast<float>(
+        info.contour_interval > 0.0 ? info.contour_interval : VGL_CONTOUR_INTERVAL_DEFAULT);
     // The atmosphere needs the camera and a sun: without one, it is above the camera.
-    const bool atmosphere = info.atmosphere != VGL_FALSE && view != nullptr;
+    const bool atmosphere =
+        vgl::backends::has(info.features, VGL_DRAW_FEATURE_ATMOSPHERE) && view != nullptr;
     vgl_dmat4 inverse{};
     const bool sky = atmosphere && vgl::backends::invert(projection, inverse);
     vgl_dvec3 sun = info.sun_direction;
@@ -979,8 +982,8 @@ void draw_items(vgl_d3d11_backend& b,
     // The far plane's depth: 0 for reversed-Z, else 1, the logarithmic convention's too.
     fc.far_depth = b.depth == VGL_DEPTH_CONVENTION_REVERSED_Z ? 0.0f : 1.0f;
     // The clouds, with the atmosphere, on their own slot and sampler.
-    const bool clouds =
-        atmosphere && info.clouds != VGL_FALSE && b.cloud_data != nullptr && upload_clouds(b);
+    const bool clouds = atmosphere && vgl::backends::has(info.features, VGL_DRAW_FEATURE_CLOUDS) &&
+                        b.cloud_data != nullptr && upload_clouds(b);
     if (clouds)
     {
         const double height =
@@ -990,11 +993,12 @@ void draw_items(vgl_d3d11_backend& b,
                     static_cast<float>(vgl::backends::cloud_texel_km(b.cloud_levels.width[0])),
                     0.0f};
     }
-    const bool stars = info.stars != VGL_FALSE && view != nullptr && b.star_count != 0;
+    const bool stars = vgl::backends::has(info.features, VGL_DRAW_FEATURE_STARS) &&
+                       view != nullptr && b.star_count != 0;
     if (stars)
     {
         const std::array<float, 9> c =
-            vgl::backends::celestial_to_camera(*view, info.sidereal_angle);
+            vgl::backends::celestial_to_camera(*view, info.earth_rotation_angle);
         for (std::size_t i = 0; i < 3; ++i)
         {
             for (std::size_t j = 0; j < 3; ++j)
@@ -1313,9 +1317,8 @@ extern "C" VGL_D3D11_API vgl_result vgl_d3d11_backend_clouds_set(vgl_d3d11_backe
     return VGL_RESULT_SUCCESS;
 }
 
-extern "C" VGL_D3D11_API vgl_result vgl_d3d11_backend_reset(vgl_d3d11_backend* backend,
-                                                            ID3D11Device* device,
-                                                            ID3D11DeviceContext* device_context)
+extern "C" VGL_D3D11_API vgl_result vgl_d3d11_backend_device_reset(
+    vgl_d3d11_backend* backend, ID3D11Device* device, ID3D11DeviceContext* device_context)
 {
     if (backend == nullptr || device == nullptr || device_context == nullptr)
     {
@@ -1325,7 +1328,7 @@ extern "C" VGL_D3D11_API vgl_result vgl_d3d11_backend_reset(vgl_d3d11_backend* b
     // device allows, and frees their memory.
     stop(*backend);
     static_cast<void>(vgl_context_resources_reset(backend->context));
-    return start(*backend, device, device_context, "vgl_d3d11_backend_reset");
+    return start(*backend, device, device_context, "vgl_d3d11_backend_device_reset");
 }
 
 extern "C" VGL_D3D11_API vgl_result vgl_d3d11_backend_draw(vgl_d3d11_backend* backend,
@@ -1358,19 +1361,17 @@ extern "C" VGL_D3D11_API vgl_result vgl_d3d11_backend_draw(vgl_d3d11_backend* ba
             "negative far distance");
         return VGL_RESULT_INVALID_ARGUMENT;
     }
-    constexpr std::uint32_t known_flags =
-        VGL_D3D11_DEBUG_FLAG_WIREFRAME | VGL_D3D11_DEBUG_FLAG_LEVEL_COLORS |
-        VGL_D3D11_DEBUG_FLAG_IMAGERY_SOURCE | VGL_D3D11_DEBUG_FLAG_HEIGHT_COLORS |
-        VGL_D3D11_DEBUG_FLAG_CONTOURS;
-    if ((info.debug_flags & ~known_flags) != 0 || info.reserved != 0 || info.reserved2 != 0 ||
-        info.reserved3 != 0 || info.reserved4 != 0 || !std::isfinite(info.sidereal_angle) ||
-        info.reserved5 != 0 || !std::isfinite(info.cloud_height) || info.cloud_height < 0.0 ||
-        !std::isfinite(info.contour_interval) || info.contour_interval < 0.0)
+    if ((info.features & ~vgl::backends::known_draw_features) != 0 ||
+        (info.debug_views & ~vgl::backends::known_debug_views) != 0 ||
+        !std::isfinite(info.earth_rotation_angle) || !std::isfinite(info.cloud_height) ||
+        info.cloud_height < 0.0 || !std::isfinite(info.contour_interval) ||
+        info.contour_interval < 0.0)
     {
         log(b,
             VGL_LOG_LEVEL_ERROR,
-            "vgl_d3d11_backend_draw: info->debug_flags has unknown flags, info->reserved is not "
-            "zero, or info->contour_interval is negative or not finite");
+            "vgl_d3d11_backend_draw: info->features or info->debug_views has unknown bits, or "
+            "info->earth_rotation_angle, info->cloud_height or info->contour_interval is not "
+            "finite or is negative");
         return VGL_RESULT_INVALID_ARGUMENT;
     }
     if (!b.ready)
@@ -1378,7 +1379,7 @@ extern "C" VGL_D3D11_API vgl_result vgl_d3d11_backend_draw(vgl_d3d11_backend* ba
         log(b,
             VGL_LOG_LEVEL_ERROR,
             "vgl_d3d11_backend_draw: the backend has no device since a failed reset; call "
-            "vgl_d3d11_backend_reset again");
+            "vgl_d3d11_backend_device_reset again");
         return VGL_RESULT_INVALID_OPERATION;
     }
 

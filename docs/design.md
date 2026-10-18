@@ -15,7 +15,7 @@ The project is named **vgl** (Virtual Globe Library). This document refers to it
 
 ### 1.1 Purpose
 
-This document describes the planned design of a lightweight C++ library for rendering a virtual globe. It covers the target audience, requirements, architecture, data pipeline and roadmap, and it records the decisions made so far, including how the questions that were once open were settled (section 16). It is also intended to confirm the requirements with prospective users, such as the client whose C project motivated the library, before implementation starts.
+This document describes the planned design of a lightweight C++ library for rendering a virtual globe. It covers the target audience, requirements, architecture, data pipeline and roadmap, and it records the decisions made so far, including how the questions that were once open were settled (section 16). It is also intended to confirm the requirements with prospective users.
 
 ### 1.2 Background
 
@@ -58,7 +58,7 @@ The following are explicitly out of scope for the first releases: 3D Tiles and g
 
 The library is "embedded" in the sense of being embeddable in a host application, rather than targeting embedded hardware. It has two kinds of users.
 
-**Integrators** add a globe view to an existing application. The client's C project is the primary example and the main design driver. Integrators need a small, stable C API, predictable resource use, and a library that cooperates with their existing rendering instead of taking it over.
+**Integrators** add a globe view to an existing application. Applications written in C are the primary example and the main design driver. Integrators need a small, stable C API, predictable resource use, and a library that cooperates with their existing rendering instead of taking it over.
 
 **Engine users** want the globe inside a scene graph. For them, the Ogre backend maps globe tiles onto the engine's own objects and materials. vgl targets Ogre 14, the continuation of the classic 1.x line (14.6.0 when this was decided); Ogre-Next is not supported.
 
@@ -90,7 +90,7 @@ Graphics APIs by platform:
 
 OpenGL ES 3.0 is therefore a target from the first releases, not just a possibility: the OpenGL backend targets the common subset of OpenGL 3.3 and OpenGL ES 3.0 (section 7.6). OpenGL ES 2.0 is out of scope. A raw Metal backend is not planned; on macOS and iOS, rendering goes through OpenGL, OpenGL ES or Ogre's Metal render system. On macOS the OpenGL backend needs no extensions beyond OpenGL 4.1, the last version Apple ships, so clip control is unavailable there too and the logarithmic depth path applies.
 
-Minimum versions and architectures, chosen as recommended defaults rather than client requirements (section 16):
+Minimum versions and architectures, chosen as recommended defaults (section 16):
 
 | Platform | Minimum | Architectures | Reason |
 |---|---|---|---|
@@ -105,7 +105,7 @@ Public structures stay free of padding on 32-bit targets (C API conventions, sec
 
 **Web.** The browser build uses Emscripten (6.0.11 tested), with the `emscripten` preset, and is static. It is built with threads (`-pthread`), so that the defaults module's thread pool decodes on Web Workers as it does on native threads, and every object, a host's too, must be compiled with `-pthread`. Threads need shared memory, which browsers give only to pages served *cross-origin isolated*, with `Cross-Origin-Opener-Policy: same-origin` and `Cross-Origin-Embedder-Policy: require-corp`; packs from another server then load through CORS, which the reference server allows (section 10.2). A host's main loop becomes the page's frames, and the main thread must not block for long, since the browser runs the page on it. On WebGL 2 the OpenGL backend's ES path applies, uploading index data through `GL_ELEMENT_ARRAY_BUFFER`, since WebGL keeps a buffer to the kind of target it was first bound to, and without the primitive restart switch, which WebGL does not have; reversed-Z needs clip control, which WebGL lacks, so the logarithmic convention applies. The tests run on Node.js in CI, and the OpenGL sample's page is checked in headless Chrome on its software renderer (`tests/browser/page_check.mjs`, with `VGL_TEST_BROWSER`): served by Caddy, driven over the DevTools protocol in real time, it must come up cross-origin isolated on WebGL 2, draw tiles, and fly to the Sognefjord on a key press and load the tiles there, without an exception, a WebGL error or a failed read.
 
-The client's toolchain includes a C++ compiler, so the C API wraps a C++ implementation and no part of the core needs to be written in C. The baseline language level is C++20, which current desktop compilers, the Android NDK (Clang with libc++) and Xcode's Apple Clang all support.
+Every target toolchain includes a C++ compiler, so the C API wraps a C++ implementation and no part of the core needs to be written in C. The baseline language level is C++20, which current desktop compilers, the Android NDK (Clang with libc++) and Xcode's Apple Clang all support.
 
 ---
 
@@ -344,8 +344,8 @@ The backend (`vgl/gl.h`, target `vgl::gl`) is a consumer of the render interface
 - **Drawing.** Each mesh has its own buffer and vertex array, which also binds the shared index list's buffer, so a tile is one draw call: a vertex array, a model-view uniform and `glDrawElements`. Plain uniforms rather than uniform buffers keep the path the same on OpenGL ES. Index lists upload through `GL_COPY_WRITE_BUFFER`, because the element array binding belongs to whichever vertex array is bound, which may be the host's.
 - **Shading.** A tile blends up to four imagery layers, with one sampler for all textures: trilinear, anisotropic where the device has it, clamped to the edge. Under the imagery, and where there is none, a palette by height from the deep ocean floor to snow shows through. The result is lit by the normal, from a sun direction the host passes or else from the camera. Height and normal come from the mesh's samples, uploaded as a texture of two 32-bit unsigned integers per texel (the height's bits and the normal's two halves) and interpolated bilinearly in the shader, since integer textures do not filter and OpenGL ES 3.0 filters no 32-bit float format without an extension.
 - **State.** `vgl/gl.h` lists the state the backend changes and restores. Primitive restart is switched off while it draws, because a 16-bit index list may use index 65,535 as a vertex. For the reversed-Z convention, it sets the clip control depth mode and keeps the host's origin.
-- **Debug views.** `vgl_gl_draw_info::debug_flags` turns on a wireframe of the mesh's grid cells over the shading (where they crowd, every second, fourth or further line, so that it stays readable) with the tiles' boundaries in yellow, a tint per tile level with the tiles' borders outlined, a tint where a tile's imagery comes from an ancestor (orange) or is missing (magenta), colours by height instead of imagery, and contour lines at an interval the host sets, a pixel wide at every distance. The contours follow heights above the ellipsoid, which differ from those above mean sea level by the geoid height. The other backends are to offer the same views.
-- **Lost contexts.** `vgl_gl_backend_reset` forgets the objects of a lost OpenGL context without deleting them, loads the functions again on the new context, and resets the context's resources, which are then uploaded again over a few frames.
+- **Debug views.** `vgl_gl_draw_info::debug_views` (`vgl_debug_views`, shared by every backend) turns on a wireframe of the mesh's grid cells over the shading (where they crowd, every second, fourth or further line, so that it stays readable) with the tiles' boundaries in yellow, a tint per tile level with the tiles' borders outlined, a tint where a tile's imagery comes from an ancestor (orange) or is missing (magenta), colours by height instead of imagery, and, as the feature `VGL_DRAW_FEATURE_CONTOURS`, contour lines at an interval the host sets, a pixel wide at every distance. The contours follow heights above the ellipsoid, which differ from those above mean sea level by the geoid height. The other backends are to offer the same views.
+- **Lost contexts.** `vgl_gl_backend_device_reset` forgets the objects of a lost OpenGL context without deleting them, loads the functions again on the new context, and resets the context's resources, which are then uploaded again over a few frames.
 
 Continuous testing keeps the GLES path working. The OpenGL sample's check draws the sample data from five views with each depth convention, compares the images across conventions and with the expected coverage, and checks for OpenGL errors and that the host's state is restored. CI runs it on OpenGL and on OpenGL ES with Mesa under a virtual X server, and the web build's page check draws through ANGLE, which carries WebGL 2 in Chrome (section 4): WebGL 2 is OpenGL ES 3.0 with further restrictions, so the ES path that passes there and on Mesa needs no separate run on ANGLE's native OpenGL ES. ANGLE has no released builds, only Chromium's sources and build tools; a host that ships it on Windows brings its own, and the sample's `--egl` reaches it.
 
@@ -361,7 +361,7 @@ The backend (`vgl/d3d11.h`, target `vgl::d3d11`) is a consumer of the render int
 - **Depth.** All three conventions of the render interface (section 8 there). The host's projection maps depth to [0, 1], as Direct3D does; the reversed-Z convention is its natural one there, with a 32-bit float depth buffer cleared to 0. The logarithmic convention writes `SV_Depth` and sets the clip-space depth to match, so the projection's near and far planes clip nothing.
 - **Culling.** Triangles are counter-clockwise from outside the ellipsoid in right-handed ECEF (render interface, section 6). The host's camera space is the view matrix's, right-handed like ECEF, and Direct3D tells front from back in clip space, before the viewport turns y down, so the triangles' fronts are counter-clockwise there as in OpenGL. `mirrored` flips this.
 - **State.** `vgl/d3d11.h` lists what the backend changes in the device context and restores: the input assembler's layout, topology, vertex buffer 0 and index buffer, the vertex and pixel shaders with their constant buffers 0 and 1, the pixel shader's resources 0 to 5 and samplers 0 and 1, and the rasterizer, depth-stencil (with its stencil reference) and blend states. The host's render targets, viewports and scissor rectangles are used as they are. The globe is drawn with the stencil test off and blending off.
-- **Lost devices.** `vgl_d3d11_backend_reset` forgets the objects of a removed device without releasing them twice, takes the new device and device context, rebuilds its shaders and states, and resets the context's resources, which are then uploaded again over a few frames.
+- **Lost devices.** `vgl_d3d11_backend_device_reset` forgets the objects of a removed device without releasing them twice, takes the new device and device context, rebuilds its shaders and states, and resets the context's resources, which are then uploaded again over a few frames.
 
 The Direct3D 11 sample's check draws the sample data from the same views with each depth convention, compares the images across conventions and with the expected coverage, and checks that the host's device-context state is restored, as the OpenGL check does.
 
@@ -411,7 +411,7 @@ Every backend can draw a star field behind the sky (`vgl_gl_backend_stars_set`, 
 
 - **Drawing.** Each star is a small quad of two triangles, not a point, whose size not every API sets: its vertex shader projects the star's direction and widens the quad by a radius in pixels from the viewport's size, 1.2 to 2.6 pixels with the star's brightness, which follows the square root of its flux so that faint stars stay visible on a display. The quads are drawn after the tiles and before the sky, at the far depth, with depth writes off and added to the target, so that they show only where nothing was drawn.
 - **Daylight.** Each star fades with the sky's brightness in its direction, from the atmosphere's model, and the sky pass dims what shows by the transmittance, so that the stars disappear by day, come out through twilight, and shine in full from space.
-- **Orientation.** The stars turn with the Earth by its rotation angle, which the host passes (`sidereal_angle`); `vgl_earth_rotation_angle_get` gives it for a time, by the IAU 2000 definition, without precession and nutation, a fraction of a degree over decades.
+- **Orientation.** The stars turn with the Earth by its rotation angle, which the host passes (`earth_rotation_angle`); `vgl_earth_rotation_angle_get` gives it for a time, by the IAU 2000 definition, without precession and nutation, a fraction of a degree over decades.
 
 ---
 
@@ -419,7 +419,7 @@ Every backend can draw a star field behind the sky (`vgl_gl_backend_stars_set`, 
 
 ### 8.1 Overview
 
-The runtime reads only baked tile packs. All handling of source formats takes place in an offline baking tool that ships with the library but never runs inside the client's application.
+The runtime reads only baked tile packs. All handling of source formats takes place in an offline baking tool that ships with the library but never runs inside the host application.
 
 ```mermaid
 flowchart LR
@@ -487,7 +487,7 @@ The disk cache wraps an I/O interface and keeps what it reads from web servers i
 
 ## 9. Data sources and licensing
 
-The client has no elevation data and a limited budget, so the default datasets are free.
+The default datasets are free, so that anyone can bake and use them without licensing costs.
 
 | Dataset | Resolution | Coverage | License and conditions |
 |---|---|---|---|
@@ -553,7 +553,7 @@ For installations that host packs themselves, vgl provides a reference server: a
 | Web | The same sample built with Emscripten into a page on WebGL 2 (`samples/gl/web`), with Emscripten's GLFW port, the options in the page's address and the sample set fetched from next to the page; `samples/gl/web/Caddyfile` serves it cross-origin isolated |
 | Direct3D 11 | The OpenGL sample's counterpart on Direct3D 11 (`samples/d3d11`, `vgl-d3d11`), in a plain Win32 window with its own device and a flip-model swap chain: the same navigation, places, Dear ImGui panel (`samples/common/overlay.hpp`, shared with its platform and renderer backends as hooks) and debug views, reversed-Z by default. Without a hardware device, or with `--warp`, it draws with WARP, the software rasterizer, so its check runs on any Windows machine: it draws the views offscreen with each depth convention, reads them back through a staging texture, checks them as the OpenGL check does (`samples/common/sample_check.hpp`, which both share), checks that the device context's state is restored, and that the backend draws the same after a reset. |
 | Ogre | Globe inside a classic Ogre scene (`samples/ogre`, `vgl-ogre`), on Windows and Linux first, then macOS, Android and iOS. A GLFW window, as in the OpenGL sample, into which Ogre draws on its OpenGL 3+ or Direct3D 11 render system (`--rs gl` or `--rs d3d11`); the same navigation, places, panel and debug views, the panel drawn with Ogre's own Dear ImGui overlay. It draws the globe into a render texture the size of the window and shows that, because Ogre gives render textures a 32-bit floating-point depth buffer under reversed-Z but keeps its windows' at 24-bit integers, which leaves the skirts z-fighting along tile edges far away. Its check draws the views offscreen with each depth convention and checks them as the other samples' checks do. |
-| Pure C | The OpenGL sample's core written in C99 against the C API (`samples/c`, `vgl-c`). This mirrors the client's integration; if it is awkward to write, the API needs to change. |
+| Pure C | The OpenGL sample's core written in C99 against the C API (`samples/c`, `vgl-c`). This mirrors an integration into a C application; if it is awkward to write, the API needs to change. |
 | Headless | Runs tile selection and loading with a scripted camera and prints statistics, without a GPU. Doubles as a test and benchmark. |
 
 All samples use a small dataset baked from freely licensed sources (public domain, or free with attribution, which the packs carry), so they work offline and also exercise the baker. It lives in the repository, in `samples/data`: GEBCO to level 3 and the EGM2008 geoid to level 2, Blue Marble to level 3, and Copernicus GLO-30 and Sentinel-2 cloudless 2016 to level 11 over the Sognefjord for detail somewhere, about 30 MB, with the bake configurations that produce them. The samples find it in the source tree by default; `--data` or the environment variable `VGL_SAMPLE_DATA` names another directory with the same packs, and `--pack`, repeated, loads other packs instead, such as a full regional bake, each winning over the ones before it where they overlap. The headless, OpenGL and pure-C samples check their own results with `--check`, on the sample data, which their tests name explicitly. The headless check runs as a test everywhere; the OpenGL checks need a display, and run as tests when `VGL_TEST_GL` is on, as in CI. GLFW and Dear ImGui are used only by the samples, GLFW from an installed package or downloaded, and Dear ImGui downloaded, at pinned versions with checked hashes like the library's dependencies; Android and iOS build no OpenGL sample, since GLFW is for desktops.
@@ -580,7 +580,7 @@ The build uses CMake, with options to enable or disable each backend, decoder an
 
 ### 12.3 Licensing
 
-The library is released under the MIT license. It lets commercial integrators link the library into closed-source products, requires only that the copyright and license notice are kept, and is compatible with both GPLv2 and GPLv3 projects. All runtime, baker and sample dependencies (stb_image, Zstandard, libcurl, GDAL, Ogre, GLFW, Dear ImGui) use permissive licenses; their notices are included in distributions. Jeremiah van Oosten retains the copyright and publishes the library as open source on GitHub at github.com/3dgep/vgl. The client, like every other user, uses it under the MIT license. External contributors keep the copyright to their own contributions and license them under MIT, confirmed by a Developer Certificate of Origin sign-off on each commit. Baked datasets carry the attribution requirements of their sources (section 9), independently of the code license.
+The library is released under the MIT license. It lets commercial integrators link the library into closed-source products, requires only that the copyright and license notice are kept, and is compatible with both GPLv2 and GPLv3 projects. All runtime, baker and sample dependencies (stb_image, Zstandard, libcurl, GDAL, Ogre, GLFW, Dear ImGui) use permissive licenses; their notices are included in distributions. Jeremiah van Oosten retains the copyright and publishes the library as open source on GitHub at github.com/3dgep/vgl. Every user uses it under the MIT license. External contributors keep the copyright to their own contributions and license them under MIT, confirmed by a Developer Certificate of Origin sign-off on each commit. Baked datasets carry the attribution requirements of their sources (section 9), independently of the code license.
 
 ---
 
@@ -612,7 +612,7 @@ The library follows Semantic Versioning. Within a major version, the C ABI stays
 
 ### 13.4 Repository and contributions
 
-The repository is public at github.com/3dgep/vgl, with continuous integration through GitHub Actions on Windows, Linux and macOS, and builds for Android and iOS. CI builds every backend, runs the tests, and runs the GLES path on Mesa, the web build's page in a browser and the headless sample. While the repository is private its minutes are limited, so pushes to `main` run a quick check (formatting and sources, Linux with every test and the OpenGL checks, and Windows), and pull requests, manual runs and a weekly run build everything. Contribution guidelines describe the coding style (enforced with clang-format and clang-tidy), the DCO sign-off and the review process, and issue templates cover bug reports and feature requests. Packages for vcpkg and Conan can follow once the API has stabilized.
+The repository is public at github.com/3dgep/vgl, with continuous integration through GitHub Actions on Windows, Linux and macOS, and builds for Android and iOS. CI builds every backend, runs the tests, and runs the GLES path on Mesa, the web build's page in a browser and the headless sample. While the repository is private its minutes are limited, so pushes to `main` run a quick check (formatting and sources, Linux with every test and the OpenGL checks, and Windows), and pull requests, manual runs and a weekly run build everything. Contribution guidelines describe the coding style (enforced with clang-format and clang-tidy), the DCO sign-off and the review process, and issue templates cover bug reports and feature requests. Releases, from version 1, are archives on GitHub releases, a vcpkg port and a Conan recipe (section 14).
 
 ---
 
@@ -623,11 +623,14 @@ The repository is public at github.com/3dgep/vgl, with continuous integration th
 | M0: Foundations | Public GitHub repository with CI and contribution guidelines, build system, foundation and geodesy modules, tiling scheme, pack format specification, C API conventions |
 | M1: Data pipeline | Baker with GDAL input, datum conversion, elevation and imagery encoding, sharded packs; regional test bake to settle tile size, deepest level and shard level |
 | M2: MVP runtime | LOD selection and culling, cache and budgets, pack-on-disk provider, mesh builder, OpenGL / GLES and Direct3D 11 backends, a global imagery layer, height queries, attribution; OpenGL, Direct3D 11, pure-C and headless samples; macOS, Android and iOS builds in CI |
-| M3: Integration | Ogre backend and sample on desktop (Windows, Linux, macOS), Android and iOS, GLES sample in CI, multiple imagery layers, picking, atmosphere, a WebAssembly build with the OpenGL sample in a browser |
+| M3: Integration | Ogre backend and sample on the desktop render systems (OpenGL 3+, Direct3D 11 and Vulkan; Windows, Linux, macOS), GLES sample in CI, multiple imagery layers, picking, atmosphere, a WebAssembly build with the OpenGL sample in a browser |
+| M3b: Mobile Ogre | The Ogre backend on OpenGL ES 3 and Metal, on Android and iOS; after version 1 |
 | M4: Distribution | HTTP pack provider, reference server and disk cache (delivered during M3: the defaults module's HTTP reader and disk cache, and a Caddy configuration); a checker of hosted packs (`vgl-bake check`) and the hosting guide's publishing steps. Global bakes and their hosting are the consumers' (section 10.2) |
 | Later | Compressed GPU textures, vector overlays rasterized into tiles, Vulkan backend, a limited subset of 3D Tiles |
 
-Within M2, the OpenGL / OpenGL ES backend comes first: it runs on every target platform and the pure-C sample needs it. The Direct3D 11 backend follows. The client integrates vgl themselves, so the order does not wait for their choice of graphics API.
+Within M2, the OpenGL / OpenGL ES backend comes first: it runs on every target platform and the pure-C sample needs it. The Direct3D 11 backend follows. The order does not wait for any one integrator's choice of graphics API.
+
+Version 1 follows M3 and M4, after an API review that settles the C ABI (binary layout, shared draw flags, output structures, the C++ wrappers). It covers the Ogre backend on the desktop render systems only, so Ogre's Vulkan render system is verified before it; the mobile Ogre render systems (M3b) come after it. Version 1 is released as archives on GitHub releases, a vcpkg port and a Conan recipe; the release waits until the Vulkan render system is verified.
 
 ---
 
@@ -649,12 +652,12 @@ Within M2, the OpenGL / OpenGL ES backend comes first: it runs on every target p
 
 ## 16. Former open questions
 
-These questions were waiting on the client. The client integrates vgl themselves, so on 16 October 2026 each was settled with the recommended choice instead, apart from the Ogre release, which follows the latest release.
+These questions were left open during planning. On 16 October 2026 each was settled with the recommended choice, apart from the Ogre release, which follows the latest release.
 
 | # | Question | Decision |
 |---|---|---|
 | 1 | Which Ogre release and render systems? | Ogre 14, the classic line, 14.6.0 when decided; Direct3D 11, OpenGL 3+, OpenGL ES 3, Vulkan and Metal (sections 4 and 7.6) |
-| 2 | Which graphics API does the client's C project use, deciding the first backend? | Not waited for: the OpenGL / OpenGL ES backend comes first, then Direct3D 11 (section 14) |
+| 2 | Which backend comes first? | The OpenGL / OpenGL ES backend, then Direct3D 11 (section 14) |
 | 3 | Minimum OS versions, Intel Macs, 32-bit ARM? | Windows 10, macOS 11 with universal binaries, Android 7.0 (API 24), iOS 15; no 32-bit ARM (section 4) |
 | 4 | Which imagery? | Blue Marble Next Generation as the global base, Sentinel-2 cloudless 2016 for detail (section 9) |
 | 5 | Bathymetry or a flat sea? | Both: terrain includes the ocean floor, and backends offer a sea surface at mean sea level (section 7.6) |

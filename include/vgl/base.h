@@ -52,13 +52,13 @@
 extern "C" {
 #endif
 
-/* Boolean. Any non-zero value is true on input; the library writes exactly 0 or 1. */
+/** Boolean. Any non-zero value is true on input; the library writes exactly 0 or 1. */
 typedef uint32_t vgl_bool;
 
 #define VGL_FALSE 0u
 #define VGL_TRUE  1u
 
-/* Double-precision vectors. */
+/** Double-precision vectors. */
 typedef struct vgl_dvec2
 {
     double x;
@@ -80,7 +80,7 @@ typedef struct vgl_dvec4
     double w;
 } vgl_dvec4;
 
-/*
+/**
  * Double-precision 4x4 matrix in column-major order, multiplying column vectors.
  * Element (row r, column c) is m[c * 4 + r]; the translation is in m[12], m[13], m[14].
  */
@@ -89,32 +89,49 @@ typedef struct vgl_dmat4
     double m[16];
 } vgl_dmat4;
 
-/*
+/**
  * Result code returned by every vgl function. Zero is success, positive values are
  * non-error statuses and negative values are errors. Treat unknown negative codes as
  * failures and unknown positive codes as success.
  */
 typedef enum vgl_result
 {
+    /** The function succeeded. */
     VGL_RESULT_SUCCESS = 0,
+    /** The function succeeded, but an output array was too small to hold all elements. */
     VGL_RESULT_INCOMPLETE = 1,
+    /** The function succeeded, but the requested data is not loaded yet; the output holds the
+     * best available answer, as documented. */
     VGL_RESULT_NOT_READY = 2,
+    /** An argument is null, out of range or otherwise invalid. */
     VGL_RESULT_INVALID_ARGUMENT = -1,
+    /** An allocation failed, or a memory budget does not allow it. */
     VGL_RESULT_OUT_OF_MEMORY = -2,
+    /** The request is valid, but this build, backend or device does not support it. */
     VGL_RESULT_NOT_SUPPORTED = -3,
+    /** The function is not allowed in the current state of the object. */
     VGL_RESULT_INVALID_OPERATION = -4,
+    /** A requested item, file or tile does not exist. */
     VGL_RESULT_NOT_FOUND = -5,
+    /** Reading data failed. */
     VGL_RESULT_IO_ERROR = -6,
+    /** Data was read but failed validation or decoding. */
     VGL_RESULT_CORRUPT_DATA = -7,
+    /** A pack, interface or structure version is not supported by this binary. */
     VGL_RESULT_VERSION_MISMATCH = -8,
+    /** An asynchronous operation was cancelled. */
     VGL_RESULT_CANCELLED = -9,
+    /** A graphics API or engine call failed. */
     VGL_RESULT_BACKEND_ERROR = -10,
+    /** A bug in the library. Please report it. */
     VGL_RESULT_INTERNAL_ERROR = -11,
     VGL_RESULT_MAX_ENUM = 0x7FFFFFFF
 } vgl_result;
 
+/** True for success and the non-error statuses. */
 #define VGL_SUCCEEDED(result) ((result) >= 0)
-#define VGL_FAILED(result)    ((result) < 0)
+/** True for errors. */
+#define VGL_FAILED(result) ((result) < 0)
 
 /**
  * Gets the name of a result code, such as "VGL_RESULT_OUT_OF_MEMORY".

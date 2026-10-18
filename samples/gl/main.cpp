@@ -344,14 +344,11 @@ vgl::result draw(vgl::gl_backend& backend, const scene& s, int width, int height
     {
         info.sun_direction = sample::sun_direction(s.debug);
     }
-    info.debug_flags = sample::debug_flags(s.debug);
+    info.debug_views = sample::debug_views(s.debug);
+    info.features = sample::draw_features(s.debug);
     info.contour_interval = s.debug.contour_interval;
-    info.sea_surface = s.debug.sea ? VGL_TRUE : VGL_FALSE;
-    info.atmosphere = s.debug.atmosphere ? VGL_TRUE : VGL_FALSE;
-    info.stars = s.debug.stars ? VGL_TRUE : VGL_FALSE;
-    info.clouds = s.debug.clouds ? VGL_TRUE : VGL_FALSE;
-    info.sidereal_angle =
-        sample::sidereal_angle(s.debug.time_of_day, s.debug.day_of_year, s.debug.year);
+    info.earth_rotation_angle =
+        sample::earth_rotation_angle(s.debug.time_of_day, s.debug.day_of_year, s.debug.year);
     return backend.draw(&info);
 }
 
@@ -1266,7 +1263,7 @@ int run_check(const options& o, const host_gl& gl, vgl::context& ctx)
             expect(unsupported, std::string("the backend is created for ") + depth_name(s.depth));
             continue;
         }
-        const std::vector<vgl_star> stars = sample::sky_stars();
+        const std::vector<vgl_star>& stars = sample::sky_stars();
         expect(backend->stars_set(stars) == vgl::result::success, "the stars are set");
         // An image too small to cover the globe is refused.
         const std::uint8_t pixel = 0;

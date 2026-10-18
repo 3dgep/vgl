@@ -232,7 +232,7 @@ bool stars_load(const std::string& path, std::string& error)
     return catalog_stars(path, loaded(), error);
 }
 
-double sidereal_angle(float time_of_day, int day_of_year, int year)
+double earth_rotation_angle(float time_of_day, int day_of_year, int year)
 {
     // The Julian date of 1 January of the year at 00:00, from its days since 1 January 1970,
     // which began at Julian date 2440587.5.

@@ -6,6 +6,8 @@
 
 #include <vgl/vgl.hpp>
 
+#include <array>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -30,6 +32,9 @@ class no_files final : public vgl::io_interface
 {
 public:
     int reads = 0;
+    int destroys = 0;
+
+    void on_destroy() noexcept override { ++destroys; }
 
     void read(vgl::io_request* request, const vgl::io_read& /*read*/) noexcept override
     {
@@ -42,6 +47,10 @@ public:
 class no_tasks final : public vgl::task_interface
 {
 public:
+    int destroys = 0;
+
+    void on_destroy() noexcept override { ++destroys; }
+
     vgl::result submit(vgl::task_fn /*function*/, void* /*task_data*/) noexcept override
     {
         return vgl::result::not_supported;
@@ -82,13 +91,32 @@ void check_context()
         CHECK(f.has_value());
         if (f)
         {
-            CHECK(f->draw_list().empty());
-            CHECK(f->destroys().empty());
-            CHECK(f->meshes().empty());
+            CHECK(f->draw_list_get().empty());
+            CHECK(f->destroys_get().empty());
+            CHECK(f->meshes_get().empty());
         }
     }
+    {
+        // The spans are of this header's structures, so other strides are refused.
+        auto begin = vgl::init<vgl_frame_begin_info>();
+        begin.draw_item_size = sizeof(vgl_draw_item) + 8;
+        const vgl::expected<vgl::frame> f = vgl::frame::begin(*ctx, &begin);
+        CHECK(!f && f.error() == vgl::result::invalid_argument);
+    }
+    const std::array<vgl::texture_format, 2> formats = {vgl::texture_format::bc7,
+                                                        vgl::texture_format::bc1};
+    CHECK(ctx->texture_formats_set(formats) == vgl::result::success);
+    const vgl_dvec3 origin{2.0e7, 0.0, 0.0};
+    const vgl_dvec3 direction{-1.0, 0.0, 0.0};
+    const vgl::expected<vgl::ray_query_result> hit = ctx->ray_query(origin, direction);
+    // The pack failed, so the ray meets the ellipsoid at the equator.
+    CHECK(hit && hit->status == vgl::result::success &&
+          std::fabs(hit->hit.distance - (2.0e7 - VGL_WGS84_SEMI_MAJOR_AXIS)) < 1.0);
     CHECK(ctx->resources_reset() == vgl::result::success);
     p->reset();
+    CHECK(files.destroys == 0 && tasks.destroys == 0);
+    ctx->reset();
+    CHECK(files.destroys == 1 && tasks.destroys == 1);
 }
 
 struct versioned
@@ -115,14 +143,10 @@ int main()
     static_assert(info.struct_size == sizeof(versioned));
     static_assert(info.value == 0);
 
-    const vgl::expected<vgl::version> v = vgl::version_get();
-    CHECK(v.has_value());
-    if (v)
-    {
-        CHECK(v->major_version == VGL_VERSION_MAJOR);
-        CHECK(v->minor_version == VGL_VERSION_MINOR);
-        CHECK(v->patch_version == VGL_VERSION_PATCH);
-    }
+    const vgl::version v = vgl::version_get();
+    CHECK(v.major_version == VGL_VERSION_MAJOR);
+    CHECK(v.minor_version == VGL_VERSION_MINOR);
+    CHECK(v.patch_version == VGL_VERSION_PATCH);
 
     const vgl::expected<int> error = vgl::unexpected(vgl::result::io_error);
     CHECK(!error.has_value());

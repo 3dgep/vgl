@@ -7,6 +7,7 @@
 // handles. On Emscripten: range requests on the browser's fetch, on the main thread.
 
 #include "common/host_memory.hpp"
+#include "defaults/threads.hpp"
 
 #include <vgl/defaults.h>
 
@@ -19,7 +20,6 @@
 #    include <cstdint>
 #    include <cstring>
 #    include <mutex>
-#    include <thread>
 
 using vgl::common::memory;
 
@@ -126,15 +126,14 @@ struct vgl_http_reader
     explicit vgl_http_reader(const memory& m) noexcept : allocator(m) {}
 
     memory allocator;
-    vgl_io_interface files{};
-    bool has_files = false;
+    vgl_io_interface fallback{};
+    bool has_fallback = false;
     std::uint32_t max_connections = default_max_connections;
     long timeout_ms = 0;
     char* user_agent = nullptr;
     std::size_t user_agent_size = 0;
     CURLM* multi = nullptr;
-    std::thread thread;
-    bool thread_started = false;
+    vgl::defaults::native_thread thread;
 
     std::mutex mutex;
     http_read* incoming = nullptr; // Reads not yet started, newest first.
@@ -417,9 +416,9 @@ struct vgl_http_reader
         auto* self = static_cast<vgl_http_reader*>(user_data);
         if (!is_http(r->uri))
         {
-            if (self->has_files)
+            if (self->has_fallback)
             {
-                self->files.read(self->files.user_data, request, r);
+                self->fallback.read(self->fallback.user_data, request, r);
             }
             else
             {
@@ -487,10 +486,10 @@ struct vgl_http_reader
         {
             static_cast<void>(curl_multi_wakeup(self->multi));
         }
-        // The read may be the file reader's; cancelling one it does not have does nothing.
-        if (self->has_files && self->files.cancel != nullptr)
+        // The read may be the fallback's; cancelling one it does not have does nothing.
+        if (self->has_fallback && self->fallback.cancel != nullptr)
         {
-            self->files.cancel(self->files.user_data, request);
+            self->fallback.cancel(self->fallback.user_data, request);
         }
     }
 };
@@ -501,19 +500,7 @@ namespace
 // Starts the reader's thread. Returns false if it could not be started.
 bool start_thread(vgl_http_reader* reader) noexcept
 {
-#    if defined(__cpp_exceptions)
-    try
-    {
-        reader->thread = std::thread([reader] { reader->run(); });
-    }
-    catch (...)
-    {
-        return false;
-    }
-#    else
-    reader->thread = std::thread([reader] { reader->run(); });
-#    endif
-    return true;
+    return reader->thread.start([](void* r) { static_cast<vgl_http_reader*>(r)->run(); }, reader);
 }
 
 // Frees a reader whose thread is not running.
@@ -545,7 +532,10 @@ vgl_http_reader_create(const vgl_http_reader_create_info* info_in, vgl_http_read
     {
         return r;
     }
-    if (!std::isfinite(info.timeout) || info.timeout < 0.0)
+    if (!std::isfinite(info.timeout) || info.timeout < 0.0 ||
+        (info.fallback != nullptr &&
+         (info.fallback->read == nullptr || info.fallback->version == 0 ||
+          info.fallback->version > VGL_IO_INTERFACE_VERSION)))
     {
         return VGL_RESULT_INVALID_ARGUMENT;
     }
@@ -565,14 +555,14 @@ vgl_http_reader_create(const vgl_http_reader_create_info* info_in, vgl_http_read
         curl_global_cleanup();
         return VGL_RESULT_OUT_OF_MEMORY;
     }
-    if (info.files != nullptr)
+    if (info.fallback != nullptr)
     {
-        reader->has_files = true;
-        static_cast<void>(vgl_file_reader_io_interface_get(info.files, &reader->files));
+        reader->has_fallback = true;
+        reader->fallback = *info.fallback;
     }
-    if (info.max_connections != 0)
+    if (info.max_connection_count != 0)
     {
-        reader->max_connections = info.max_connections;
+        reader->max_connections = info.max_connection_count;
     }
     const double timeout = info.timeout == 0.0 ? default_timeout : info.timeout;
     // A day at most, which keeps the milliseconds in a 32-bit long.
@@ -760,8 +750,8 @@ struct vgl_http_reader
     explicit vgl_http_reader(const memory& m) noexcept : allocator(m) {}
 
     memory allocator;
-    vgl_io_interface files{};
-    bool has_files = false;
+    vgl_io_interface fallback{};
+    bool has_fallback = false;
     std::uint32_t timeout_ms = 0;
     fetch_read* active = nullptr; // Reads with a fetch, on the main thread.
 
@@ -937,9 +927,9 @@ struct vgl_http_reader
     static void read(void* user_data, vgl_io_request* request, const vgl_io_read* r)
     {
         auto* self = static_cast<vgl_http_reader*>(user_data);
-        if (!is_http(r->uri) && self->has_files)
+        if (!is_http(r->uri) && self->has_fallback)
         {
-            self->files.read(self->files.user_data, request, r);
+            self->fallback.read(self->fallback.user_data, request, r);
             return;
         }
         if (r->size == 0)
@@ -978,9 +968,9 @@ struct vgl_http_reader
     static void cancel(void* user_data, vgl_io_request* request)
     {
         auto* self = static_cast<vgl_http_reader*>(user_data);
-        if (self->has_files && self->files.cancel != nullptr)
+        if (self->has_fallback && self->fallback.cancel != nullptr)
         {
-            self->files.cancel(self->files.user_data, request);
+            self->fallback.cancel(self->fallback.user_data, request);
         }
         auto* c = self->allocator.create<fetch_cancel>();
         if (c == nullptr)
@@ -1016,7 +1006,10 @@ vgl_http_reader_create(const vgl_http_reader_create_info* info_in, vgl_http_read
     {
         return r;
     }
-    if (!std::isfinite(info.timeout) || info.timeout < 0.0)
+    if (!std::isfinite(info.timeout) || info.timeout < 0.0 ||
+        (info.fallback != nullptr &&
+         (info.fallback->read == nullptr || info.fallback->version == 0 ||
+          info.fallback->version > VGL_IO_INTERFACE_VERSION)))
     {
         return VGL_RESULT_INVALID_ARGUMENT;
     }
@@ -1031,12 +1024,12 @@ vgl_http_reader_create(const vgl_http_reader_create_info* info_in, vgl_http_read
     {
         return VGL_RESULT_OUT_OF_MEMORY;
     }
-    if (info.files != nullptr)
+    if (info.fallback != nullptr)
     {
-        reader->has_files = true;
-        static_cast<void>(vgl_file_reader_io_interface_get(info.files, &reader->files));
+        reader->has_fallback = true;
+        reader->fallback = *info.fallback;
     }
-    // max_connections and user_agent are the browser's to decide.
+    // max_connection_count and user_agent are the browser's to decide.
     const double timeout = info.timeout == 0.0 ? default_timeout : info.timeout;
     reader->timeout_ms =
         static_cast<std::uint32_t>(std::ceil((timeout < 86400.0 ? timeout : 86400.0) * 1000.0));

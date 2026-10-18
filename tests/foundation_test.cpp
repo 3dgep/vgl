@@ -297,11 +297,25 @@ TEST_CASE(io_request_create_calls_back_on_completion)
     CHECK(r.data.empty());
     CHECK_EQ(memory.live, 0);
 
+    // A completion with bad arguments still consumes the request, which fails.
+    REQUIRE(vgl_io_request_create(&info, &request) == VGL_RESULT_SUCCESS);
+    CHECK_EQ(vgl_io_request_complete(request, VGL_RESULT_SUCCESS, nullptr, 4),
+             VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(r.result, VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(memory.live, 0);
+    REQUIRE(vgl_io_request_create(&info, &request) == VGL_RESULT_SUCCESS);
+    CHECK_EQ(vgl_io_request_complete(request, VGL_RESULT_NOT_READY, nullptr, 0),
+             VGL_RESULT_INVALID_ARGUMENT); // A positive status means nothing for a read.
+    CHECK_EQ(r.result, VGL_RESULT_INVALID_ARGUMENT);
+    CHECK_EQ(memory.live, 0);
+    CHECK_EQ(vgl_io_request_complete(nullptr, VGL_RESULT_SUCCESS, nullptr, 0),
+             VGL_RESULT_INVALID_ARGUMENT);
+
     // The C++ wrapper, on the C heap.
     vgl::expected<vgl::io_request*> made = vgl::io_request_create(&received::callback, &r);
     REQUIRE(made.has_value());
     CHECK(vgl::io_request_complete(*made, vgl::result::success) == vgl::result::success);
-    CHECK_EQ(r.calls, 3);
+    CHECK_EQ(r.calls, 5);
     CHECK(r.data.empty());
 }
 

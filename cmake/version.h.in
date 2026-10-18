@@ -7,9 +7,13 @@
 #ifndef VGL_VERSION_H
 #define VGL_VERSION_H
 
+/** The major version of the headers; vgl_version_get reports the binary's. */
 #define VGL_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+/** The minor version of the headers. */
 #define VGL_VERSION_MINOR @PROJECT_VERSION_MINOR@
+/** The patch version of the headers. */
 #define VGL_VERSION_PATCH @PROJECT_VERSION_PATCH@
+/** The version of the headers as text, "major.minor.patch". */
 #define VGL_VERSION_STRING "@PROJECT_VERSION@"
 
 #endif /* VGL_VERSION_H */

@@ -58,6 +58,7 @@ if(TARGET vgl_defaults)
         "${PROJECT_SOURCE_DIR}/src/defaults/file_reader.cpp"
         "${PROJECT_SOURCE_DIR}/src/defaults/files.cpp"
         "${PROJECT_SOURCE_DIR}/src/defaults/thread_pool.cpp"
+        "${PROJECT_SOURCE_DIR}/src/defaults/threads.cpp"
         WRITER)
     target_compile_definitions(vgl_test_defaults PRIVATE VGL_DEFAULTS_BUILDING)
     target_include_directories(vgl_test_defaults PRIVATE "${PROJECT_SOURCE_DIR}/src")
@@ -77,6 +78,7 @@ if(TARGET vgl_defaults AND VGL_DEFAULTS_HTTP AND NOT EMSCRIPTEN)
         "${PROJECT_SOURCE_DIR}/src/defaults/files.cpp"
         "${PROJECT_SOURCE_DIR}/src/defaults/http_reader.cpp"
         "${PROJECT_SOURCE_DIR}/src/defaults/thread_pool.cpp"
+        "${PROJECT_SOURCE_DIR}/src/defaults/threads.cpp"
         WRITER)
     target_compile_definitions(vgl_test_http PRIVATE VGL_DEFAULTS_BUILDING VGL_DEFAULTS_HAS_CURL=1)
     target_include_directories(vgl_test_http PRIVATE "${PROJECT_SOURCE_DIR}/src")

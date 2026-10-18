@@ -270,14 +270,11 @@ vgl::ogre::globe_settings settings_for(const scene& s)
     {
         g.sun_direction = sample::sun_direction(s.debug);
     }
-    g.debug_flags = sample::debug_flags(s.debug);
+    g.debug_views = sample::debug_views(s.debug);
+    g.features = sample::draw_features(s.debug);
     g.contour_interval = s.debug.contour_interval;
-    g.sea_surface = s.debug.sea;
-    g.atmosphere = s.debug.atmosphere;
-    g.stars = s.debug.stars;
-    g.clouds = s.debug.clouds;
-    g.sidereal_angle =
-        sample::sidereal_angle(s.debug.time_of_day, s.debug.day_of_year, s.debug.year);
+    g.earth_rotation_angle =
+        sample::earth_rotation_angle(s.debug.time_of_day, s.debug.day_of_year, s.debug.year);
     return g;
 }
 
@@ -287,21 +284,22 @@ globe_create(vgl::context& ctx, ogre_app& a, vgl_depth_convention depth, vgl::og
     vgl::ogre::globe_create_info info;
     info.depth_convention = depth;
     info.resource_group = Ogre::RGN_INTERNAL;
-    const vgl::result r = vgl::ogre::globe::create(ctx.get(), info, globe);
-    if (r == vgl::result::success)
+    vgl::expected<vgl::ogre::globe*> made = vgl::ogre::globe::create(ctx, info);
+    if (!made)
     {
-        a.scene->getRootSceneNode()->attachObject(globe);
-        const std::vector<vgl_star> stars = sample::sky_stars();
-        expect(globe->stars_set(stars.data(), static_cast<std::uint32_t>(stars.size())) ==
-                   vgl::result::success,
-               "the stars are set");
-        const sample::cloud_image& clouds = sample::sky_clouds();
-        expect(clouds.width == 0 ||
-                   globe->clouds_set(clouds.coverage.data(), clouds.width, clouds.height) ==
-                       vgl::result::success,
-               "the clouds are set");
+        globe = nullptr;
+        return made.error();
     }
-    return r;
+    globe = *made;
+    a.scene->getRootSceneNode()->attachObject(globe);
+    const std::vector<vgl_star>& stars = sample::sky_stars();
+    expect(globe->stars_set(stars) == vgl::result::success, "the stars are set");
+    const sample::cloud_image& clouds = sample::sky_clouds();
+    expect(clouds.width == 0 ||
+               globe->clouds_set(clouds.coverage.data(), clouds.width, clouds.height) ==
+                   vgl::result::success,
+           "the clouds are set");
+    return vgl::result::success;
 }
 
 void globe_destroy(ogre_app& a, vgl::ogre::globe* globe)
@@ -399,7 +397,8 @@ int run_check(const options& o, vgl::context& ctx)
                     expect(ctx.update() == vgl::result::success, "vgl_context_update succeeds");
                     camera_set(
                         a.camera, s.depth, s.camera.altitude, static_cast<double>(width) / height);
-                    globe->settings_set(settings_for(s));
+                    expect(globe->settings_set(settings_for(s)) == vgl::result::success,
+                           "the settings are valid");
                     a.root->renderOneFrame();
                     quiet = sample::idle(ctx.statistics_get()) ? quiet + 1 : 0;
                     ++frames;
@@ -421,7 +420,8 @@ int run_check(const options& o, vgl::context& ctx)
                 air.debug.atmosphere = true;
                 air.debug.stars = true;
                 air.debug.clouds = true;
-                globe->settings_set(settings_for(air));
+                expect(globe->settings_set(settings_for(air)) == vgl::result::success,
+                       "the settings are valid");
                 a.root->renderOneFrame();
                 image sky = read_image(target);
                 if (!o.save.empty())
@@ -438,7 +438,8 @@ int run_check(const options& o, vgl::context& ctx)
                 // The debug views draw.
                 s.debug.wireframe = s.debug.level_colors = s.debug.imagery_source = true;
                 s.debug.height_colors = s.debug.contours = s.debug.sea = true;
-                globe->settings_set(settings_for(s));
+                expect(globe->settings_set(settings_for(s)) == vgl::result::success,
+                       "the settings are valid");
                 a.root->renderOneFrame();
                 if (!o.save.empty())
                 {
@@ -673,7 +674,8 @@ int run_interactive(const options& o,
             static_cast<void>(ctx.update());
             const double aspect = static_cast<double>(width) / height;
             camera_set(a.camera, s.depth, s.camera.altitude, aspect);
-            globe->settings_set(settings_for(s));
+            expect(globe->settings_set(settings_for(s)) == vgl::result::success,
+                   "the settings are valid");
 
             const auto frame_end = std::chrono::steady_clock::now();
             const double frame_seconds =

@@ -8,6 +8,7 @@
 #include "atmosphere_shader.hpp"
 #include "backends/common/atmosphere_view.hpp"
 #include "backends/common/clouds.hpp"
+#include "backends/common/draw_flags.hpp"
 #include "backends/common/stars.hpp"
 #include "common/host_memory.hpp"
 #include "common/pointer_map.hpp"
@@ -22,6 +23,7 @@
 #include <cstring>
 #include <exception>
 #include <new>
+#include <span>
 #include <string>
 
 using vgl::common::memory;
@@ -150,7 +152,7 @@ struct vgl::ogre::globe::state
     sky_renderable sky;
     bool sky_shown = false; // The last frame drew the atmosphere.
     // The stars: the host's, as quads (backends/common/stars.hpp), kept on the CPU to be
-    // uploaded again after resources_reset; the buffer is made when they are first drawn.
+    // uploaded again after device_reset; the buffer is made when they are first drawn.
     Ogre::HighLevelGpuProgramPtr stars_vertex_program;
     Ogre::HighLevelGpuProgramPtr stars_fragment_program;
     Ogre::MaterialPtr stars_material;
@@ -160,7 +162,7 @@ struct vgl::ogre::globe::state
     std::uint32_t star_count = 0;
     bool stars_shown = false; // The last frame drew them.
     // The clouds: the host's coverage with its mip levels (backends/common/clouds.hpp), kept on
-    // the CPU to be uploaded again after resources_reset, as a texture made when first drawn.
+    // the CPU to be uploaded again after device_reset, as a texture made when first drawn.
     std::uint8_t* cloud_data = nullptr;
     vgl::backends::cloud_levels cloud_levels;
     Ogre::TexturePtr cloud_texture;
@@ -936,7 +938,8 @@ void fill_renderables(state& s, const vgl_frame* frame, const vgl_dmat4* view)
 {
     const globe_settings& g = s.settings;
     // The atmosphere needs the camera and a sun: without one, it is above the camera.
-    const bool atmosphere = g.atmosphere && view != nullptr;
+    const bool atmosphere =
+        vgl::backends::has(g.features, VGL_DRAW_FEATURE_ATMOSPHERE) && view != nullptr;
     vgl_dvec3 sun = g.sun_direction;
     std::array<Ogre::Vector4, 3> to_planet{};
     Ogre::Vector4 camera(0.0f, 0.0f, 0.0f, 0.0f);
@@ -955,10 +958,12 @@ void fill_renderables(state& s, const vgl_frame* frame, const vgl_dmat4* view)
         sun_planet = Ogre::Vector4(air.sun_planet[0], air.sun_planet[1], air.sun_planet[2], 1.0f);
     }
     s.sky_shown = atmosphere;
-    s.stars_shown = g.stars && view != nullptr && s.star_count != 0 && upload_stars(s);
+    s.stars_shown = vgl::backends::has(g.features, VGL_DRAW_FEATURE_STARS) && view != nullptr &&
+                    s.star_count != 0 && upload_stars(s);
     if (s.stars_shown)
     {
-        const std::array<float, 9> c = vgl::backends::celestial_to_camera(*view, g.sidereal_angle);
+        const std::array<float, 9> c =
+            vgl::backends::celestial_to_camera(*view, g.earth_rotation_angle);
         for (std::size_t i = 0; i < 3; ++i)
         {
             s.stars.setCustomParameter(custom_celestial + i,
@@ -980,7 +985,8 @@ void fill_renderables(state& s, const vgl_frame* frame, const vgl_dmat4* view)
     s.sky.setCustomParameter(custom_sun_planet, sun_planet);
     // The clouds, with the atmosphere.
     Ogre::Vector4 cloud(0.0f, 0.0f, 1.0f, 0.0f);
-    const bool clouds = atmosphere && g.clouds && s.cloud_data != nullptr && upload_clouds(s);
+    const bool clouds = atmosphere && vgl::backends::has(g.features, VGL_DRAW_FEATURE_CLOUDS) &&
+                        s.cloud_data != nullptr && upload_clouds(s);
     if (clouds)
     {
         const double height =
@@ -1004,7 +1010,11 @@ void fill_renderables(state& s, const vgl_frame* frame, const vgl_dmat4* view)
         custom_sky,
         Ogre::Vector4(s.depth == VGL_DEPTH_CONVENTION_REVERSED_Z ? 0.0f : 1.0f, 0.0f, 0.0f, 0.0f));
     // The sun in camera space: only the view's rotation applies to a direction.
-    Ogre::Vector4 light(0.0f, 0.0f, 0.0f, static_cast<float>(g.debug_flags));
+    Ogre::Vector4 light(
+        0.0f,
+        0.0f,
+        0.0f,
+        static_cast<float>(vgl::backends::shader_debug_bits(g.debug_views, g.features)));
     if (view != nullptr && (sun.x != 0.0 || sun.y != 0.0 || sun.z != 0.0))
     {
         const double* m = &view->m[0];
@@ -1019,9 +1029,10 @@ void fill_renderables(state& s, const vgl_frame* frame, const vgl_dmat4* view)
     const double far_distance =
         g.logarithmic_far > 0.0 ? g.logarithmic_far : VGL_LOGARITHMIC_DEPTH_FAR_DEFAULT;
     const Ogre::Vector4 frame_values(
-        g.sea_surface ? 1.0f : 0.0f,
+        vgl::backends::has(g.features, VGL_DRAW_FEATURE_SEA_SURFACE) ? 1.0f : 0.0f,
         static_cast<float>(2.0 / std::log2(far_distance + 1.0)),
-        static_cast<float>(g.contour_interval > 0.0 ? g.contour_interval : 500.0),
+        static_cast<float>(g.contour_interval > 0.0 ? g.contour_interval
+                                                    : VGL_CONTOUR_INTERVAL_DEFAULT),
         0.0f);
 
     const vgl_draw_layer* layers = nullptr;
@@ -1145,8 +1156,15 @@ void run_frame(state& s)
     info.view_matrix = s.settings.has_view_matrix ? &s.settings.view_matrix : nullptr;
     vgl_frame* frame = nullptr;
     s.sky_shown = false;
-    if (vgl_context_frame_begin(s.context, &info, &frame) != VGL_RESULT_SUCCESS)
+    if (const vgl_result begun = vgl_context_frame_begin(s.context, &info, &frame);
+        begun != VGL_RESULT_SUCCESS)
     {
+        const char* name = nullptr;
+        static_cast<void>(vgl_result_name_get(begun, &name));
+        log(s,
+            VGL_LOG_LEVEL_ERROR,
+            std::string("vgl::ogre::globe: the frame could not begin (") + name +
+                "); the globe is not drawn");
         s.used = 0;
         return;
     }
@@ -1175,12 +1193,24 @@ void run_frame(state& s)
 namespace vgl::ogre
 {
 
-vgl::result globe::create(vgl_context* context, const globe_create_info& info, globe*& out) noexcept
+vgl::expected<globe*> globe::create(vgl::context& context, const globe_create_info& info) noexcept
 {
-    out = nullptr;
-    if (context == nullptr || info.depth_convention > VGL_DEPTH_CONVENTION_CONVENTIONAL)
+    return create(context.get(), info);
+}
+
+vgl::expected<globe*> globe::create(vgl_context* context, const globe_create_info& info) noexcept
+{
+    if (context == nullptr)
     {
-        return vgl::result::invalid_argument;
+        return vgl::unexpected(vgl::result::invalid_argument);
+    }
+    if (info.depth_convention > VGL_DEPTH_CONVENTION_CONVENTIONAL)
+    {
+        static_cast<void>(
+            vgl_context_log(context,
+                            VGL_LOG_LEVEL_ERROR,
+                            "vgl::ogre::globe::create: info.depth_convention is unknown"));
+        return vgl::unexpected(vgl::result::invalid_argument);
     }
     vgl_allocator_interface allocator{};
     static_cast<void>(vgl_context_allocator_get(context, &allocator));
@@ -1191,7 +1221,9 @@ vgl::result globe::create(vgl_context* context, const globe_create_info& info, g
     {
         mem.destroy(s);
         mem.deallocate(place, sizeof(globe), alignof(globe));
-        return vgl::result::out_of_memory;
+        static_cast<void>(vgl_context_log(
+            context, VGL_LOG_LEVEL_ERROR, "vgl::ogre::globe::create: out of memory"));
+        return vgl::unexpected(vgl::result::out_of_memory);
     }
     s->context = context;
     s->depth = info.depth_convention;
@@ -1215,7 +1247,7 @@ vgl::result globe::create(vgl_context* context, const globe_create_info& info, g
             s->~state();
             mem.deallocate(s, sizeof(state), alignof(state));
             mem.deallocate(place, sizeof(globe), alignof(globe));
-            return vgl::result::not_supported;
+            return vgl::unexpected(vgl::result::not_supported);
         }
         build_pipeline(*s);
         g = ::new (place) globe(s->name, s);
@@ -1235,12 +1267,11 @@ vgl::result globe::create(vgl_context* context, const globe_create_info& info, g
         }
         mem.destroy(s);
         mem.deallocate(place, sizeof(globe), alignof(globe));
-        return vgl::result::backend_error;
+        return vgl::unexpected(vgl::result::backend_error);
     }
     const vgl_texture_format format = VGL_TEXTURE_FORMAT_RGBA8;
     static_cast<void>(vgl_context_texture_formats_set(context, &format, 1));
-    out = g;
-    return vgl::result::success;
+    return g;
 }
 
 void globe::destroy(globe* g) noexcept
@@ -1297,18 +1328,47 @@ globe::~globe()
     s.mem.destroy(state_);
 }
 
-void globe::settings_set(const globe_settings& settings) noexcept
+vgl::result globe::settings_set(const globe_settings& settings) noexcept
 {
-    state_->settings = settings;
-}
-
-vgl::result globe::stars_set(const vgl_star* stars, std::uint32_t count) noexcept
-{
-    state& s = *state_;
-    if ((stars == nullptr && count != 0) || count > vgl::backends::max_stars)
+    // As the C backends check their draws.
+    const auto finite_matrix = [](const vgl_dmat4& m) {
+        return std::all_of(
+            std::begin(m.m), std::end(m.m), [](double v) { return std::isfinite(v); });
+    };
+    const vgl_dvec3& sun = settings.sun_direction;
+    if ((settings.has_view_matrix && !finite_matrix(settings.view_matrix)) ||
+        !std::isfinite(sun.x) || !std::isfinite(sun.y) || !std::isfinite(sun.z) ||
+        !std::isfinite(settings.logarithmic_far) || settings.logarithmic_far < 0.0 ||
+        (settings.features & ~vgl::backends::known_draw_features) != 0 ||
+        (settings.debug_views & ~vgl::backends::known_debug_views) != 0 ||
+        !std::isfinite(settings.earth_rotation_angle) || !std::isfinite(settings.cloud_height) ||
+        settings.cloud_height < 0.0 || !std::isfinite(settings.contour_interval) ||
+        settings.contour_interval < 0.0)
     {
+        log(*state_,
+            VGL_LOG_LEVEL_ERROR,
+            "vgl::ogre::globe::settings_set: the view matrix or the sun direction is not finite, "
+            "features or debug_views has unknown bits, or logarithmic_far, "
+            "earth_rotation_angle, contour_interval or cloud_height is not finite or is "
+            "negative; the settings before stay");
         return vgl::result::invalid_argument;
     }
+    state_->settings = settings;
+    return vgl::result::success;
+}
+
+vgl::result globe::stars_set(std::span<const vgl_star> stars_in) noexcept
+{
+    state& s = *state_;
+    const vgl_star* stars = stars_in.data();
+    if (stars_in.size() > vgl::backends::max_stars)
+    {
+        log(s,
+            VGL_LOG_LEVEL_ERROR,
+            "vgl::ogre::globe::stars_set: more stars than VGL_STAR_COUNT_MAX");
+        return vgl::result::invalid_argument;
+    }
+    const auto count = static_cast<std::uint32_t>(stars_in.size());
     for (std::uint32_t i = 0; i < count; ++i)
     {
         if (!vgl::backends::star_is_valid(stars[i]))
@@ -1353,7 +1413,7 @@ globe::clouds_set(const std::uint8_t* coverage, std::uint32_t width, std::uint32
         log(s,
             VGL_LOG_LEVEL_ERROR,
             "vgl::ogre::globe::clouds_set: the coverage is null, or " + std::to_string(width) +
-                "x" + std::to_string(height) + " is outside 2x2 to 16384x8192");
+                "x" + std::to_string(height) + " is outside 2x2 to 16384x8192 (VGL_CLOUD_IMAGE_*)");
         return vgl::result::invalid_argument;
     }
     std::uint8_t* data = nullptr;
@@ -1374,7 +1434,7 @@ globe::clouds_set(const std::uint8_t* coverage, std::uint32_t width, std::uint32
     return vgl::result::success;
 }
 
-void globe::resources_reset() noexcept
+void globe::device_reset() noexcept
 {
     forget_resources(*state_);
     static_cast<void>(vgl_context_resources_reset(state_->context));

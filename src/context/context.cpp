@@ -135,7 +135,10 @@ vgl_result start_read(vgl_context& ctx,
     request->core = ctx.core;
     request->id = ctx.next_request_id++;
     request->target = target;
-    request->read = {uri, offset, size};
+    request->read = {};
+    request->read.uri = uri;
+    request->read.offset = offset;
+    request->read.size = size;
     if (ctx.outstanding.insert(request->id, request) == nullptr)
     {
         ctx.memory.destroy(request);
@@ -1295,6 +1298,27 @@ extern "C" VGL_API vgl_result vgl_pack_opacity_get(const vgl_pack* pack, float* 
     return VGL_RESULT_SUCCESS;
 }
 
+namespace
+{
+
+// A query's read of finer data that could not start for lack of memory leaves the query
+// pending, as a later call starts it again; other errors end the query. Returns false for
+// those, with error set.
+bool read_started(vgl_context& ctx, vgl_result& error, bool& pending) noexcept
+{
+    if (error == VGL_RESULT_OUT_OF_MEMORY)
+    {
+        ctx.log.log(VGL_LOG_LEVEL_WARNING,
+                    "vgl_context_height_query: a read of finer data could not start for lack of "
+                    "memory; the query reports VGL_RESULT_NOT_READY until it can");
+        error = VGL_RESULT_SUCCESS;
+        pending = true;
+    }
+    return error == VGL_RESULT_SUCCESS;
+}
+
+} // namespace
+
 extern "C" VGL_API vgl_result vgl_context_height_query(vgl_context* context,
                                                        double latitude,
                                                        double longitude,
@@ -1309,7 +1333,8 @@ extern "C" VGL_API vgl_result vgl_context_height_query(vgl_context* context,
     {
         return VGL_RESULT_INVALID_ARGUMENT;
     }
-    *out_height = std::numeric_limits<double>::quiet_NaN();
+    // Errors leave out_height as it was (docs/c-api.md, section 6.2); NOT_READY without any data
+    // writes NaN.
     const bool msl = reference == VGL_HEIGHT_REFERENCE_MEAN_SEA_LEVEL;
     if (msl && (ctx->geoid == nullptr || ctx->geoid->state == VGL_PACK_STATE_FAILED))
     {
@@ -1327,6 +1352,7 @@ extern "C" VGL_API vgl_result vgl_context_height_query(vgl_context* context,
                          "vgl_pack_create");
             return VGL_RESULT_INVALID_OPERATION;
         }
+        *out_height = std::numeric_limits<double>::quiet_NaN();
         return VGL_RESULT_NOT_READY;
     }
 
@@ -1357,23 +1383,29 @@ extern "C" VGL_API vgl_result vgl_context_height_query(vgl_context* context,
             break;
         }
     }
-    if (error != VGL_RESULT_SUCCESS)
+    if (!read_started(*ctx, error, pending))
     {
         return error;
     }
     if (!found)
     {
-        return pending ? VGL_RESULT_NOT_READY : VGL_RESULT_NOT_FOUND;
+        if (!pending)
+        {
+            return VGL_RESULT_NOT_FOUND;
+        }
+        *out_height = std::numeric_limits<double>::quiet_NaN();
+        return VGL_RESULT_NOT_READY;
     }
     if (msl)
     {
         const sample n = sample_pack(*ctx, *ctx->geoid, lat, lon, error);
-        if (error != VGL_RESULT_SUCCESS)
+        if (!read_started(*ctx, error, pending))
         {
             return error;
         }
         if (!n.valid)
         {
+            *out_height = height; // Above the ellipsoid until the geoid has loaded.
             return VGL_RESULT_NOT_READY;
         }
         height -= n.value;

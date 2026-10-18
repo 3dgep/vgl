@@ -15,10 +15,12 @@
 
 #define VGL_PI 3.14159265358979323846
 
+/** Angle conversions for C and C++; vgl_degrees_to_radians and vgl_radians_to_degrees do the
+ * same for bindings that cannot use macros. */
 #define VGL_DEGREES_TO_RADIANS(degrees) ((degrees) * (VGL_PI / 180.0))
 #define VGL_RADIANS_TO_DEGREES(radians) ((radians) * (180.0 / VGL_PI))
 
-/* WGS84 defining parameters. */
+/** WGS84 defining parameters. */
 #define VGL_WGS84_SEMI_MAJOR_AXIS 6378137.0
 #define VGL_WGS84_FLATTENING      (1.0 / 298.257223563)
 
@@ -26,22 +28,22 @@
 extern "C" {
 #endif
 
-/*
+/**
  * Reference ellipsoid of revolution. Valid ellipsoids have a finite semi_major_axis greater
  * than zero and a flattening in [0, 0.5). A flattening of 0 is a sphere.
  */
 typedef struct vgl_ellipsoid
 {
-    double semi_major_axis; /* Equatorial radius in metres. */
-    double flattening;      /* (a - b) / a. */
+    double semi_major_axis; /**< Equatorial radius in metres. */
+    double flattening;      /**< (a - b) / a. */
 } vgl_ellipsoid;
 
-/* Geodetic position. */
+/** Geodetic position. */
 typedef struct vgl_geodetic
 {
-    double latitude;  /* Geodetic latitude in radians, in [-pi/2, pi/2]. */
-    double longitude; /* Longitude in radians. Any finite value; outputs are in [-pi, pi]. */
-    double height;    /* Height above the ellipsoid in metres. */
+    double latitude;  /**< Geodetic latitude in radians, in [-pi/2, pi/2]. */
+    double longitude; /**< Longitude in radians. Any finite value; outputs are in [-pi, pi]. */
+    double height;    /**< Height above the ellipsoid in metres. */
 } vgl_geodetic;
 
 /**
@@ -143,6 +145,34 @@ VGL_API vgl_result vgl_ellipsoid_enu_frame_get(const vgl_ellipsoid* ellipsoid,
  * Free-threaded.
  */
 VGL_API vgl_result vgl_earth_rotation_angle_get(double julian_date, double* out_angle);
+
+/**
+ * Converts an angle from degrees to radians, as VGL_DEGREES_TO_RADIANS does.
+ *
+ * @param degrees      The angle in degrees. Any value; NaN and infinities pass through.
+ * @param out_radians  Receives the angle in radians.
+ *
+ * @retval VGL_RESULT_SUCCESS           The angle was written.
+ * @retval VGL_RESULT_INVALID_ARGUMENT  out_radians is null.
+ *
+ * @par Thread safety
+ * Free-threaded.
+ */
+VGL_API vgl_result vgl_degrees_to_radians(double degrees, double* out_radians);
+
+/**
+ * Converts an angle from radians to degrees, as VGL_RADIANS_TO_DEGREES does.
+ *
+ * @param radians      The angle in radians. Any value; NaN and infinities pass through.
+ * @param out_degrees  Receives the angle in degrees.
+ *
+ * @retval VGL_RESULT_SUCCESS           The angle was written.
+ * @retval VGL_RESULT_INVALID_ARGUMENT  out_degrees is null.
+ *
+ * @par Thread safety
+ * Free-threaded.
+ */
+VGL_API vgl_result vgl_radians_to_degrees(double radians, double* out_degrees);
 
 #ifdef __cplusplus
 }

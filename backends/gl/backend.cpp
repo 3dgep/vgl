@@ -9,6 +9,7 @@
 #include "atmosphere_shader.hpp"
 #include "backends/common/atmosphere_view.hpp"
 #include "backends/common/clouds.hpp"
+#include "backends/common/draw_flags.hpp"
 #include "backends/common/stars.hpp"
 #include "common/host_memory.hpp"
 #include "common/pointer_map.hpp"
@@ -946,7 +947,7 @@ void draw_stars(vgl_gl_backend& b,
     gl.UniformMatrix3fv(b.u_stars_celestial,
                         1,
                         GL_FALSE,
-                        vgl::backends::celestial_to_camera(view, info.sidereal_angle).data());
+                        vgl::backends::celestial_to_camera(view, info.earth_rotation_angle).data());
     gl.UniformMatrix4fv(b.u_stars_projection, 1, GL_FALSE, to_float(projection).data());
     gl.Uniform2f(b.u_stars_viewport,
                  static_cast<GLfloat>(std::max(viewport[2], 1)),
@@ -1004,13 +1005,17 @@ void draw_items(vgl_gl_backend& b,
     const functions& gl = b.gl;
     gl.UseProgram(b.program);
     gl.UniformMatrix4fv(b.u_projection, 1, GL_FALSE, to_float(projection).data());
-    gl.Uniform1i(b.u_debug, static_cast<GLint>(info.debug_flags));
-    gl.Uniform1i(b.u_sea, info.sea_surface != VGL_FALSE ? 1 : 0);
+    gl.Uniform1i(
+        b.u_debug,
+        static_cast<GLint>(vgl::backends::shader_debug_bits(info.debug_views, info.features)));
+    gl.Uniform1i(b.u_sea, vgl::backends::has(info.features, VGL_DRAW_FEATURE_SEA_SURFACE) ? 1 : 0);
     gl.Uniform1f(b.u_contour_interval,
-                 static_cast<GLfloat>(info.contour_interval > 0.0 ? info.contour_interval : 500.0));
+                 static_cast<GLfloat>(info.contour_interval > 0.0 ? info.contour_interval
+                                                                  : VGL_CONTOUR_INTERVAL_DEFAULT));
 
     // The atmosphere needs the camera and a sun: without one, it is above the camera.
-    const bool atmosphere = info.atmosphere != VGL_FALSE && view != nullptr;
+    const bool atmosphere =
+        vgl::backends::has(info.features, VGL_DRAW_FEATURE_ATMOSPHERE) && view != nullptr;
     atmosphere_view air;
     vgl_dvec3 sun = info.sun_direction;
     if (atmosphere)
@@ -1020,7 +1025,8 @@ void draw_items(vgl_gl_backend& b,
     }
     // The clouds, with the atmosphere, on their own texture unit.
     cloud_view clouds;
-    if (atmosphere && info.clouds != VGL_FALSE && b.cloud_data != nullptr)
+    if (atmosphere && vgl::backends::has(info.features, VGL_DRAW_FEATURE_CLOUDS) &&
+        b.cloud_data != nullptr)
     {
         bind_clouds(b);
         clouds.drawn = true;
@@ -1146,7 +1152,7 @@ void draw_items(vgl_gl_backend& b,
                      static_cast<GLfloat>(item.centre.x),
                      static_cast<GLfloat>(item.centre.y),
                      static_cast<GLfloat>(item.centre.z));
-        if (info.debug_flags != 0)
+        if (vgl::backends::shader_debug_bits(info.debug_views, info.features) != 0)
         {
             gl.Uniform1f(b.u_level, static_cast<GLfloat>(item.tile.level));
             // The top layer's scale is a little below 1 for the tile's own imagery (its border
@@ -1174,11 +1180,11 @@ void draw_items(vgl_gl_backend& b,
             bound[samples_unit] = mesh->texture;
         }
         gl.Uniform1f(b.u_sample_cells, static_cast<GLfloat>(mesh->sample_grid - 1));
-        if (info.sea_surface != VGL_FALSE)
+        if (vgl::backends::has(info.features, VGL_DRAW_FEATURE_SEA_SURFACE))
         {
             gl.Uniform1f(b.u_min_height, mesh->min_height);
         }
-        if ((info.debug_flags & VGL_GL_DEBUG_FLAG_WIREFRAME) != 0)
+        if ((info.debug_views & VGL_DEBUG_VIEW_WIREFRAME) != 0)
         {
             gl.Uniform1f(b.u_cells, static_cast<GLfloat>(mesh->grid > 1 ? mesh->grid - 1 : 0));
         }
@@ -1188,7 +1194,7 @@ void draw_items(vgl_gl_backend& b,
                         item.index_size == 2 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT,
                         nullptr);
     }
-    if (info.stars != VGL_FALSE && view != nullptr)
+    if (vgl::backends::has(info.features, VGL_DRAW_FEATURE_STARS) && view != nullptr)
     {
         draw_stars(b, info, projection, *view, atmosphere, air);
     }
@@ -1379,7 +1385,7 @@ extern "C" VGL_GL_API vgl_result vgl_gl_backend_clouds_set(vgl_gl_backend* backe
     return VGL_RESULT_SUCCESS;
 }
 
-extern "C" VGL_GL_API vgl_result vgl_gl_backend_reset(vgl_gl_backend* backend)
+extern "C" VGL_GL_API vgl_result vgl_gl_backend_device_reset(vgl_gl_backend* backend)
 {
     if (backend == nullptr)
     {
@@ -1388,7 +1394,7 @@ extern "C" VGL_GL_API vgl_result vgl_gl_backend_reset(vgl_gl_backend* backend)
     // The objects went with the old OpenGL context, so they are not deleted.
     stop(*backend, false);
     static_cast<void>(vgl_context_resources_reset(backend->context));
-    return start(*backend, "vgl_gl_backend_reset");
+    return start(*backend, "vgl_gl_backend_device_reset");
 }
 
 extern "C" VGL_GL_API vgl_result vgl_gl_backend_draw(vgl_gl_backend* backend,
@@ -1421,19 +1427,17 @@ extern "C" VGL_GL_API vgl_result vgl_gl_backend_draw(vgl_gl_backend* backend,
             "negative far distance");
         return VGL_RESULT_INVALID_ARGUMENT;
     }
-    constexpr std::uint32_t known_flags =
-        VGL_GL_DEBUG_FLAG_WIREFRAME | VGL_GL_DEBUG_FLAG_LEVEL_COLORS |
-        VGL_GL_DEBUG_FLAG_IMAGERY_SOURCE | VGL_GL_DEBUG_FLAG_HEIGHT_COLORS |
-        VGL_GL_DEBUG_FLAG_CONTOURS;
-    if ((info.debug_flags & ~known_flags) != 0 || info.reserved != 0 || info.reserved2 != 0 ||
-        info.reserved3 != 0 || info.reserved4 != 0 || !std::isfinite(info.sidereal_angle) ||
-        info.reserved5 != 0 || !std::isfinite(info.cloud_height) || info.cloud_height < 0.0 ||
-        !std::isfinite(info.contour_interval) || info.contour_interval < 0.0)
+    if ((info.features & ~vgl::backends::known_draw_features) != 0 ||
+        (info.debug_views & ~vgl::backends::known_debug_views) != 0 ||
+        !std::isfinite(info.earth_rotation_angle) || !std::isfinite(info.cloud_height) ||
+        info.cloud_height < 0.0 || !std::isfinite(info.contour_interval) ||
+        info.contour_interval < 0.0)
     {
         log(b,
             VGL_LOG_LEVEL_ERROR,
-            "vgl_gl_backend_draw: info->debug_flags has unknown flags, info->reserved is not "
-            "zero, or info->contour_interval is negative or not finite");
+            "vgl_gl_backend_draw: info->features or info->debug_views has unknown bits, or "
+            "info->earth_rotation_angle, info->cloud_height or info->contour_interval is not "
+            "finite or is negative");
         return VGL_RESULT_INVALID_ARGUMENT;
     }
     if (!b.ready)
@@ -1441,7 +1445,7 @@ extern "C" VGL_GL_API vgl_result vgl_gl_backend_draw(vgl_gl_backend* backend,
         log(b,
             VGL_LOG_LEVEL_ERROR,
             "vgl_gl_backend_draw: the backend has no OpenGL context since a failed reset; call "
-            "vgl_gl_backend_reset again");
+            "vgl_gl_backend_device_reset again");
         return VGL_RESULT_INVALID_OPERATION;
     }
 

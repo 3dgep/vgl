@@ -9,6 +9,7 @@
 #include <vgl/base.hpp>
 #include <vgl/defaults.h>
 
+#include <cassert>
 #include <cstdint>
 #include <utility>
 
@@ -61,6 +62,7 @@ public:
     [[nodiscard]] vgl_task_interface task_interface_get() const noexcept
     {
         vgl_task_interface table{};
+        assert(handle_ != nullptr);
         static_cast<void>(vgl_thread_pool_task_interface_get(handle_, &table));
         return table;
     }
@@ -123,6 +125,7 @@ public:
     [[nodiscard]] vgl_io_interface io_interface_get() const noexcept
     {
         vgl_io_interface table{};
+        assert(handle_ != nullptr);
         static_cast<void>(vgl_file_reader_io_interface_get(handle_, &table));
         return table;
     }
@@ -163,12 +166,20 @@ public:
         return http_reader(handle);
     }
 
-    // Reads the URIs that are not HTTP with a file reader, which must outlive this one.
-    [[nodiscard]] static expected<http_reader> create(file_reader& files) noexcept
+    // Reads the URIs that are not HTTP through another interface, such as a file reader's,
+    // whose object must outlive this one.
+    [[nodiscard]] static expected<http_reader> create(const vgl_io_interface& fallback) noexcept
     {
         auto info = init<vgl_http_reader_create_info>();
-        info.files = files.get();
+        info.fallback = &fallback;
         return create(&info);
+    }
+
+    // Reads the URIs that are not HTTP with a file reader, which must outlive this one.
+    [[nodiscard]] static expected<http_reader> create(const file_reader& files) noexcept
+    {
+        const vgl_io_interface fallback = files.io_interface_get();
+        return create(fallback);
     }
 
     [[nodiscard]] vgl_http_reader* get() const noexcept { return handle_; }
@@ -185,6 +196,7 @@ public:
     [[nodiscard]] vgl_io_interface io_interface_get() const noexcept
     {
         vgl_io_interface table{};
+        assert(handle_ != nullptr);
         static_cast<void>(vgl_http_reader_io_interface_get(handle_, &table));
         return table;
     }
@@ -253,13 +265,16 @@ public:
     [[nodiscard]] vgl_io_interface io_interface_get() const noexcept
     {
         vgl_io_interface table{};
+        assert(handle_ != nullptr);
         static_cast<void>(vgl_disk_cache_io_interface_get(handle_, &table));
         return table;
     }
 
+    // The cache must be valid.
     [[nodiscard]] vgl_disk_cache_statistics statistics_get() const noexcept
     {
         auto s = init<vgl_disk_cache_statistics>();
+        assert(handle_ != nullptr);
         static_cast<void>(vgl_disk_cache_statistics_get(handle_, &s));
         return s;
     }

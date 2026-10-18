@@ -146,7 +146,7 @@ TEST_CASE(http_reader_reads_ranges)
         vgl_http_reader_create_info info{};
         info.struct_size = sizeof(info);
         info.allocator = &memory.table;
-        info.max_connections = 4;
+        info.max_connection_count = 4;
         const http_context c(&info, &memory.table);
         vgl_pack* p = add_pack(c.ctx, uri);
         vgl_pack* missing = add_pack(c.ctx, uri + "-missing");
@@ -192,9 +192,11 @@ TEST_CASE(http_reader_hands_other_uris_to_the_file_reader)
     {
         vgl_file_reader* files = nullptr;
         REQUIRE(vgl_file_reader_create(nullptr, &files) == VGL_RESULT_SUCCESS);
+        vgl_io_interface fallback{};
+        REQUIRE(vgl_file_reader_io_interface_get(files, &fallback) == VGL_RESULT_SUCCESS);
         vgl_http_reader_create_info info{};
         info.struct_size = sizeof(info);
-        info.files = files;
+        info.fallback = &fallback;
         {
             const http_context c(&info);
             vgl_pack* p = add_pack(c.ctx, uri);

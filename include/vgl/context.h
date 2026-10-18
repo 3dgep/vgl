@@ -22,26 +22,32 @@ extern "C" {
 
 typedef struct vgl_context vgl_context;
 
-/* Creation parameters of a context. Zero-initialize, set struct_size, then fill in. */
+/** Creation parameters of a context. Zero-initialize, set struct_size, then fill in. */
 typedef struct vgl_context_create_info
 {
     uint32_t struct_size;
-    /* Minimum level of messages passed to log. VGL_LOG_LEVEL_DEFAULT is warnings. */
+    /** Minimum level of messages passed to log. VGL_LOG_LEVEL_DEFAULT is warnings. */
     vgl_log_level log_level;
-    /* Memory for decoded tiles and pack metadata, in bytes. 0 selects 256 MiB. */
+    /** Memory for decoded tiles and pack metadata, in bytes. 0 selects 256 MiB. */
     uint64_t cpu_budget;
-    /* Optional. Every allocation of the context goes through it; null uses the C heap. */
+    /** Optional. Every allocation of the context goes through it; null uses the C heap. */
     const vgl_allocator_interface* allocator;
-    /* Optional. How the context reads packs. Without it, packs cannot be created. */
+    VGL_POINTER_PADDING(allocator_padding)
+    /** Optional. How the context reads packs. Without it, packs cannot be created. */
     const vgl_io_interface* io;
-    /* Optional. Where decoding runs. Without it, vgl_context_update decodes. */
+    VGL_POINTER_PADDING(io_padding)
+    /** Optional. Where decoding runs. Without it, vgl_context_update decodes. */
     const vgl_task_interface* tasks;
-    /* Optional. Reference ellipsoid; null selects WGS84. Packs must use the same. */
+    VGL_POINTER_PADDING(tasks_padding)
+    /** Optional. Reference ellipsoid; null selects WGS84. Packs must use the same. */
     const vgl_ellipsoid* ellipsoid;
-    /* Optional. Receives log messages; without it, the context is silent. */
+    VGL_POINTER_PADDING(ellipsoid_padding)
+    /** Optional. Receives log messages; without it, the context is silent. */
     vgl_log_fn log;
+    VGL_POINTER_PADDING(log_padding)
     void* log_user_data;
-    /* GPU memory for the resources of the render interface, in bytes. 0 selects 512 MiB
+    VGL_POINTER_PADDING(log_user_data_padding)
+    /** GPU memory for the resources of the render interface, in bytes. 0 selects 512 MiB
      * (docs/render-interface.md, section 4.3). */
     uint64_t gpu_budget;
 } vgl_context_create_info;
@@ -121,12 +127,12 @@ VGL_API vgl_result vgl_context_log(const vgl_context* context,
                                    vgl_log_level level,
                                    const char* message);
 
-/* Parameters of an update. Zero-initialize, set struct_size, then fill in. */
+/** Parameters of an update. Zero-initialize, set struct_size, then fill in. */
 typedef struct vgl_update_info
 {
     uint32_t struct_size;
     uint32_t reserved;
-    /* Time the update may spend decoding, in seconds. 0 selects 2 ms. Completions are always
+    /** Time the update may spend decoding, in seconds. 0 selects 2 ms. Completions are always
      * processed in full, and at least one decode runs if any is waiting. */
     double time_budget;
 } vgl_update_info;
@@ -135,7 +141,7 @@ typedef struct vgl_update_info
 /* View and update                                                                          */
 /* ---------------------------------------------------------------------------------------- */
 
-/*
+/**
  * A view of the globe, for tile selection (design document, section 7.3). Matrices are
  * column-major and multiply column vectors (vgl_dmat4). Hosts with row-major matrices that
  * multiply row vectors, as is common with Direct3D, pass theirs unchanged: the two differences
@@ -146,14 +152,14 @@ typedef struct vgl_view
 {
     uint32_t struct_size;
     uint32_t reserved;
-    /* From ECEF to camera space. Must be invertible. */
+    /** From ECEF to camera space. Must be invertible. */
     vgl_dmat4 view_matrix;
-    /* From camera space to clip space: perspective or orthographic. */
+    /** From camera space to clip space: perspective or orthographic. */
     vgl_dmat4 projection_matrix;
-    /* Size of the render target in pixels. Both must be at least 1. */
+    /** Size of the render target in pixels. Both must be at least 1. */
     uint32_t viewport_width;
     uint32_t viewport_height;
-    /* Largest screen-space error of a selected tile, in pixels. 0 selects 2. */
+    /** Largest screen-space error of a selected tile, in pixels. 0 selects 2. */
     double max_screen_space_error;
 } vgl_view;
 
@@ -240,13 +246,12 @@ VGL_API vgl_result vgl_view_geodetic_project(const vgl_view* view,
  * projection matrix.
  *
  * @param context   The context.
- * @param out_view  Receives the view. The caller sets struct_size, and only the fields that
- *                  fit within it are written (docs/c-api.md, section 8.4).
+ * @param out_view  Receives the view, an output structure (docs/c-api.md, section 8.4): set its
+ *                  struct_size, at least 8.
  *
  * @retval VGL_RESULT_SUCCESS           The view was written.
  * @retval VGL_RESULT_NOT_FOUND         No view is set; out_view is unchanged.
- * @retval VGL_RESULT_INVALID_ARGUMENT  A pointer is null, or out_view->struct_size is smaller
- *                                      than the first version of vgl_view.
+ * @retval VGL_RESULT_INVALID_ARGUMENT  A pointer is null, or out_view->struct_size is below 8.
  *
  * @par Thread safety
  * Context-synchronized.
@@ -261,8 +266,10 @@ VGL_API vgl_result vgl_context_view_get(const vgl_context* context, vgl_view* ou
  * @param context  The context.
  * @param info     Optional. Null selects the defaults.
  *
- * @retval VGL_RESULT_SUCCESS           The update ran.
- * @retval VGL_RESULT_INVALID_ARGUMENT  context is null or info is invalid.
+ * @retval VGL_RESULT_SUCCESS            The update ran.
+ * @retval VGL_RESULT_INVALID_ARGUMENT   context is null or info is invalid.
+ * @retval VGL_RESULT_NOT_SUPPORTED      info has fields from a newer version set.
+ * @retval VGL_RESULT_INVALID_OPERATION  A frame is open (docs/render-interface.md, section 9).
  *
  * @par Thread safety
  * Context-synchronized.
@@ -275,23 +282,25 @@ VGL_API vgl_result vgl_context_update(vgl_context* context, const vgl_update_inf
 
 typedef struct vgl_pack vgl_pack;
 
-/* Creation parameters of a pack. Zero-initialize, set struct_size, then fill in. */
+/** Creation parameters of a pack. Zero-initialize, set struct_size, then fill in. */
 typedef struct vgl_pack_create_info
 {
     uint32_t struct_size;
-    /* Packs with a higher priority win where they have data (FR-05). Among equal priorities,
+    /** Packs with a higher priority win where they have data (FR-05). Among equal priorities,
      * the pack created later wins. Ignored for a geoid pack. */
     int32_t priority;
-    /* Location of the pack's directory, passed to the I/O interface with the pack's file
+    /** Location of the pack's directory, passed to the I/O interface with the pack's file
      * names appended after a '/'. Required. Copied. */
     const char* uri;
+    VGL_POINTER_PADDING(uri_padding)
 } vgl_pack_create_info;
 
+/** What a pack is doing. 0 is never written. */
 typedef enum vgl_pack_state
 {
-    VGL_PACK_STATE_LOADING = 1, /* The manifest is being read. */
-    VGL_PACK_STATE_READY = 2,   /* The pack is in use. */
-    VGL_PACK_STATE_FAILED = 3,  /* The pack could not be used; see the failure result. */
+    VGL_PACK_STATE_LOADING = 1, /**< The manifest is being read. */
+    VGL_PACK_STATE_READY = 2,   /**< The pack is in use. */
+    VGL_PACK_STATE_FAILED = 3,  /**< The pack could not be used; see the failure result. */
     VGL_PACK_STATE_MAX_ENUM = 0x7FFFFFFF
 } vgl_pack_state;
 
@@ -307,6 +316,7 @@ typedef enum vgl_pack_state
  *
  * @retval VGL_RESULT_SUCCESS            The pack was added and is loading.
  * @retval VGL_RESULT_INVALID_ARGUMENT   A pointer is null, or info is invalid.
+ * @retval VGL_RESULT_NOT_SUPPORTED      info has fields from a newer version set.
  * @retval VGL_RESULT_INVALID_OPERATION  The context has no I/O interface.
  * @retval VGL_RESULT_OUT_OF_MEMORY      Allocation failed.
  *
@@ -417,8 +427,8 @@ VGL_API vgl_result vgl_pack_opacity_get(const vgl_pack* pack, float* out_opacity
 
 typedef enum vgl_height_reference
 {
-    VGL_HEIGHT_REFERENCE_ELLIPSOID = 0,      /* Height above the reference ellipsoid. */
-    VGL_HEIGHT_REFERENCE_MEAN_SEA_LEVEL = 1, /* Height above the geoid (needs a geoid pack). */
+    VGL_HEIGHT_REFERENCE_ELLIPSOID = 0,      /**< Height above the reference ellipsoid. */
+    VGL_HEIGHT_REFERENCE_MEAN_SEA_LEVEL = 1, /**< Height above the geoid (needs a geoid pack). */
     VGL_HEIGHT_REFERENCE_MAX_ENUM = 0x7FFFFFFF
 } vgl_height_reference;
 
@@ -433,17 +443,18 @@ typedef enum vgl_height_reference
  * @param latitude    Geodetic latitude in radians, in [-pi/2, pi/2].
  * @param longitude   Longitude in radians.
  * @param reference   What the height is relative to.
- * @param out_height  Receives the height in metres. NaN while no data has loaded at all.
+ * @param out_height  Receives the height in metres. Unchanged on an error.
  *
  * @retval VGL_RESULT_SUCCESS            The height is final: it comes from the finest data the
  *                                       packs have at the position.
  * @retval VGL_RESULT_NOT_READY          Finer data, a pack's manifest, or the geoid is still
- *                                       loading; out_height holds the best current value.
+ *                                       loading, or a read of it could not start yet for lack
+ *                                       of memory (logged); out_height holds the best current
+ *                                       value, NaN while no data has loaded at all, and above
+ *                                       the ellipsoid while the geoid has not.
  * @retval VGL_RESULT_NOT_FOUND          No ready elevation pack has data at the position.
  * @retval VGL_RESULT_INVALID_OPERATION  reference is VGL_HEIGHT_REFERENCE_MEAN_SEA_LEVEL, and
  *                                       the context has no geoid pack.
- * @retval VGL_RESULT_OUT_OF_MEMORY      Starting a read of finer data failed; out_height is
- *                                       NaN. The query may be repeated.
  * @retval VGL_RESULT_INVALID_ARGUMENT   context or out_height is null, an angle is not finite or
  *                                       out of range, or reference is unknown.
  *
@@ -456,15 +467,15 @@ VGL_API vgl_result vgl_context_height_query(vgl_context* context,
                                             vgl_height_reference reference,
                                             double* out_height);
 
-/* Where a ray meets the terrain. Set struct_size; the library writes the fields that fit
+/** Where a ray meets the terrain. Set struct_size; the library writes the fields that fit
  * within it. */
 typedef struct vgl_ray_hit
 {
     uint32_t struct_size;
     uint32_t reserved;
-    double distance;       /* Along the ray from its origin, in metres. */
-    vgl_dvec3 position;    /* ECEF, in metres. */
-    vgl_geodetic geodetic; /* The same position, with its height above the ellipsoid. */
+    double distance;       /**< Along the ray from its origin, in metres. */
+    vgl_dvec3 position;    /**< ECEF, in metres. */
+    vgl_geodetic geodetic; /**< The same position, with its height above the ellipsoid. */
 } vgl_ray_hit;
 
 /**
@@ -479,18 +490,17 @@ typedef struct vgl_ray_hit
  * @param origin     The ray's origin in ECEF, in metres. It may lie anywhere, even under the
  *                   terrain, which then counts as hit at distance 0.
  * @param direction  The ray's direction in ECEF; any length but 0.
- * @param out_hit    Receives the nearest hit. Set its struct_size. Unchanged when there is no
- *                   hit.
+ * @param out_hit    Receives the nearest hit, an output structure (docs/c-api.md, section 8.4):
+ *                   set its struct_size, at least 8. Unchanged when there is no hit.
  *
  * @retval VGL_RESULT_SUCCESS            The ray meets the terrain, from the finest data the
  *                                       packs have at the hit.
  * @retval VGL_RESULT_NOT_READY          The ray meets the terrain, but finer data at the hit,
- *                                       or a pack's manifest, is still loading; out_hit holds
- *                                       the best current hit.
+ *                                       or a pack's manifest, is still loading, or a read of it
+ *                                       could not start yet for lack of memory (logged);
+ *                                       out_hit holds the best current hit.
  * @retval VGL_RESULT_NOT_FOUND          The ray misses the globe.
- * @retval VGL_RESULT_OUT_OF_MEMORY      Starting a read of finer data failed; out_hit holds the
- *                                       hit. The query may be repeated.
- * @retval VGL_RESULT_INVALID_ARGUMENT   A pointer is null, out_hit's struct_size is too small,
+ * @retval VGL_RESULT_INVALID_ARGUMENT   A pointer is null, out_hit's struct_size is below 8,
  *                                       or origin or direction is not finite or direction is 0.
  *
  * @par Thread safety
@@ -533,7 +543,7 @@ VGL_API vgl_result vgl_context_attribution_get(const vgl_context* context,
 /* Statistics                                                                               */
 /* ---------------------------------------------------------------------------------------- */
 
-/*
+/**
  * What a context holds and does (design document, section 7.4). Set struct_size; the library
  * writes the fields that fit within it.
  */
@@ -542,57 +552,54 @@ typedef struct vgl_context_statistics
     uint32_t struct_size;
     uint32_t reserved;
 
-    /* Memory, in bytes. */
+    /** Memory, in bytes. */
     uint64_t cpu_used;
     uint64_t cpu_budget;
-    uint64_t gpu_used; /* Resources offered to or created by the consumer. */
+    uint64_t gpu_used; /**< Resources offered to or created by the consumer. */
     uint64_t gpu_budget;
 
-    /* Packs. */
+    /** Packs. */
     uint32_t packs_loading;
     uint32_t packs_failed;
 
-    /* Work under way and cached. */
+    /** Work under way and cached. */
     uint32_t reads_outstanding;
-    uint32_t tiles_decoding; /* Read, and waiting for or in decoding. */
-    uint32_t tiles_decoded;  /* In the CPU cache. */
+    uint32_t tiles_decoding; /**< Read, and waiting for or in decoding. */
+    uint32_t tiles_decoded;  /**< In the CPU cache. */
     uint32_t meshes_building;
-    uint32_t meshes_waiting; /* Built for selected tiles, and waiting to be created. */
+    uint32_t meshes_waiting;    /**< Built for selected tiles, and waiting to be created. */
+    uint32_t textures_decoding; /**< Imagery tiles being decoded into textures. */
+    uint32_t textures_waiting;  /**< Wanted by selected tiles, and not created by the consumer. */
     uint32_t resources_resident;
 
-    /* The view. */
+    /** The view. */
     uint32_t tiles_selected;
 
-    /* The last frame. */
+    /** The last frame. Vertices and triangles count the meshes drawn, skirts included. */
     uint32_t tiles_drawn;
     uint32_t resources_created;
     uint32_t resources_destroyed;
     uint64_t bytes_created;
+    uint64_t vertices_drawn;
+    uint64_t triangles_drawn;
 
-    /* Totals since the context was created. */
+    /** Totals since the context was created. */
     uint64_t reads_total;
     uint64_t bytes_read_total;
     uint64_t tiles_loaded_total;
 
-    /* Times, in seconds. */
-    double tile_load_time_mean; /* From the start of a tile's read to its decoding. */
-    double update_time;         /* Of the last vgl_context_update. */
-    double frame_time;          /* Of the last vgl_context_frame_begin. */
-
-    /* Imagery textures. */
-    uint32_t textures_decoding; /* Imagery tiles being decoded into textures. */
-    uint32_t textures_waiting;  /* Wanted by selected tiles, and not created by the consumer. */
-
-    /* The last frame's meshes: vertices and triangles drawn, skirts included. */
-    uint64_t vertices_drawn;
-    uint64_t triangles_drawn;
+    /** Times, in seconds. */
+    double tile_load_time_mean; /**< From the start of a tile's read to its decoding. */
+    double update_time;         /**< Of the last vgl_context_update. */
+    double frame_time;          /**< Of the last vgl_context_frame_begin. */
 } vgl_context_statistics;
 
 /**
  * Gets the statistics of a context.
  *
  * @param context         The context.
- * @param out_statistics  Receives the statistics. Set its struct_size first; at least 8.
+ * @param out_statistics  Receives the statistics, an output structure (docs/c-api.md,
+ *                        section 8.4): set its struct_size, at least 8.
  *
  * @retval VGL_RESULT_SUCCESS           The statistics were written.
  * @retval VGL_RESULT_INVALID_ARGUMENT  A pointer is null, or struct_size is below 8.

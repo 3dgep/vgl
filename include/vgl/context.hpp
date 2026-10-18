@@ -11,6 +11,7 @@
 #include <vgl/foundation.hpp>
 #include <vgl/render.h>
 
+#include <cassert>
 #include <cstdint>
 #include <limits>
 #include <span>
@@ -43,13 +44,24 @@ struct height_sample
 
 // Where a ray meets the terrain, from context::ray_query. status is result::success when the
 // hit is final, or result::not_ready while finer data at it loads.
-struct ray_hit
+struct ray_query_result
 {
-    double distance = 0.0; // Along the ray, in metres.
-    vgl_dvec3 position{};  // ECEF.
-    vgl_geodetic geodetic{};
+    vgl_ray_hit hit = init<vgl_ray_hit>();
     result status = result::not_ready;
 };
+
+// The texture formats a consumer can sample (vgl_texture_format).
+enum class texture_format : std::int32_t
+{
+    rgba8 = VGL_TEXTURE_FORMAT_RGBA8,
+    rgba8_srgb = VGL_TEXTURE_FORMAT_RGBA8_SRGB,
+    bc1 = VGL_TEXTURE_FORMAT_BC1,
+    bc7 = VGL_TEXTURE_FORMAT_BC7,
+    etc2_rgb8 = VGL_TEXTURE_FORMAT_ETC2_RGB8,
+    astc_4x4 = VGL_TEXTURE_FORMAT_ASTC_4X4,
+};
+
+static_assert(sizeof(texture_format) == sizeof(vgl_texture_format));
 
 struct pack_status
 {
@@ -153,6 +165,7 @@ public:
     [[nodiscard]] vgl_allocator_interface allocator_get() const noexcept
     {
         vgl_allocator_interface table{};
+        assert(handle_ != nullptr);
         static_cast<void>(vgl_context_allocator_get(handle_, &table));
         return table;
     }
@@ -165,18 +178,23 @@ public:
     }
 
     // The texture formats the consumer can sample, most preferred first (vgl/render.h).
-    [[nodiscard]] result texture_formats_set(std::span<const vgl_texture_format> formats) noexcept
+    [[nodiscard]] result texture_formats_set(std::span<const texture_format> formats) noexcept
     {
+        // The two enumerations have the same size and values.
         return static_cast<result>(vgl_context_texture_formats_set(
-            handle_, formats.data(), static_cast<std::uint32_t>(formats.size())));
+            handle_,
+            reinterpret_cast<const vgl_texture_format*>(formats.data()),
+            static_cast<std::uint32_t>(formats.size())));
     }
 
     // The credits of the data in view, each line once (vgl_context_attribution_get). The
-    // strings stay valid until the pack they come from is destroyed.
+    // strings stay valid until the pack they come from is destroyed. Empty when the context
+    // is not valid. Throws std::bad_alloc if the vector cannot be allocated.
     [[nodiscard]] std::vector<const char*> attribution_get() const
     {
         std::uint32_t count = 0;
-        if (vgl_context_attribution_get(handle_, &count, nullptr) != VGL_RESULT_SUCCESS)
+        if (vgl_context_attribution_get(handle_, &count, nullptr) != VGL_RESULT_SUCCESS ||
+            count == 0)
         {
             return {};
         }
@@ -190,6 +208,7 @@ public:
     [[nodiscard]] vgl_context_statistics statistics_get() const noexcept
     {
         auto s = init<vgl_context_statistics>();
+        assert(handle_ != nullptr);
         static_cast<void>(vgl_context_statistics_get(handle_, &s));
         return s;
     }
@@ -208,17 +227,16 @@ public:
     }
 
     // Picking: where a ray in ECEF meets the terrain. A miss is result::not_found.
-    [[nodiscard]] expected<ray_hit> ray_query(const vgl_dvec3& origin,
-                                              const vgl_dvec3& direction) noexcept
+    [[nodiscard]] expected<ray_query_result> ray_query(const vgl_dvec3& origin,
+                                                       const vgl_dvec3& direction) noexcept
     {
-        auto h = init<vgl_ray_hit>();
-        const auto status =
-            static_cast<result>(vgl_context_ray_query(handle_, &origin, &direction, &h));
-        if (failed(status))
+        ray_query_result q;
+        q.status = static_cast<result>(vgl_context_ray_query(handle_, &origin, &direction, &q.hit));
+        if (failed(q.status))
         {
-            return unexpected(status);
+            return unexpected(q.status);
         }
-        return ray_hit{h.distance, h.position, h.geodetic, status};
+        return q;
     }
 
     // Latitude and longitude in radians.

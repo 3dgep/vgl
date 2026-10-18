@@ -125,3 +125,23 @@ extern "C" VGL_API vgl_result vgl_earth_rotation_angle_get(double julian_date, d
     *out_angle = angle;
     return VGL_RESULT_SUCCESS;
 }
+
+extern "C" VGL_API vgl_result vgl_degrees_to_radians(double degrees, double* out_radians)
+{
+    if (out_radians == nullptr)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    *out_radians = VGL_DEGREES_TO_RADIANS(degrees);
+    return VGL_RESULT_SUCCESS;
+}
+
+extern "C" VGL_API vgl_result vgl_radians_to_degrees(double radians, double* out_degrees)
+{
+    if (out_degrees == nullptr)
+    {
+        return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    *out_degrees = VGL_RADIANS_TO_DEGREES(radians);
+    return VGL_RESULT_SUCCESS;
+}

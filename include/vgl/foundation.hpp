@@ -123,6 +123,10 @@ public:
     // Asks to give up a read; it must still be completed. Called on the context's thread.
     virtual void cancel(io_request* /*request*/) noexcept {}
 
+    // Called once while a context that uses this object is destroyed, on the thread that
+    // destroys it. Reads may still be outstanding; they must still be completed.
+    virtual void on_destroy() noexcept {}
+
     // C table whose entries forward to this object.
     [[nodiscard]] vgl_io_interface c_interface() noexcept
     {
@@ -131,6 +135,7 @@ public:
         table.user_data = this;
         table.read = &read_thunk;
         table.cancel = &cancel_thunk;
+        table.destroy = &destroy_thunk;
         return table;
     }
 
@@ -143,6 +148,11 @@ private:
     static void cancel_thunk(void* user_data, vgl_io_request* request)
     {
         static_cast<io_interface*>(user_data)->cancel(request);
+    }
+
+    static void destroy_thunk(void* user_data)
+    {
+        static_cast<io_interface*>(user_data)->on_destroy();
     }
 };
 
@@ -165,6 +175,10 @@ public:
     // throw.
     virtual result submit(task_fn function, void* task_data) noexcept = 0;
 
+    // Called once while a context that uses this object is destroyed, on the thread that
+    // destroys it. Submitted tasks may still be queued; they must still run.
+    virtual void on_destroy() noexcept {}
+
     // C table whose entries forward to this object.
     [[nodiscard]] vgl_task_interface c_interface() noexcept
     {
@@ -172,6 +186,7 @@ public:
         table.version = VGL_TASK_INTERFACE_VERSION;
         table.user_data = this;
         table.submit = &submit_thunk;
+        table.destroy = &destroy_thunk;
         return table;
     }
 
@@ -180,6 +195,11 @@ private:
     {
         return static_cast<vgl_result>(
             static_cast<task_interface*>(user_data)->submit(function, task_data));
+    }
+
+    static void destroy_thunk(void* user_data)
+    {
+        static_cast<task_interface*>(user_data)->on_destroy();
     }
 };
 

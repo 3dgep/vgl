@@ -78,22 +78,22 @@ class consumer
 public:
     void apply(const vgl::frame& f)
     {
-        for (const std::uint64_t id : f.destroys())
+        for (const std::uint64_t id : f.destroys_get())
         {
             bytes_ -= sizes_[id];
             sizes_.erase(id);
         }
-        for (const vgl_index_list_data& d : f.index_lists())
+        for (const vgl_index_list_data& d : f.index_lists_get())
         {
             add(d.resource, std::uint64_t{d.index_count} * d.index_size);
         }
-        for (const vgl_mesh_data& d : f.meshes())
+        for (const vgl_mesh_data& d : f.meshes_get())
         {
             add(d.resource,
                 std::uint64_t{d.vertex_count} * d.vertex_size +
                     std::uint64_t{d.sample_grid} * d.sample_grid * d.sample_size);
         }
-        for (const vgl_texture_data& d : f.textures())
+        for (const vgl_texture_data& d : f.textures_get())
         {
             std::uint64_t size = 0;
             for (std::uint32_t level = 0; level < d.mip_count; ++level)
@@ -102,9 +102,9 @@ public:
             }
             add(d.resource, size);
         }
-        drawn_ = f.draw_list().size();
+        drawn_ = f.draw_list_get().size();
         layered_ = 0;
-        for (const vgl_draw_item& item : f.draw_list())
+        for (const vgl_draw_item& item : f.draw_list_get())
         {
             layered_ += item.layer_count != 0 ? 1 : 0;
         }

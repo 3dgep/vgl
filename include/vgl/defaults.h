@@ -59,23 +59,21 @@ extern "C" {
 /* Thread pool                                                                              */
 /* ---------------------------------------------------------------------------------------- */
 
-/* A fixed set of worker threads that run tasks in the order they were submitted. */
+/** A fixed set of worker threads that run tasks in the order they were submitted. */
 typedef struct vgl_thread_pool vgl_thread_pool;
 
 typedef struct vgl_thread_pool_create_info
 {
     uint32_t struct_size;
-    /* Number of threads. 0 means one less than the hardware threads, and at least one. */
+    /** Number of threads. 0 means one less than the hardware threads, and at least one. */
     uint32_t thread_count;
-    /* Optional. Allocator for the pool and its queue; must be thread-safe. */
+    /** Optional. Allocator for the pool and its queue; must be thread-safe. */
     const vgl_allocator_interface* allocator;
+    VGL_POINTER_PADDING(allocator_padding)
 } vgl_thread_pool_create_info;
 
 /**
  * Creates a thread pool and starts its threads.
- *
- * In a build without exceptions, failing to start a thread ends the process, because the C++
- * runtime reports that only by an exception. With exceptions, the failure is returned.
  *
  * @param info      Optional. Null means all defaults.
  * @param out_pool  Receives the pool.
@@ -125,7 +123,7 @@ VGL_DEFAULTS_API vgl_result vgl_thread_pool_task_interface_get(vgl_thread_pool* 
 /* File reader                                                                              */
 /* ---------------------------------------------------------------------------------------- */
 
-/*
+/**
  * Reads files for the I/O interface. URIs are UTF-8 paths, absolute or relative to the
  * working directory, with an optional "file://" prefix; they are not percent-decoded. A file
  * that does not exist completes with VGL_RESULT_NOT_FOUND, other failures with
@@ -137,13 +135,15 @@ typedef struct vgl_file_reader_create_info
 {
     uint32_t struct_size;
     uint32_t reserved;
-    /*
+    /**
      * Optional. Reads on the pool's threads. Null reads inside vgl_io_interface.read, on the
      * thread that calls into the context.
      */
     vgl_thread_pool* pool;
-    /* Optional. Allocator for the reader and its reads; must be thread-safe with a pool. */
+    VGL_POINTER_PADDING(pool_padding)
+    /** Optional. Allocator for the reader and its reads; must be thread-safe with a pool. */
     const vgl_allocator_interface* allocator;
+    VGL_POINTER_PADDING(allocator_padding)
 } vgl_file_reader_create_info;
 
 /**
@@ -196,12 +196,12 @@ VGL_DEFAULTS_API vgl_result vgl_file_reader_io_interface_get(vgl_file_reader* re
 /* HTTP reader                                                                              */
 /* ---------------------------------------------------------------------------------------- */
 
-/*
+/**
  * Reads packs from a web server for the I/O interface, with HTTP range requests (design
  * document, section 8.6), so that any server, CDN or object store that serves range requests
  * can hold packs. It is built on libcurl, when vgl is built with VGL_DEFAULTS_HTTP; without it,
  * vgl_http_reader_create reports VGL_RESULT_NOT_SUPPORTED. URIs starting with "http://" or
- * "https://" are read over HTTP, others by the file reader the create info names.
+ * "https://" are read over HTTP, others through the fallback interface the create info names.
  *
  * Reads run on one thread of the reader's own, which overlaps them over a few connections per
  * server, and complete from it. A missing file (404 or 410) completes with
@@ -215,7 +215,7 @@ VGL_DEFAULTS_API vgl_result vgl_file_reader_io_interface_get(vgl_file_reader* re
  * On Emscripten, the reader is built on the browser's fetch instead, with VGL_DEFAULTS_HTTP and no
  * library, and needs no thread: fetches start and finish on the main thread, between the page's
  * frames, and reads that arrive on other threads are passed to it. Reads that fail without an
- * answer are tried again, a few times. Without a file reader, URIs that are not HTTP are fetched
+ * answer are tried again, a few times. Without a fallback, URIs that are not HTTP are fetched
  * too, relative to the page's address. The browser chooses the connections and the User-Agent
  * header, and allocates the data delivered.
  */
@@ -224,18 +224,20 @@ typedef struct vgl_http_reader vgl_http_reader;
 typedef struct vgl_http_reader_create_info
 {
     uint32_t struct_size;
-    /* Connections to each server at most. 0 selects 8. Ignored in a browser. */
-    uint32_t max_connections;
-    /* Optional. Allocator for the reader and its reads; must be thread-safe. */
+    /** Connections to each server at most. 0 selects 8. Ignored in a browser. */
+    uint32_t max_connection_count;
+    /** Optional. Allocator for the reader and its reads; must be thread-safe. */
     const vgl_allocator_interface* allocator;
     VGL_POINTER_PADDING(allocator_padding)
-    /* Optional. Reads the URIs that are not HTTP; without it, they complete with
-     * VGL_RESULT_NOT_FOUND, or in a browser are fetched. Must outlive the reader. */
-    vgl_file_reader* files;
-    VGL_POINTER_PADDING(files_padding)
-    /* Seconds a read may take before it fails with VGL_RESULT_IO_ERROR. 0 selects 30. */
+    /** Optional. Reads the URIs that are not HTTP, such as a file reader's interface
+     * (vgl_file_reader_io_interface_get) or a host's own; without it, they complete with
+     * VGL_RESULT_NOT_FOUND, or in a browser are fetched. The table is copied; the object
+     * behind its user_data must outlive the reader. */
+    const vgl_io_interface* fallback;
+    VGL_POINTER_PADDING(fallback_padding)
+    /** Seconds a read may take before it fails with VGL_RESULT_IO_ERROR. 0 selects 30. */
     double timeout;
-    /* Optional. The User-Agent header, copied; null selects "vgl/<version>". Ignored in a
+    /** Optional. The User-Agent header, copied; null selects "vgl/<version>". Ignored in a
      * browser. */
     const char* user_agent;
     VGL_POINTER_PADDING(user_agent_padding)
@@ -249,7 +251,8 @@ typedef struct vgl_http_reader_create_info
  *
  * @retval VGL_RESULT_SUCCESS            The reader was created.
  * @retval VGL_RESULT_INVALID_ARGUMENT   out_reader is null, or info is invalid: the timeout is
- *                                       negative or not finite.
+ *                                       negative or not finite, or the fallback has no read
+ *                                       callback or an unknown version.
  * @retval VGL_RESULT_NOT_SUPPORTED      vgl was built without VGL_DEFAULTS_HTTP, or info has
  *                                       fields from a newer version set.
  * @retval VGL_RESULT_VERSION_MISMATCH   The allocator interface has an unknown version.
@@ -295,7 +298,7 @@ VGL_DEFAULTS_API vgl_result vgl_http_reader_io_interface_get(vgl_http_reader* re
 /* Disk cache                                                                               */
 /* ---------------------------------------------------------------------------------------- */
 
-/*
+/**
  * Keeps what another I/O interface reads from web servers in a directory, so that areas seen
  * once load again without the network, and offline (design document, section 8.6). It wraps
  * the interface: put it between a context and an HTTP reader, or a host's own network layer.
@@ -318,36 +321,37 @@ typedef struct vgl_disk_cache_create_info
 {
     uint32_t struct_size;
     uint32_t reserved;
-    /* The directory, UTF-8; created if missing. Required. */
+    /** The directory, UTF-8; created if missing. Required. */
     const char* directory;
     VGL_POINTER_PADDING(directory_padding)
-    /* The interface whose reads are cached, copied. Required. It must stay valid until the
-     * cache is destroyed and its reads have completed. */
+    /** The interface whose reads are cached. Required. The table is copied; the object behind
+     * its user_data must stay valid until the cache is destroyed and its reads have
+     * completed. */
     const vgl_io_interface* source;
     VGL_POINTER_PADDING(source_padding)
-    /* Bytes the entries may take on disk. 0 selects 1 GiB. */
+    /** Bytes the entries may take on disk. 0 selects 1 GiB. */
     uint64_t budget;
-    /* Optional. Reads and writes the disk on the pool's threads. Null does it in
+    /** Optional. Reads and writes the disk on the pool's threads. Null does it in
      * vgl_io_interface.read and on the thread that completes the source's reads. */
     vgl_thread_pool* pool;
     VGL_POINTER_PADDING(pool_padding)
-    /* Optional. Allocator for the cache and its reads; must be thread-safe. */
+    /** Optional. Allocator for the cache and its reads; must be thread-safe. */
     const vgl_allocator_interface* allocator;
     VGL_POINTER_PADDING(allocator_padding)
 } vgl_disk_cache_create_info;
 
-/* What the cache has done since it was created, and what it holds. */
+/** What the cache has done since it was created, and what it holds. */
 typedef struct vgl_disk_cache_statistics
 {
     uint32_t struct_size;
     uint32_t reserved;
-    uint64_t hits;         /* Reads served from the disk. */
-    uint64_t misses;       /* Reads of shards that went to the source. */
-    uint64_t offline_hits; /* Manifests served from the disk because the source failed. */
-    uint64_t entries;      /* Entries on disk. */
-    uint64_t bytes;        /* Bytes the entries take on disk. */
-    uint64_t budget;       /* Bytes they may take. */
-    uint64_t evictions;    /* Entries removed to keep to the budget. */
+    uint64_t hits;         /**< Reads served from the disk. */
+    uint64_t misses;       /**< Reads of shards that went to the source. */
+    uint64_t offline_hits; /**< Manifests served from the disk because the source failed. */
+    uint64_t entries;      /**< Entries on disk. */
+    uint64_t bytes;        /**< Bytes the entries take on disk. */
+    uint64_t budget;       /**< Bytes they may take. */
+    uint64_t evictions;    /**< Entries removed to keep to the budget. */
 } vgl_disk_cache_statistics;
 
 /**
@@ -405,7 +409,8 @@ VGL_DEFAULTS_API vgl_result vgl_disk_cache_io_interface_get(vgl_disk_cache* cach
  * Gets the cache's statistics.
  *
  * @param cache           The cache.
- * @param out_statistics  Receives them. Set its struct_size first; at least 8.
+ * @param out_statistics  Receives them, an output structure (docs/c-api.md, section 8.4): set
+ *                        its struct_size, at least 8.
  *
  * @retval VGL_RESULT_SUCCESS           The statistics were written.
  * @retval VGL_RESULT_INVALID_ARGUMENT  A pointer is null, or struct_size is below 8.

@@ -285,8 +285,10 @@ extern "C" VGL_API vgl_result vgl_context_ray_query(vgl_context* context,
         }
     }
 
-    const std::uint32_t size = out_hit->struct_size;
+    // The fields that fit, and the size written (docs/c-api.md, section 8.4).
+    const auto size =
+        static_cast<std::uint32_t>(std::min<std::size_t>(out_hit->struct_size, sizeof(h)));
     h.struct_size = size;
-    std::memcpy(out_hit, &h, std::min<std::size_t>(size, sizeof(h)));
+    std::memcpy(out_hit, &h, size);
     return r;
 }

@@ -247,7 +247,10 @@ struct vgl_file_reader
         p->request = request;
         p->uri = uri;
         p->uri_size = uri_size;
-        p->read = {uri, r->offset, r->size};
+        p->read = {};
+        p->read.uri = uri;
+        p->read.offset = r->offset;
+        p->read.size = r->size;
         {
             const std::lock_guard<std::mutex> lock(self->mutex);
             p->next = self->queued;

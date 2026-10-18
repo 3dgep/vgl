@@ -42,10 +42,10 @@ Public C headers are written in C99 and must also compile without warnings as C+
 | `vgl/vgl.h` | Umbrella header. Includes every core header below. |
 | `vgl/base.h` | Export macros, basic types, result codes, version |
 | `vgl/foundation.h` | Allocator, logging, task and I/O interfaces |
-| `vgl/geodesy.h` | Ellipsoids, coordinate conversions, geoid |
-| `vgl/context.h` | Context, layers and packs, update, queries, statistics |
+| `vgl/geodesy.h` | Ellipsoids, coordinate conversions, angle conversions, the Earth's rotation |
+| `vgl/context.h` | Context and packs (elevation, imagery and the geoid), update, views, queries, statistics |
 | `vgl/render.h` | Render interface and visible-set description |
-| `vgl/defaults.h` | Optional thread pool and filesystem reader |
+| `vgl/defaults.h` | Optional thread pool, file reader, HTTP reader and disk cache |
 | `vgl/gl.h` | OpenGL / OpenGL ES backend |
 | `vgl/d3d11.h` | Direct3D 11 backend |
 | `vgl/ogre.hpp` | Ogre backend (C++ only, because Ogre is a C++ API) |
@@ -344,7 +344,7 @@ Structures that are fixed by nature, such as `vgl_dvec3`, have no `struct_size` 
 
 ### 8.4 Output structures
 
-Structures the library fills in, such as statistics, follow the same layout. The caller sets `struct_size`, and the library writes only the fields that fit within it.
+Structures the library fills in, such as statistics, follow the same layout. The caller sets `struct_size`, at least 8, and the library writes only the fields that fit within it, then sets `struct_size` to the number of bytes it wrote: a caller compiled against later headers than the library sees which of its fields the library filled. Fields beyond that keep what the caller put there. A size below 8 is `VGL_RESULT_INVALID_ARGUMENT`.
 
 ---
 
@@ -434,6 +434,7 @@ The library never creates threads (NFR-02). Every function documents one of thes
 | **Free-threaded** | May be called from any thread, concurrently with any other call. |
 | **Context-synchronized** | Calls on the same context, or on any object created from it, must not overlap. The host may make them from any thread, one at a time. Different contexts are independent. This is the default. |
 | **Render thread** | Context-synchronized, and must also be called on the thread that owns the host's graphics device or context. Applies to backend functions and to GPU uploads. |
+| **Externally synchronized** | For objects that belong to no context, such as the defaults module's: calls on the same object must not overlap. Different objects are independent. Used for their destroy functions. |
 
 Callbacks document where they are invoked:
 
@@ -454,7 +455,7 @@ I/O and background work are asynchronous (design document, section 7.5). They fo
 1. The library starts an operation by calling a host callback, passing an opaque request handle (for example `vgl_io_request*`) and a description of the work.
 2. The host completes the request exactly once, by calling the matching `complete` function (for example `vgl_io_request_complete`) with a result code and any output data. Completion functions are free-threaded, may be called from inside the starting callback, and only queue the result. Their effects become visible at the next `vgl_context_update`.
 3. The library may cancel a request through an optional `cancel` callback. The host must still complete a cancelled request, either normally or with `VGL_RESULT_CANCELLED`.
-4. A request handle is valid from the start callback until the host's completion call returns.
+4. A request handle is valid from the start callback until the host's completion call returns. Every completion call with a non-null request consumes it, whatever it returns: the request must not be completed again. Its `result` is `VGL_RESULT_SUCCESS` or an error; the positive statuses mean nothing for a read.
 5. A host may create a request itself with `vgl_io_request_create`, to pass a read on to another I/O interface: its completion calls the creator's callback, on the completing thread, instead of reaching a context, and frees the request. Interfaces chain this way, as the defaults module's disk cache does.
 
 A context may be destroyed while requests are outstanding. It asks the host to cancel them through the `cancel` callback, if there is one, and the host still completes each of them, now or later; the library then discards the completion and frees the request. Neither side waits for the other, except that destroying a context waits for tasks that are running on host threads. The interfaces' `destroy` callbacks are called during context destruction, possibly before every request is completed, so a host that frees its I/O state there must first complete what it still holds. The details of each operation are specified with the foundation module (`vgl/foundation.h`).
@@ -496,7 +497,7 @@ Exported functions are never removed within a major version.
 
 ### 14.3 Symbols and calling convention
 
-- Exported functions are marked `VGL_API` and all start with `vgl_`. No other symbols are exported.
+- Exported functions all start with `vgl_`, and are marked with their library's export macro: `VGL_API` for the core, `VGL_DEFAULTS_API` for the defaults module, `VGL_GL_API` and `VGL_D3D11_API` for the backends. No other symbols are exported. Each library defines its own `<LIBRARY>_BUILDING` while it is built, so that the macro exports its symbols there and imports them elsewhere.
 - When vgl is built as a shared library, consumers define `VGL_SHARED`. The CMake package and the pkg-config file do this automatically.
 - Functions and callbacks use the platform's default C calling convention.
 

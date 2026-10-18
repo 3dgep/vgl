@@ -149,9 +149,18 @@ extern "C" VGL_API vgl_result vgl_io_request_complete(vgl_io_request* request,
                                                       const void* data,
                                                       std::size_t size)
 {
-    if (request == nullptr || (data == nullptr && size != 0))
+    if (request == nullptr)
     {
         return VGL_RESULT_INVALID_ARGUMENT;
+    }
+    // A completion the library cannot use still consumes the request: it fails.
+    vgl_result returned = VGL_RESULT_SUCCESS;
+    if ((data == nullptr && size != 0) || result > 0)
+    {
+        result = VGL_RESULT_INVALID_ARGUMENT;
+        returned = VGL_RESULT_INVALID_ARGUMENT;
+        data = nullptr;
+        size = 0;
     }
     if (request->complete != nullptr)
     {
@@ -162,10 +171,10 @@ extern "C" VGL_API vgl_result vgl_io_request_complete(vgl_io_request* request,
                           result == VGL_RESULT_SUCCESS ? size : 0);
         const vgl::internal::allocator memory = request->memory;
         memory.destroy(request);
-        return VGL_RESULT_SUCCESS;
+        return returned;
     }
     vgl::internal::async_core* core = request->core;
-    vgl_result r = VGL_RESULT_SUCCESS;
+    vgl_result r = returned;
     request->result = result;
     if (result == VGL_RESULT_SUCCESS)
     {

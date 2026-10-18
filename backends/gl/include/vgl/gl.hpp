@@ -10,6 +10,8 @@
 #include <vgl/context.hpp>
 #include <vgl/gl.h>
 
+#include <cstdint>
+#include <span>
 #include <utility>
 
 namespace vgl
@@ -64,24 +66,24 @@ public:
         return static_cast<result>(vgl_gl_backend_draw(handle_, info));
     }
 
-    // Sets the stars it draws when asked to (vgl_gl_backend_stars_set).
+    // Sets the stars it draws with VGL_DRAW_FEATURE_STARS (vgl_gl_backend_stars_set).
     [[nodiscard]] result stars_set(std::span<const vgl_star> stars) noexcept
     {
         return static_cast<result>(vgl_gl_backend_stars_set(
             handle_, stars.data(), static_cast<std::uint32_t>(stars.size())));
     }
 
-    // Sets the clouds it draws when asked to (vgl_gl_backend_clouds_set).
+    // Sets the clouds it draws with VGL_DRAW_FEATURE_CLOUDS (vgl_gl_backend_clouds_set).
     [[nodiscard]] result
     clouds_set(const std::uint8_t* coverage, std::uint32_t width, std::uint32_t height) noexcept
     {
         return static_cast<result>(vgl_gl_backend_clouds_set(handle_, coverage, width, height));
     }
 
-    // Recovers from a lost OpenGL context, on the new one.
-    [[nodiscard]] result context_lost() noexcept
+    // Recovers from a lost OpenGL context, on the new one (vgl_gl_backend_device_reset).
+    [[nodiscard]] result device_reset() noexcept
     {
-        return static_cast<result>(vgl_gl_backend_reset(handle_));
+        return static_cast<result>(vgl_gl_backend_device_reset(handle_));
     }
 
 private:

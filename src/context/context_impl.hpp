@@ -402,8 +402,10 @@ struct vgl_context
         : memory(a), decompressor(a), outstanding(a), packs(a), pending(a), selected(a),
           prefetched(a), wanted(a), boxes(a), meshes(a), resources(a), index_lists(a), drawn(a),
           frame_destroys(a), frame_index_lists(a), frame_meshes(a), frame_textures(a),
-          frame_draw(a), frame_layers(a), frame_offered(a), frame_selected(a), frame_drawn(a),
-          frame_tiles(a), frame_ready(a), frame_counts(a), frame_owner(a), frame_candidates(a)
+          frame_draw(a), frame_layers(a), frame_index_lists_strided(a), frame_meshes_strided(a),
+          frame_textures_strided(a), frame_layers_strided(a), frame_offered(a), frame_selected(a),
+          frame_drawn(a), frame_tiles(a), frame_ready(a), frame_counts(a), frame_owner(a),
+          frame_candidates(a)
     {
     }
 
@@ -476,6 +478,16 @@ struct vgl_context
     std::uint32_t frame_draw_count = 0;
     std::uint32_t frame_draw_stride = 0;
     vgl::internal::vector<vgl_draw_layer> frame_layers;
+    // The lists at the consumer's strides, where they differ from this header's sizes
+    // (docs/render-interface.md, section 5); empty and unused where they do not.
+    vgl::internal::vector<std::byte> frame_index_lists_strided;
+    vgl::internal::vector<std::byte> frame_meshes_strided;
+    vgl::internal::vector<std::byte> frame_textures_strided;
+    vgl::internal::vector<std::byte> frame_layers_strided;
+    std::uint32_t frame_index_list_stride = sizeof(vgl_index_list_data);
+    std::uint32_t frame_mesh_stride = sizeof(vgl_mesh_data);
+    std::uint32_t frame_texture_stride = sizeof(vgl_texture_data);
+    std::uint32_t frame_layer_stride = sizeof(vgl_draw_layer);
     vgl::internal::vector<std::uint64_t> frame_offered;
     // Scratch for deciding what to draw.
     vgl::internal::u64_map<std::uint32_t> frame_selected; // Selected tile key to index.

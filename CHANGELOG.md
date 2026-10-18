@@ -10,6 +10,13 @@ The pack format has its own version number, independent of the library version.
 
 ### Added
 
+- `vgl_degrees_to_radians` and `vgl_radians_to_degrees`, for bindings that cannot use the
+  conversion macros.
+- The thread-safety category Externally synchronized (C API conventions, section 11), and the
+  export macros of each library (section 14.3).
+- The defaults module starts its threads with the platform's functions instead of
+  `std::thread`, so that a thread that cannot start fails `vgl_thread_pool_create` with
+  `VGL_RESULT_OUT_OF_MEMORY` even in a build without exceptions.
 - Repository setup: license, README, contribution guidelines, issue templates, clang-format and
   clang-tidy configuration, CMake build skeleton, and GitHub Actions CI for Windows and Linux.
 - C API conventions specification (`docs/c-api.md`).
@@ -379,6 +386,44 @@ The pack format has its own version number, independent of the library version.
   The OpenGL backend already did both.
 - **Breaking:** the C++ wrapper for `vgl/base.h` moved from `vgl/vgl.hpp` to `vgl/base.hpp`.
   `vgl/vgl.hpp` now includes every core wrapper header.
+- **Breaking:** the API review before version 1 changed the binary layout of these structures:
+  `vgl_io_read`, `vgl_context_create_info`, `vgl_pack_create_info`,
+  `vgl_thread_pool_create_info` and `vgl_file_reader_create_info` have padding after their
+  pointers (C API conventions, section 6.3), so that they are the same on 32- and 64-bit
+  platforms; `vgl_frame_begin_info` has a stride for every list (`draw_item_size`,
+  `draw_layer_size`, `index_list_data_size`, `mesh_data_size`, `texture_data_size`) before
+  `upload_budget`; and `vgl_context_statistics` groups the texture counts with the other work
+  and the drawn vertices and triangles with the last frame. Hosts rebuild against the new headers.
+- **Breaking:** the draw settings of the OpenGL and Direct3D 11 backends and of the Ogre globe
+  take the features to draw as `vgl_draw_features` (`VGL_DRAW_FEATURE_SEA_SURFACE`,
+  `ATMOSPHERE`, `STARS`, `CLOUDS` and `CONTOURS`) and the debug views as `vgl_debug_views`
+  (`VGL_DEBUG_VIEW_WIREFRAME`, `LEVEL_COLORS`, `IMAGERY_SOURCE` and `HEIGHT_COLORS`), both
+  from `vgl/render.h`, instead of a boolean per feature and each backend's own debug flags.
+  `sidereal_angle` is now `earth_rotation_angle`, and contours are a feature rather than a debug
+  view. The backends' limits are shared constants (`VGL_STAR_COUNT_MAX`,
+  `VGL_CLOUD_IMAGE_WIDTH_MAX` and the others), and unknown bits fail with
+  `VGL_RESULT_INVALID_ARGUMENT`.
+- **Breaking:** `vgl_gl_backend_reset` and `vgl_d3d11_backend_reset` are now
+  `vgl_gl_backend_device_reset` and `vgl_d3d11_backend_device_reset`, and the Ogre globe's
+  `resources_reset` is `device_reset`.
+- **Breaking:** `vgl_http_reader_create_info` reads URIs that are not HTTP through any
+  `vgl_io_interface` (`fallback`), instead of only a file reader (`files`), and
+  `max_connections` is now `max_connection_count`.
+- **Breaking:** an I/O request completed with null data and a non-zero size, or with a positive
+  result, now fails with `VGL_RESULT_INVALID_ARGUMENT`, and is still consumed. Height and ray
+  queries leave their outputs unchanged on errors, and report a read that could not start for
+  lack of memory as `VGL_RESULT_NOT_READY`. Output structures (`vgl_view`, `vgl_ray_hit`,
+  `vgl_context_statistics`) need a `struct_size` of at least 8, which the library sets to the
+  bytes it wrote (C API conventions, section 8.4).
+- **Breaking:** C++ wrappers. The frame's lists are `destroys_get`, `index_lists_get`,
+  `meshes_get`, `textures_get`, `draw_list_get` and `draw_layers_get`, and `frame::begin`
+  refuses strides other than its header's. `vgl::ray_hit` is now `vgl::ray_query_result`,
+  holding a `vgl_ray_hit` and the status. `vgl::texture_format` and `vgl::depth_convention`
+  are scoped enumerations, and `context::texture_formats_set` takes the former.
+  `vgl::version_get` returns the version directly. `vgl::io_interface` and
+  `vgl::task_interface` have an `on_destroy` hook. The Ogre globe's `create` returns
+  `vgl::expected<globe*>`, its `settings_set` validates and returns a result, and its
+  `stars_set` takes a span. `http_reader::create` takes any I/O interface or a file reader.
 - The allocator interface entry `free` in the C API conventions is now `deallocate`.
 - The core modules build into an object library, `vgl_objects`, from which `vgl` is made.
 - On Linux, `vgl` links the math library, and a static `vgl` also the C++ runtime, so C hosts

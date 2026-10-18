@@ -66,25 +66,25 @@ public:
         return static_cast<result>(vgl_d3d11_backend_draw(handle_, info));
     }
 
-    // Sets the stars it draws when asked to (vgl_d3d11_backend_stars_set).
+    // Sets the stars it draws with VGL_DRAW_FEATURE_STARS (vgl_d3d11_backend_stars_set).
     [[nodiscard]] result stars_set(std::span<const vgl_star> stars) noexcept
     {
         return static_cast<result>(vgl_d3d11_backend_stars_set(
             handle_, stars.data(), static_cast<std::uint32_t>(stars.size())));
     }
 
-    // Sets the clouds it draws when asked to (vgl_d3d11_backend_clouds_set).
+    // Sets the clouds it draws with VGL_DRAW_FEATURE_CLOUDS (vgl_d3d11_backend_clouds_set).
     [[nodiscard]] result
     clouds_set(const std::uint8_t* coverage, std::uint32_t width, std::uint32_t height) noexcept
     {
         return static_cast<result>(vgl_d3d11_backend_clouds_set(handle_, coverage, width, height));
     }
 
-    // Recovers from a removed device, on the new one.
-    [[nodiscard]] result device_lost(ID3D11Device* device,
-                                     ID3D11DeviceContext* device_context) noexcept
+    // Recovers from a removed device, on the new one (vgl_d3d11_backend_device_reset).
+    [[nodiscard]] result device_reset(ID3D11Device* device,
+                                      ID3D11DeviceContext* device_context) noexcept
     {
-        return static_cast<result>(vgl_d3d11_backend_reset(handle_, device, device_context));
+        return static_cast<result>(vgl_d3d11_backend_device_reset(handle_, device, device_context));
     }
 
 private:

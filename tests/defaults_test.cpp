@@ -638,7 +638,10 @@ read_through(const vgl_io_interface& io, const char* uri, std::uint64_t offset, 
     {
         return r;
     }
-    const vgl_io_read read{uri, offset, size};
+    vgl_io_read read{};
+    read.uri = uri;
+    read.offset = offset;
+    read.size = size;
     io.read(io.user_data, request, &read);
     while (box.done.load() == 0)
     {

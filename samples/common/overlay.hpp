@@ -49,9 +49,10 @@ struct debug_settings
     float max_error = 2.0f; // Screen-space error in pixels.
 };
 
-// The debug views' flags, which the OpenGL and Direct3D 11 backends share (vgl_gl_debug_flag,
-// vgl_d3d11_debug_flag).
-std::uint32_t debug_flags(const debug_settings& d);
+// The settings as every backend takes them (vgl/render.h): the debug views, and the features
+// drawn besides the terrain.
+vgl_debug_views debug_views(const debug_settings& d);
+vgl_draw_features draw_features(const debug_settings& d);
 
 // The direction towards the sun along the ECEF axes for the settings' time and day: over the
 // longitude where it is noon then, and the latitude of its declination that day. It leaves out

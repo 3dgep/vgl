@@ -57,17 +57,17 @@ extern "C" {
 
 typedef struct vgl_d3d11_backend vgl_d3d11_backend;
 
-/* Creation parameters of a backend. Zero-initialize, set struct_size, then fill in. */
+/** Creation parameters of a backend. Zero-initialize, set struct_size, then fill in. */
 typedef struct vgl_d3d11_backend_create_info
 {
     uint32_t struct_size;
-    /* How depth is written and compared (vgl/render.h). The default is logarithmic; the
+    /** How depth is written and compared (vgl/render.h). The default is logarithmic; the
      * reversed-Z convention is the natural one on Direct3D 11. */
     vgl_depth_convention depth_convention;
-    /* Required. The device, at feature level 11_0 or later. The backend holds a reference. */
+    /** Required. The device, at feature level 11_0 or later. The backend holds a reference. */
     ID3D11Device* device;
     VGL_POINTER_PADDING(device_padding)
-    /* Required. The device context to draw with, usually the immediate one. The backend holds a
+    /** Required. The device context to draw with, usually the immediate one. The backend holds a
      * reference. */
     ID3D11DeviceContext* device_context;
     VGL_POINTER_PADDING(device_context_padding)
@@ -94,7 +94,7 @@ typedef struct vgl_d3d11_backend_create_info
  * @retval VGL_RESULT_OUT_OF_MEMORY     Allocation failed.
  *
  * @par Thread safety
- * The thread that owns the device context.
+ * Render thread, on the thread that owns the device context.
  */
 VGL_D3D11_API vgl_result vgl_d3d11_backend_create(vgl_context* context,
                                                   const vgl_d3d11_backend_create_info* info,
@@ -110,74 +110,50 @@ VGL_D3D11_API vgl_result vgl_d3d11_backend_create(vgl_context* context,
  * @retval VGL_RESULT_SUCCESS  Always.
  *
  * @par Thread safety
- * The thread that owns the device context, before the context is destroyed.
+ * Render thread, on the thread that owns the device context, before the context is destroyed.
  */
 VGL_D3D11_API vgl_result vgl_d3d11_backend_destroy(vgl_d3d11_backend* backend);
 
-/* Parameters of a draw. Zero-initialize, set struct_size, then fill in. */
+/** Parameters of a draw. Zero-initialize, set struct_size, then fill in. */
 typedef struct vgl_d3d11_draw_info
 {
     uint32_t struct_size;
-    /* VGL_TRUE when the projection mirrors the image, as a projection with a flipped y axis
+    /** VGL_TRUE when the projection mirrors the image, as a projection with a flipped y axis
      * does. Triangles then face the other way, and the backend culls the other side. */
     vgl_bool mirrored;
-    /* Optional. The camera to draw from, when it differs from the view of the last update
+    /** Optional. The camera to draw from, when it differs from the view of the last update
      * (vgl_frame_begin_info.view_matrix). Null uses the context's view. */
     const vgl_dmat4* view_matrix;
     VGL_POINTER_PADDING(view_matrix_padding)
-    /* Optional. From camera space to clip space, with depth from 0 to 1. Null uses the
+    /** Optional. From camera space to clip space, with depth from 0 to 1. Null uses the
      * context's view. */
     const vgl_dmat4* projection_matrix;
     VGL_POINTER_PADDING(projection_matrix_padding)
-    /* Direction towards the sun, along the ECEF axes; it need not be normalized. Zero lights
+    /** Direction towards the sun, along the ECEF axes; it need not be normalized. Zero lights
      * the terrain from the camera. */
     vgl_dvec3 sun_direction;
-    /* The logarithmic convention's far distance, in metres: the camera distance that maps to
+    /** The logarithmic convention's far distance, in metres: the camera distance that maps to
      * depth 1. 0 selects VGL_LOGARITHMIC_DEPTH_FAR_DEFAULT. Ignored by the other conventions. */
     double logarithmic_far;
-    /* Bytes of resources to upload in this draw (vgl_frame_begin_info.upload_budget). 0
-     * selects 16 MiB. */
+    /** Bytes of resources to upload in this draw (vgl_frame_begin_info.upload_budget). 0
+     * selects VGL_UPLOAD_BUDGET_DEFAULT. */
     uint64_t upload_budget;
-    /* Debug views: a combination of vgl_d3d11_debug_flag values. 0 draws normally. */
-    uint32_t debug_flags;
-    uint32_t reserved;
-    /* Height between contour lines (VGL_D3D11_DEBUG_FLAG_CONTOURS), in metres. 0 selects 500. */
+    /** What to draw besides the terrain and its imagery: vgl_draw_feature values (vgl/render.h).
+     * 0 draws the terrain alone. */
+    vgl_draw_features features;
+    /** Views for inspecting level of detail and loading: vgl_debug_view values (vgl/render.h).
+     * 0 draws normally. */
+    vgl_debug_views debug_views;
+    /** The Earth rotation angle in radians (vgl_earth_rotation_angle_get), which turns the
+     * stars' celestial frame into ECEF, for VGL_DRAW_FEATURE_STARS. */
+    double earth_rotation_angle;
+    /** Height between contour lines (VGL_DRAW_FEATURE_CONTOURS), in metres. 0 selects
+     * VGL_CONTOUR_INTERVAL_DEFAULT. */
     double contour_interval;
-    /* VGL_TRUE draws a sea surface: terrain below mean sea level is raised to it and shaded as
-     * water. It needs a geoid pack (vgl_draw_item.has_geoid); without one, mean sea level is the
-     * ellipsoid. */
-    vgl_bool sea_surface;
-    uint32_t reserved2;
-    /* VGL_TRUE draws the atmosphere, as vgl_gl_draw_info.atmosphere describes: the sky where
-     * nothing was drawn before it, at the far depth, blended over the render target there, and
-     * the haze and the sun's colour on the terrain. */
-    vgl_bool atmosphere;
-    uint32_t reserved3;
-    /* VGL_TRUE draws the stars set with vgl_d3d11_backend_stars_set, behind the sky, as
-     * vgl_gl_draw_info.stars describes. */
-    vgl_bool stars;
-    uint32_t reserved4;
-    /* The Earth rotation angle in radians (vgl_earth_rotation_angle_get). */
-    double sidereal_angle;
-    /* VGL_TRUE draws, with the atmosphere, the clouds set with vgl_d3d11_backend_clouds_set,
-     * as vgl_gl_draw_info.clouds describes. */
-    vgl_bool clouds;
-    uint32_t reserved5;
-    /* The cloud shell's height above the ellipsoid, in metres. 0 selects 6,000. */
+    /** The cloud shell's height above the ellipsoid (VGL_DRAW_FEATURE_CLOUDS), in metres. 0
+     * selects VGL_CLOUD_HEIGHT_DEFAULT. */
     double cloud_height;
 } vgl_d3d11_draw_info;
-
-/* Debug views of vgl_d3d11_draw_info.debug_flags, the same as the OpenGL backend's
- * (vgl_gl_debug_flag in vgl/gl.h, which describes them). */
-typedef enum vgl_d3d11_debug_flag
-{
-    VGL_D3D11_DEBUG_FLAG_WIREFRAME = 0x1,
-    VGL_D3D11_DEBUG_FLAG_LEVEL_COLORS = 0x2,
-    VGL_D3D11_DEBUG_FLAG_IMAGERY_SOURCE = 0x4,
-    VGL_D3D11_DEBUG_FLAG_HEIGHT_COLORS = 0x8,
-    VGL_D3D11_DEBUG_FLAG_CONTOURS = 0x10,
-    VGL_D3D11_DEBUG_FLAG_MAX_ENUM = 0x7FFFFFFF
-} vgl_d3d11_debug_flag;
 
 /**
  * Draws the globe into the device context's bound render target: takes a frame from the
@@ -193,22 +169,25 @@ typedef enum vgl_d3d11_debug_flag
  *
  * @retval VGL_RESULT_SUCCESS            The globe was drawn.
  * @retval VGL_RESULT_INVALID_ARGUMENT   backend is null, or info is invalid: a matrix or
- *                                       direction element is not finite, or the far distance is
- *                                       negative.
+ *                                       direction element is not finite, features or
+ *                                       debug_views has unknown bits, or earth_rotation_angle,
+ *                                       logarithmic_far, contour_interval or cloud_height is
+ *                                       not finite or, but for the angle, negative.
  * @retval VGL_RESULT_NOT_SUPPORTED      info has fields from a newer version set.
  * @retval VGL_RESULT_INVALID_OPERATION  A frame of the context is open already, or the last
- *                                       vgl_d3d11_backend_reset failed.
+ *                                       vgl_d3d11_backend_device_reset failed.
+ * @retval VGL_RESULT_OUT_OF_MEMORY      The frame could not be begun (vgl_context_frame_begin).
  *
  * @par Thread safety
- * The thread that owns the device context.
+ * Render thread, on the thread that owns the device context.
  */
 VGL_D3D11_API vgl_result vgl_d3d11_backend_draw(vgl_d3d11_backend* backend,
                                                 const vgl_d3d11_draw_info* info);
 
 /**
- * Sets the clouds the backend draws when vgl_d3d11_draw_info.clouds asks for them, as
+ * Sets the clouds the backend draws with VGL_DRAW_FEATURE_CLOUDS, as
  * vgl_gl_backend_clouds_set describes: a coverage image of the whole globe, copied with its mip
- * levels, and kept for vgl_d3d11_backend_reset.
+ * levels, and kept for vgl_d3d11_backend_device_reset.
  *
  * @param backend   The backend.
  * @param coverage  The image, width x height bytes, rows from the north; or null with width
@@ -231,16 +210,17 @@ VGL_D3D11_API vgl_result vgl_d3d11_backend_clouds_set(vgl_d3d11_backend* backend
                                                       uint32_t height);
 
 /**
- * Sets the stars the backend draws when vgl_d3d11_draw_info.stars asks for them, replacing those
- * set before, as vgl_gl_backend_stars_set does: copied, kept for vgl_d3d11_backend_reset, and
- * drawn as small quads. vgl ships no stars.
+ * Sets the stars the backend draws with VGL_DRAW_FEATURE_STARS, replacing those
+ * set before, as vgl_gl_backend_stars_set does: copied, kept for vgl_d3d11_backend_device_reset,
+ * and drawn as small quads. vgl ships no stars.
  *
  * @param backend     The backend.
  * @param stars       The stars, or null with star_count 0 to remove them.
- * @param star_count  How many, at most 400,000.
+ * @param star_count  How many, at most VGL_STAR_COUNT_MAX.
  *
  * @retval VGL_RESULT_SUCCESS           The stars were set.
- * @retval VGL_RESULT_INVALID_ARGUMENT  backend is null, stars is null with stars, there are
+ * @retval VGL_RESULT_INVALID_ARGUMENT  backend is null, stars is null with a non-zero
+ *                                      star_count, there are
  *                                      too many, or a star is invalid (vgl_gl_backend_stars_set).
  * @retval VGL_RESULT_OUT_OF_MEMORY     The copy could not be allocated; the stars set before
  *                                      stay.
@@ -269,11 +249,11 @@ VGL_D3D11_API vgl_result vgl_d3d11_backend_stars_set(vgl_d3d11_backend* backend,
  * @retval VGL_RESULT_BACKEND_ERROR     Direct3D failed to create a shader or state.
  *
  * @par Thread safety
- * The thread that owns the new device context.
+ * Render thread, on the thread that owns the new device context.
  */
-VGL_D3D11_API vgl_result vgl_d3d11_backend_reset(vgl_d3d11_backend* backend,
-                                                 ID3D11Device* device,
-                                                 ID3D11DeviceContext* device_context);
+VGL_D3D11_API vgl_result vgl_d3d11_backend_device_reset(vgl_d3d11_backend* backend,
+                                                        ID3D11Device* device,
+                                                        ID3D11DeviceContext* device_context);
 
 #ifdef __cplusplus
 }

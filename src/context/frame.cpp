@@ -34,7 +34,7 @@ namespace vgl::internal
 namespace
 {
 
-constexpr std::uint64_t default_upload_budget = 16ull * 1024 * 1024;
+constexpr std::uint64_t default_upload_budget = VGL_UPLOAD_BUDGET_DEFAULT;
 constexpr std::uint32_t none = 0xFFFFFFFFu;
 
 bool is_live(const gpu_resource* r, gpu_resource::state s) noexcept
@@ -552,6 +552,38 @@ bool write_layers(vgl_context& ctx, const tile_id& t, vgl_draw_item& item) noexc
     return true;
 }
 
+// Copies a frame's list to the consumer's stride, where it differs from this header's size
+// (docs/render-interface.md, section 5): each item's bytes, then zeros for the fields of a later
+// minor version, which this one does not know.
+template <typename T>
+bool restride(const vector<T>& items, std::uint32_t stride, vector<std::byte>& out) noexcept
+{
+    out.clear();
+    if (stride == sizeof(T))
+    {
+        return true;
+    }
+    if (!out.resize(std::size_t{stride} * items.size()))
+    {
+        return false;
+    }
+    for (std::size_t k = 0; k < items.size(); ++k)
+    {
+        std::memcpy(
+            out.data() + k * stride, &items.data()[k], std::min<std::size_t>(stride, sizeof(T)));
+    }
+    return true;
+}
+
+// A list as the consumer reads it: at its own stride if it asked for one.
+template <typename T>
+const T* list_at_stride(const vector<T>& items,
+                        std::uint32_t stride,
+                        const vector<std::byte>& strided) noexcept
+{
+    return stride == sizeof(T) ? items.data() : reinterpret_cast<const T*>(strided.data());
+}
+
 // Step 5.
 bool write_draw_items(vgl_context& ctx, const dmat4& view, const dvec3& eye) noexcept
 {
@@ -673,9 +705,14 @@ extern "C" VGL_API vgl_result vgl_context_frame_begin(vgl_context* context,
         }
         std::memcpy(&settings, info, sizeof(settings));
     }
-    if (settings.draw_item_size != 0 && settings.draw_item_size < offsetof(vgl_draw_item, centre))
+    // Each stride is at least the size in this header: earlier versions have no smaller ones.
+    if ((settings.draw_item_size != 0 && settings.draw_item_size < sizeof(vgl_draw_item)) ||
+        (settings.draw_layer_size != 0 && settings.draw_layer_size < sizeof(vgl_draw_layer)) ||
+        (settings.index_list_data_size != 0 &&
+         settings.index_list_data_size < sizeof(vgl_index_list_data)) ||
+        (settings.mesh_data_size != 0 && settings.mesh_data_size < sizeof(vgl_mesh_data)) ||
+        (settings.texture_data_size != 0 && settings.texture_data_size < sizeof(vgl_texture_data)))
     {
-        // Too small for any version of the draw item.
         return VGL_RESULT_INVALID_ARGUMENT;
     }
     dmat4 view = ctx->view.view_matrix;
@@ -703,6 +740,15 @@ extern "C" VGL_API vgl_result vgl_context_frame_begin(vgl_context* context,
     ctx->frame_draw_count = 0;
     ctx->frame_draw_stride =
         settings.draw_item_size == 0 ? sizeof(vgl_draw_item) : settings.draw_item_size;
+    ctx->frame_layer_stride =
+        settings.draw_layer_size == 0 ? sizeof(vgl_draw_layer) : settings.draw_layer_size;
+    ctx->frame_index_list_stride = settings.index_list_data_size == 0
+                                       ? sizeof(vgl_index_list_data)
+                                       : settings.index_list_data_size;
+    ctx->frame_mesh_stride =
+        settings.mesh_data_size == 0 ? sizeof(vgl_mesh_data) : settings.mesh_data_size;
+    ctx->frame_texture_stride =
+        settings.texture_data_size == 0 ? sizeof(vgl_texture_data) : settings.texture_data_size;
 
     promote(*ctx);
     mark_wanted(*ctx);
@@ -721,7 +767,12 @@ extern "C" VGL_API vgl_result vgl_context_frame_begin(vgl_context* context,
     }
     mark_drawn(*ctx);
     choose_destroys(*ctx);
-    if (!write_draw_items(*ctx, view, eye))
+    if (!write_draw_items(*ctx, view, eye) ||
+        !restride(
+            ctx->frame_index_lists, ctx->frame_index_list_stride, ctx->frame_index_lists_strided) ||
+        !restride(ctx->frame_meshes, ctx->frame_mesh_stride, ctx->frame_meshes_strided) ||
+        !restride(ctx->frame_textures, ctx->frame_texture_stride, ctx->frame_textures_strided) ||
+        !restride(ctx->frame_layers, ctx->frame_layer_stride, ctx->frame_layers_strided))
     {
         // Undo the offers, so that nothing is half delivered.
         for (const std::uint64_t id : ctx->frame_offered)
@@ -774,7 +825,8 @@ extern "C" VGL_API vgl_result vgl_frame_index_lists_get(const vgl_frame* frame,
         return VGL_RESULT_INVALID_ARGUMENT;
     }
     const vgl_context& ctx = *frame->context;
-    *out_index_lists = ctx.frame_index_lists.data();
+    *out_index_lists = list_at_stride(
+        ctx.frame_index_lists, ctx.frame_index_list_stride, ctx.frame_index_lists_strided);
     *out_count = static_cast<std::uint32_t>(ctx.frame_index_lists.size());
     return VGL_RESULT_SUCCESS;
 }
@@ -788,7 +840,7 @@ extern "C" VGL_API vgl_result vgl_frame_meshes_get(const vgl_frame* frame,
         return VGL_RESULT_INVALID_ARGUMENT;
     }
     const vgl_context& ctx = *frame->context;
-    *out_meshes = ctx.frame_meshes.data();
+    *out_meshes = list_at_stride(ctx.frame_meshes, ctx.frame_mesh_stride, ctx.frame_meshes_strided);
     *out_count = static_cast<std::uint32_t>(ctx.frame_meshes.size());
     return VGL_RESULT_SUCCESS;
 }
@@ -802,7 +854,8 @@ extern "C" VGL_API vgl_result vgl_frame_textures_get(const vgl_frame* frame,
         return VGL_RESULT_INVALID_ARGUMENT;
     }
     const vgl_context& ctx = *frame->context;
-    *out_textures = ctx.frame_textures.data();
+    *out_textures =
+        list_at_stride(ctx.frame_textures, ctx.frame_texture_stride, ctx.frame_textures_strided);
     *out_count = static_cast<std::uint32_t>(ctx.frame_textures.size());
     return VGL_RESULT_SUCCESS;
 }
@@ -846,7 +899,8 @@ extern "C" VGL_API vgl_result vgl_frame_draw_layers_get(const vgl_frame* frame,
         return VGL_RESULT_INVALID_ARGUMENT;
     }
     const vgl_context& ctx = *frame->context;
-    *out_layers = ctx.frame_layers.data();
+    *out_layers =
+        list_at_stride(ctx.frame_layers, ctx.frame_layer_stride, ctx.frame_layers_strided);
     *out_count = static_cast<std::uint32_t>(ctx.frame_layers.size());
     return VGL_RESULT_SUCCESS;
 }

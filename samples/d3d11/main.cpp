@@ -343,14 +343,11 @@ vgl::result draw(vgl::d3d11_backend& backend, const scene& s, int width, int hei
     {
         info.sun_direction = sample::sun_direction(s.debug);
     }
-    info.debug_flags = sample::debug_flags(s.debug);
+    info.debug_views = sample::debug_views(s.debug);
+    info.features = sample::draw_features(s.debug);
     info.contour_interval = s.debug.contour_interval;
-    info.sea_surface = s.debug.sea ? VGL_TRUE : VGL_FALSE;
-    info.atmosphere = s.debug.atmosphere ? VGL_TRUE : VGL_FALSE;
-    info.stars = s.debug.stars ? VGL_TRUE : VGL_FALSE;
-    info.clouds = s.debug.clouds ? VGL_TRUE : VGL_FALSE;
-    info.sidereal_angle =
-        sample::sidereal_angle(s.debug.time_of_day, s.debug.day_of_year, s.debug.year);
+    info.earth_rotation_angle =
+        sample::earth_rotation_angle(s.debug.time_of_day, s.debug.day_of_year, s.debug.year);
     return backend.draw(&info);
 }
 
@@ -583,8 +580,8 @@ int run_check(const options& o, const gpu& g, vgl::context& ctx)
 
         // After a reset, as after a removed device, the backend draws the same view again once
         // its resources are uploaded anew.
-        expect(backend->device_lost(g.device.get(), g.dc.get()) == vgl::result::success,
-               std::string("vgl_d3d11_backend_reset succeeds: ") + depth_name(s.depth));
+        expect(backend->device_reset(g.device.get(), g.dc.get()) == vgl::result::success,
+               std::string("vgl_d3d11_backend_device_reset succeeds: ") + depth_name(s.depth));
         bool settled = false;
         static_cast<void>(settle(ctx, *backend, g, host, s, t, settled));
         const image again = read_image(g, t);

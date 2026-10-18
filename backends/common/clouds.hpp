@@ -9,6 +9,8 @@
 #ifndef VGL_BACKENDS_CLOUDS_HPP
 #define VGL_BACKENDS_CLOUDS_HPP
 
+#include <vgl/render.h>
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -18,12 +20,12 @@
 namespace vgl::backends
 {
 
-// Limits of the cloud image, which every backend's textures take.
-inline constexpr std::uint32_t max_cloud_width = 16384;
-inline constexpr std::uint32_t max_cloud_height = 8192;
+// Limits of the cloud image, which every backend's textures take (vgl/render.h).
+inline constexpr std::uint32_t max_cloud_width = VGL_CLOUD_IMAGE_WIDTH_MAX;
+inline constexpr std::uint32_t max_cloud_height = VGL_CLOUD_IMAGE_HEIGHT_MAX;
 
-// The cloud shell's height when the host gives none, in metres: low and middle clouds.
-inline constexpr double default_cloud_height = 6000.0;
+// The cloud shell's height when the host gives none, in metres.
+inline constexpr double default_cloud_height = VGL_CLOUD_HEIGHT_DEFAULT;
 
 // The width of a cloud image's pixels at the equator, in kilometres, on the WGS84 ellipsoid.
 [[nodiscard]] inline double cloud_texel_km(std::uint32_t width)

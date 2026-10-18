@@ -83,9 +83,14 @@ typedef struct vgl_frame vgl_frame;
 typedef struct vgl_frame_begin_info
 {
     uint32_t struct_size;
-    /* sizeof(vgl_draw_item) in the consumer's header; draw items are written at this
-     * stride. 0 selects the size in this header (section 5). */
-    uint32_t draw_item_size;
+    /* The sizes of the frame's structures in the consumer's header: the frame's lists are
+     * written at these strides (section 5). 0 selects the size in this header, which is
+     * also the smallest accepted. */
+    uint32_t draw_item_size;       /* sizeof(vgl_draw_item) */
+    uint32_t draw_layer_size;      /* sizeof(vgl_draw_layer) */
+    uint32_t index_list_data_size; /* sizeof(vgl_index_list_data) */
+    uint32_t mesh_data_size;       /* sizeof(vgl_mesh_data) */
+    uint32_t texture_data_size;    /* sizeof(vgl_texture_data) */
     /* Bytes of resources the consumer may create in this frame. 0 selects 16 MiB. At
      * least one resource is always offered, so a large one cannot stall forever. */
     uint64_t upload_budget;
@@ -262,7 +267,7 @@ typedef struct vgl_draw_item
 - **Order.** Items are sorted by distance from the camera, nearest first, which helps early depth rejection. Consumers may reorder them.
 - **Layers.** The material model is the design's narrow one: a terrain tile with imagery layers blended bottom to top. An item's layers are `layer_count` entries of the frame's layer list (`vgl_frame_draw_layers_get`), from `first_layer`; an index rather than a pointer keeps the item free of padding. Each imagery pack gives a layer, from the lowest priority at the bottom to the highest at the top, with the deepest resident texture over the tile: its own imagery tile, or an ancestor's while its own is loading or where the pack has nothing finer. `uv_scale_offset` maps the mesh's texture coordinates into that texture: into the part of the ancestor the tile covers, and inside the texture's border (section 7). Layers blend by the texture's alpha times `opacity`, which the host sets for each imagery pack (`vgl_pack_opacity_set`); hidden layers, at opacity 0, are left out of the list, so `opacity` is always greater than 0. A tile with no imagery has no layers; backends then shade by height and normal. The OpenGL backend blends the top four layers of an item.
 - **Mean sea level and the sea surface.** Vertex heights are above the ellipsoid. For heights above mean sea level, and for a sea surface over the ocean floor (design document, section 7.6), an item carries the geoid's height at the tile's four corners, sampled from the context's geoid pack at the corners themselves, so that neighbouring tiles share them. Consumers interpolate them bilinearly over the mesh's texture coordinates: a vertex's height above mean sea level is its height minus that value, and a sea surface lies at it, along the local vertical. Over a tile of a few degrees, as close views draw, the geoid barely varies, so the corners are enough; over a coarse tile seen from afar, the error of tens of metres does not show. Without a geoid pack, or before it has a tile there, `has_geoid` is `VGL_FALSE` and the heights are zero, which makes the ellipsoid sea level. A mesh built before the geoid loaded gets its corners when it does. A consumer that raises terrain to the sea surface tells the skirts by their height, below the mesh's `min_height`, raises them only as far as the mesh's lowest point, so that they still hang below the raised surface, and shades them as the edge above rather than as water.
-- **Growth.** The draw list is an array, so consumers step through it by `sizeof(vgl_draw_item)` of the header they were compiled against. To keep that safe, `vgl_frame_begin_info` has a field in which the consumer states that size, and the core writes items of that size. Fields are only ever appended.
+- **Growth.** The frame's lists are arrays in the core's memory, so consumers step through them by the sizes of the structures in the header they were compiled against. To keep that safe as the structures grow, `vgl_frame_begin_info` has a field for each in which the consumer states that size: `draw_item_size`, `draw_layer_size`, `index_list_data_size`, `mesh_data_size` and `texture_data_size`, with 0 for the size in its header. The core writes each list at the stated stride: a consumer built against a later minor version, whose structures are larger, gets zeros in the fields the core does not know, and a later core writes only the fields an earlier consumer knows. Fields are only ever appended, and no stride below the 1.0 sizes is accepted.
 
 ## 6. Vertex and index formats
 
@@ -275,7 +280,7 @@ Meshes use the layout the mesh builder already produces (design document, sectio
 | 16 | Texture coordinates over the tile (*u* east, *v* south) | 2 × unsigned 16-bit normalized |
 | 20 | Normal, octahedral encoding | 2 × signed 16-bit normalized |
 
-The stride is 24 bytes. Every one of these formats exists in OpenGL ES 3.0 and Direct3D 11, and in recent classic Ogre releases as `VET_FLOAT3`, `VET_FLOAT1`, `VET_USHORT2_NORM` and `VET_SHORT2_NORM`; to be confirmed for the client's release (design document, section 16, question 1).
+The stride is 24 bytes. Every one of these formats exists in OpenGL ES 3.0 and Direct3D 11, and in recent classic Ogre releases as `VET_FLOAT3`, `VET_FLOAT1`, `VET_USHORT2_NORM` and `VET_SHORT2_NORM`, including Ogre 14 (design document, section 16, question 1).
 
 A mesh is a square grid of *g* × *g* vertices, in rows from the north, with texture coordinates *i* / (*g* − 1) and *j* / (*g* − 1), followed by the 4 (*g* − 1) vertices of its skirts, which hang from the tile's edges with the texture coordinates of the edge vertices above them. Its vertex count, *g*² + 4 (*g* − 1), therefore gives *g*, which consumers that need the grid recover from it: the OpenGL backend's wireframe draws the cells' edges at multiples of 1 / (*g* − 1).
 
@@ -372,7 +377,7 @@ The distance along the view axis, rather than the clip-space *w*, keeps the conv
 | Precision | `model_view` as is | `model_view` as is; an Ogre build with `OGRE_DOUBLE_PRECISION` is not needed | `model_view`, or its own composition from `centre` |
 | State | Saves and restores what it changes (NFR-08), documented per backend | Ogre's pass state; nothing to restore | Its own |
 
-The Ogre column is the one most worth checking against the client's project once the Ogre release and render systems are known (design document, section 16, question 1).
+The Ogre column follows Ogre 14 and its render systems (design document, section 16, question 1).
 
 ## 11. Not covered
 
@@ -401,7 +406,7 @@ Implementing the core side changed some details of the accepted proposal, withou
 
 - One list per kind of resource replaced a single list of events with a type field (section 4.2). An event holding one pointer per kind needed implicit padding on 32-bit targets, which the C API conventions forbid.
 - Draw items name their layers by index into a frame-wide list instead of a pointer, and say their index size (section 5), for the same reason and to spare a lookup.
-- A resource is drawn from the frame after the one that created it, so that a create the consumer reports as failed is never in the same frame's draw list.
+- At first a resource was drawn only from the frame after the one that created it, so that a create the consumer reported as failed was never in the same frame's draw list. Draw items now draw resources created in their own frame, and consumers skip an item whose mesh or index list they could not create (section 4.2), so that a new region appears without a frame's delay.
 - Meshes of selected tiles are exempt from GPU eviction (section 4.3); without that, a region waiting for its last tiles could evict the others forever.
 - Frames allocate only while their lists grow (section 9), instead of never.
 
@@ -414,7 +419,7 @@ Implementing the OpenGL backend added what a consumer built on the public API ne
 
 Coarser meshes at globe scale added samples to meshes, without touching the decisions:
 
-- A tile that can refine takes a coarser grid where the coarser surface stays within half its geometric error (design document, section 7.3), which cut the triangles of a view from orbit fiftyfold. Interpolated from fewer vertices, height colours, the sea's coastline and lighting lost their detail, so each mesh carries its full-resolution samples, appended to `vgl_mesh_data` (section 6). They are part of the mesh rather than a texture resource of their own: a mesh and its samples are created, counted and destroyed together, and each consumer stores them as suits it. Before version 1.0, `vgl_mesh_data` grew without a size field for the consumer to state, as draw items have; the frame's lists of resources may get one when the interface is frozen.
+- A tile that can refine takes a coarser grid where the coarser surface stays within half its geometric error (design document, section 7.3), which cut the triangles of a view from orbit fiftyfold. Interpolated from fewer vertices, height colours, the sea's coastline and lighting lost their detail, so each mesh carries its full-resolution samples, appended to `vgl_mesh_data` (section 6). They are part of the mesh rather than a texture resource of their own: a mesh and its samples are created, counted and destroyed together, and each consumer stores them as suits it. Before version 1.0, `vgl_mesh_data` grew without a size field for the consumer to state, as draw items had; when the interface was frozen, every list of the frame got one (section 5).
 
 Imagery filled in what sections 5 and 7 had left open, again without touching the decisions:
 

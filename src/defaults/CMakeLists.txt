@@ -15,7 +15,9 @@ add_library(vgl_defaults
     files.cpp
     files.hpp
     http_reader.cpp
-    thread_pool.cpp)
+    thread_pool.cpp
+    threads.cpp
+    threads.hpp)
 add_library(vgl::defaults ALIAS vgl_defaults)
 
 target_include_directories(vgl_defaults PRIVATE "${PROJECT_SOURCE_DIR}/src")

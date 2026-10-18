@@ -950,7 +950,10 @@ struct vgl_disk_cache
             return;
         }
         std::memcpy(op->uri, r->uri, op->uri_size);
-        op->read = {op->uri, r->offset, r->size};
+        op->read = {};
+        op->read.uri = op->uri;
+        op->read.offset = r->offset;
+        op->read.size = r->size;
         std::size_t n = op->uri_size - 1;
         std::memcpy(op->key, r->uri, n);
         op->key[n++] = '\n';

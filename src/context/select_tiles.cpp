@@ -492,7 +492,7 @@ extern "C" VGL_API vgl_result vgl_view_geodetic_project(const vgl_view* view,
 
 extern "C" VGL_API vgl_result vgl_context_view_get(const vgl_context* context, vgl_view* out_view)
 {
-    if (context == nullptr || out_view == nullptr || out_view->struct_size < sizeof(vgl_view))
+    if (context == nullptr || out_view == nullptr || out_view->struct_size < 8)
     {
         return VGL_RESULT_INVALID_ARGUMENT;
     }
@@ -500,9 +500,11 @@ extern "C" VGL_API vgl_result vgl_context_view_get(const vgl_context* context, v
     {
         return VGL_RESULT_NOT_FOUND;
     }
-    // Fields beyond this version stay as the caller left them (docs/c-api.md, section 8.4).
-    const std::uint32_t size = out_view->struct_size;
-    std::memcpy(out_view, &context->host_view, sizeof(vgl_view));
-    out_view->struct_size = size;
+    // The fields that fit, and the size written (docs/c-api.md, section 8.4).
+    vgl_view v = context->host_view;
+    const auto size =
+        static_cast<std::uint32_t>(std::min<std::size_t>(out_view->struct_size, sizeof(vgl_view)));
+    v.struct_size = size;
+    std::memcpy(out_view, &v, size);
     return VGL_RESULT_SUCCESS;
 }

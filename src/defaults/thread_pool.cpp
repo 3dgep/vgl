@@ -4,15 +4,17 @@
 // The default thread pool (vgl/defaults.h): worker threads taking tasks from one queue.
 
 #include "common/host_memory.hpp"
+#include "defaults/threads.hpp"
 
 #include <vgl/defaults.h>
 
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
-#include <thread>
+#include <new>
 
 using vgl::common::memory;
+using vgl::defaults::native_thread;
 
 namespace
 {
@@ -23,25 +25,6 @@ struct task
     vgl_task_fn function = nullptr;
     void* data = nullptr;
 };
-
-// Starts a thread in place. Returns false if it could not be started.
-template <typename F>
-bool start_thread(std::thread* where, F&& f) noexcept
-{
-#if defined(__cpp_exceptions)
-    try
-    {
-        ::new (where) std::thread(std::forward<F>(f));
-    }
-    catch (...)
-    {
-        return false;
-    }
-#else
-    ::new (where) std::thread(std::forward<F>(f));
-#endif
-    return true;
-}
 
 } // namespace
 
@@ -55,7 +38,7 @@ struct vgl_thread_pool
     task* head = nullptr;
     task* tail = nullptr;
     bool stopping = false;
-    std::thread* threads = nullptr;
+    native_thread* threads = nullptr;
     std::uint32_t thread_count = 0;
 
     void run() noexcept
@@ -92,12 +75,15 @@ struct vgl_thread_pool
             stopping = true;
         }
         wake.notify_all();
-        for (std::uint32_t i = 0; i < count; ++i)
+        for (std::uint32_t i = 0; i < thread_count; ++i)
         {
-            threads[i].join();
-            threads[i].~thread();
+            if (i < count)
+            {
+                threads[i].join();
+            }
+            threads[i].~native_thread();
         }
-        allocator.deallocate(threads, sizeof(std::thread) * thread_count, alignof(std::thread));
+        allocator.deallocate(threads, sizeof(native_thread) * thread_count, alignof(native_thread));
         threads = nullptr;
     }
 
@@ -155,7 +141,7 @@ vgl_thread_pool_create(const vgl_thread_pool_create_info* info_in, vgl_thread_po
     std::uint32_t count = info.thread_count;
     if (count == 0)
     {
-        const unsigned hardware = std::thread::hardware_concurrency();
+        const std::uint32_t hardware = native_thread::hardware_count();
         count = hardware > 2 ? hardware - 1 : 1;
     }
 
@@ -165,8 +151,8 @@ vgl_thread_pool_create(const vgl_thread_pool_create_info* info_in, vgl_thread_po
         return VGL_RESULT_OUT_OF_MEMORY;
     }
     pool->thread_count = count;
-    pool->threads =
-        static_cast<std::thread*>(m.allocate(sizeof(std::thread) * count, alignof(std::thread)));
+    pool->threads = static_cast<native_thread*>(
+        m.allocate(sizeof(native_thread) * count, alignof(native_thread)));
     if (pool->threads == nullptr)
     {
         m.destroy(pool);
@@ -174,7 +160,11 @@ vgl_thread_pool_create(const vgl_thread_pool_create_info* info_in, vgl_thread_po
     }
     for (std::uint32_t i = 0; i < count; ++i)
     {
-        if (!start_thread(&pool->threads[i], [pool] { pool->run(); }))
+        ::new (&pool->threads[i]) native_thread();
+    }
+    for (std::uint32_t i = 0; i < count; ++i)
+    {
+        if (!pool->threads[i].start([](void* p) { static_cast<vgl_thread_pool*>(p)->run(); }, pool))
         {
             pool->stop(i);
             m.destroy(pool);

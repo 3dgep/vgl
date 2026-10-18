@@ -76,6 +76,12 @@ vgl_dvec3 transform(const vgl_dmat4& m, const vgl_dvec3& p, double& w)
             m.m[2] * p.x + m.m[6] * p.y + m.m[10] * p.z + m.m[14]};
 }
 
+// The flag if on is set, else 0. GCC rejects an enumerator and an integer in one conditional.
+std::uint32_t flag_if(bool on, std::uint32_t flag)
+{
+    return on ? flag : 0u;
+}
+
 } // namespace
 
 vgl_dvec3 sun_direction(const debug_settings& d)
@@ -106,11 +112,20 @@ std::vector<layer_control> layer_controls(const std::vector<pack_source>& source
     return layers;
 }
 
-std::uint32_t debug_flags(const debug_settings& d)
+vgl_debug_views debug_views(const debug_settings& d)
 {
-    return (d.wireframe ? 0x1u : 0u) | (d.level_colors ? 0x2u : 0u) |
-           (d.imagery_source ? 0x4u : 0u) | (d.height_colors ? 0x8u : 0u) |
-           (d.contours ? 0x10u : 0u);
+    return flag_if(d.wireframe, VGL_DEBUG_VIEW_WIREFRAME) |
+           flag_if(d.level_colors, VGL_DEBUG_VIEW_LEVEL_COLORS) |
+           flag_if(d.imagery_source, VGL_DEBUG_VIEW_IMAGERY_SOURCE) |
+           flag_if(d.height_colors, VGL_DEBUG_VIEW_HEIGHT_COLORS);
+}
+
+vgl_draw_features draw_features(const debug_settings& d)
+{
+    return flag_if(d.sea, VGL_DRAW_FEATURE_SEA_SURFACE) |
+           flag_if(d.atmosphere, VGL_DRAW_FEATURE_ATMOSPHERE) |
+           flag_if(d.stars, VGL_DRAW_FEATURE_STARS) | flag_if(d.clouds, VGL_DRAW_FEATURE_CLOUDS) |
+           flag_if(d.contours, VGL_DRAW_FEATURE_CONTOURS);
 }
 
 overlay::~overlay()

@@ -61,7 +61,7 @@
 extern "C" {
 #endif
 
-/* An OpenGL function, as the host's loader returns it. */
+/** An OpenGL function, as the host's loader returns it. */
 typedef void (*vgl_gl_proc)(void);
 
 /**
@@ -73,21 +73,21 @@ typedef void (*vgl_gl_proc)(void);
  * @param name       The function's name, such as "glDrawElements".
  *
  * @par Thread safety
- * Calling thread: inside vgl_gl_backend_create and vgl_gl_backend_reset.
+ * Calling thread: inside vgl_gl_backend_create and vgl_gl_backend_device_reset.
  */
 typedef vgl_gl_proc (*vgl_gl_get_proc_address_fn)(void* user_data, const char* name);
 
 typedef struct vgl_gl_backend vgl_gl_backend;
 
-/* Creation parameters of a backend. Zero-initialize, set struct_size, then fill in. */
+/** Creation parameters of a backend. Zero-initialize, set struct_size, then fill in. */
 typedef struct vgl_gl_backend_create_info
 {
     uint32_t struct_size;
-    /* How depth is written and compared (vgl/render.h). The default is logarithmic. The
+    /** How depth is written and compared (vgl/render.h). The default is logarithmic. The
      * reversed-Z convention needs clip control: OpenGL 4.5, GL_ARB_clip_control or, on OpenGL
      * ES, GL_EXT_clip_control. */
     vgl_depth_convention depth_convention;
-    /* Required. Loads the OpenGL functions. */
+    /** Required. Loads the OpenGL functions. */
     vgl_gl_get_proc_address_fn get_proc_address;
     VGL_POINTER_PADDING(get_proc_address_padding)
     void* get_proc_address_user_data;
@@ -139,87 +139,49 @@ VGL_GL_API vgl_result vgl_gl_backend_create(vgl_context* context,
  */
 VGL_GL_API vgl_result vgl_gl_backend_destroy(vgl_gl_backend* backend);
 
-/* Parameters of a draw. Zero-initialize, set struct_size, then fill in. */
+/** Parameters of a draw. Zero-initialize, set struct_size, then fill in. */
 typedef struct vgl_gl_draw_info
 {
     uint32_t struct_size;
-    /* VGL_TRUE when the projection mirrors the image, as a projection with a flipped y axis
+    /** VGL_TRUE when the projection mirrors the image, as a projection with a flipped y axis
      * for rendering into a texture does. Triangles then face the other way, and the backend
      * culls the other side. */
     vgl_bool mirrored;
-    /* Optional. The camera to draw from, when it differs from the view of the last update
+    /** Optional. The camera to draw from, when it differs from the view of the last update
      * (vgl_frame_begin_info.view_matrix). Null uses the context's view. */
     const vgl_dmat4* view_matrix;
     VGL_POINTER_PADDING(view_matrix_padding)
-    /* Optional. From camera space to clip space. Null uses the context's view. */
+    /** Optional. From camera space to clip space, with OpenGL's depth from -1 to 1 for the
+     * logarithmic and conventional conventions, and from 0 to 1 for reversed-Z, which the
+     * backend sets with clip control (docs/render-interface.md, section 8). Null uses the
+     * context's view. */
     const vgl_dmat4* projection_matrix;
     VGL_POINTER_PADDING(projection_matrix_padding)
-    /* Direction towards the sun, along the ECEF axes; it need not be normalized. Zero lights
+    /** Direction towards the sun, along the ECEF axes; it need not be normalized. Zero lights
      * the terrain from the camera. */
     vgl_dvec3 sun_direction;
-    /* The logarithmic convention's far distance, in metres: the camera distance that maps to
+    /** The logarithmic convention's far distance, in metres: the camera distance that maps to
      * depth 1. 0 selects VGL_LOGARITHMIC_DEPTH_FAR_DEFAULT. Ignored by the other conventions. */
     double logarithmic_far;
-    /* Bytes of resources to upload in this draw (vgl_frame_begin_info.upload_budget). 0
-     * selects 16 MiB. */
+    /** Bytes of resources to upload in this draw (vgl_frame_begin_info.upload_budget). 0
+     * selects VGL_UPLOAD_BUDGET_DEFAULT. */
     uint64_t upload_budget;
-    /* Debug views: a combination of vgl_gl_debug_flag values. 0 draws normally. */
-    uint32_t debug_flags;
-    uint32_t reserved;
-    /* Height between contour lines (VGL_GL_DEBUG_FLAG_CONTOURS), in metres. 0 selects 500. */
+    /** What to draw besides the terrain and its imagery: vgl_draw_feature values (vgl/render.h).
+     * 0 draws the terrain alone. */
+    vgl_draw_features features;
+    /** Views for inspecting level of detail and loading: vgl_debug_view values (vgl/render.h).
+     * 0 draws normally. */
+    vgl_debug_views debug_views;
+    /** The Earth rotation angle in radians (vgl_earth_rotation_angle_get), which turns the
+     * stars' celestial frame into ECEF, for VGL_DRAW_FEATURE_STARS. */
+    double earth_rotation_angle;
+    /** Height between contour lines (VGL_DRAW_FEATURE_CONTOURS), in metres. 0 selects
+     * VGL_CONTOUR_INTERVAL_DEFAULT. */
     double contour_interval;
-    /* VGL_TRUE draws a sea surface: terrain below mean sea level is raised to it and shaded
-     * as water, for applications that want a flat sea rather than the ocean floor. It needs a
-     * geoid pack (vgl_draw_item.has_geoid); without one, mean sea level is the ellipsoid. */
-    vgl_bool sea_surface;
-    uint32_t reserved2;
-    /* VGL_TRUE draws the atmosphere (design document, section 7.6): the sky, the glow around the
-     * globe seen from space, and the haze between the camera and the terrain, lit by the sun
-     * (sun_direction, or straight above the camera when that is zero), which then also reddens
-     * and dims the sunlight on the terrain and leaves the night side dark. The sky is drawn
-     * where nothing was drawn before it, at the far depth: blended over what the framebuffer
-     * holds there, which shows through where the sky is thin, as in space. */
-    vgl_bool atmosphere;
-    uint32_t reserved3;
-    /* VGL_TRUE draws the stars set with vgl_gl_backend_stars_set, behind the sky: where
-     * nothing was drawn before them, at the far depth, added to what the framebuffer holds
-     * there. With the atmosphere they fade where the sky is bright, as by day. */
-    vgl_bool stars;
-    uint32_t reserved4;
-    /* The Earth rotation angle in radians (vgl_earth_rotation_angle_get), which turns the
-     * stars' celestial frame into ECEF. */
-    double sidereal_angle;
-    /* VGL_TRUE draws, with the atmosphere, the clouds set with vgl_gl_backend_clouds_set: a
-     * shell at cloud_height above the ellipsoid, over the terrain and in the sky, lit by the
-     * sun, which they shade the terrain from. */
-    vgl_bool clouds;
-    uint32_t reserved5;
-    /* The cloud shell's height above the ellipsoid, in metres. 0 selects 6,000. */
+    /** The cloud shell's height above the ellipsoid (VGL_DRAW_FEATURE_CLOUDS), in metres. 0
+     * selects VGL_CLOUD_HEIGHT_DEFAULT. */
     double cloud_height;
 } vgl_gl_draw_info;
-
-/* Debug views of vgl_gl_draw_info.debug_flags, for inspecting level of detail and loading. */
-typedef enum vgl_gl_debug_flag
-{
-    /* The mesh's grid cells as bright cyan lines a pixel wide over the shading, without the
-     * diagonals that split them into triangles. Where cells are closer than four pixels, every
-     * second, fourth, eighth line and so on, which keeps them that far apart. The tiles'
-     * boundaries are always drawn, in yellow and about two pixels wide. */
-    VGL_GL_DEBUG_FLAG_WIREFRAME = 0x1,
-    /* Each tile tinted by its level, with its borders outlined. */
-    VGL_GL_DEBUG_FLAG_LEVEL_COLORS = 0x2,
-    /* Tiles drawn with imagery coarser than themselves tinted orange, more strongly the more
-     * levels coarser it is, and tiles without imagery magenta. */
-    VGL_GL_DEBUG_FLAG_IMAGERY_SOURCE = 0x4,
-    /* Colours by height above mean sea level, from the deep ocean floor to snow, instead of
-     * the imagery. */
-    VGL_GL_DEBUG_FLAG_HEIGHT_COLORS = 0x8,
-    /* Contour lines every contour_interval metres above mean sea level, every fifth one
-     * heavier. Without a geoid pack, heights are above the ellipsoid, which differs from mean
-     * sea level by up to about 100 m. */
-    VGL_GL_DEBUG_FLAG_CONTOURS = 0x10,
-    VGL_GL_DEBUG_FLAG_MAX_ENUM = 0x7FFFFFFF
-} vgl_gl_debug_flag;
 
 /**
  * Draws the globe into the current framebuffer: takes a frame from the context, applies its
@@ -235,11 +197,14 @@ typedef enum vgl_gl_debug_flag
  *
  * @retval VGL_RESULT_SUCCESS            The globe was drawn.
  * @retval VGL_RESULT_INVALID_ARGUMENT   backend is null, or info is invalid: a matrix or
- *                                       direction element is not finite, or the far distance
- *                                       is negative.
+ *                                       direction element is not finite, features or
+ *                                       debug_views has unknown bits, or earth_rotation_angle,
+ *                                       logarithmic_far, contour_interval or cloud_height is
+ *                                       not finite or, but for the angle, negative.
  * @retval VGL_RESULT_NOT_SUPPORTED      info has fields from a newer version set.
  * @retval VGL_RESULT_INVALID_OPERATION  A frame of the context is open already, or the last
- *                                       vgl_gl_backend_reset failed.
+ *                                       vgl_gl_backend_device_reset failed.
+ * @retval VGL_RESULT_OUT_OF_MEMORY      The frame could not be begun (vgl_context_frame_begin).
  *
  * @par Thread safety
  * Render thread, with the backend's OpenGL context (or one sharing its objects) current.
@@ -247,17 +212,17 @@ typedef enum vgl_gl_debug_flag
 VGL_GL_API vgl_result vgl_gl_backend_draw(vgl_gl_backend* backend, const vgl_gl_draw_info* info);
 
 /**
- * Sets the stars the backend draws when vgl_gl_draw_info.stars asks for them, replacing those
- * set before; vgl ships none, so the host supplies them from a catalogue of its choice. The
- * stars are copied, and kept to be drawn again after vgl_gl_backend_reset. Each is drawn as a
- * small quad of two triangles, not as a point.
+ * Sets the stars the backend draws with VGL_DRAW_FEATURE_STARS, replacing those set before;
+ * vgl ships none, so the host supplies them from a catalogue of its choice. The stars are
+ * copied, and kept to be drawn again after vgl_gl_backend_device_reset.
  *
  * @param backend     The backend.
  * @param stars       The stars, or null with star_count 0 to remove them.
- * @param star_count  How many, at most 400,000.
+ * @param star_count  How many, at most VGL_STAR_COUNT_MAX.
  *
  * @retval VGL_RESULT_SUCCESS           The stars were set.
- * @retval VGL_RESULT_INVALID_ARGUMENT  backend is null, stars is null with stars, there are
+ * @retval VGL_RESULT_INVALID_ARGUMENT  backend is null, stars is null with a non-zero
+ *                                      star_count, there are
  *                                      too many, or a star is invalid: its direction is not of
  *                                      unit length, a value is not finite, a colour channel is
  *                                      outside [0, 1], or reserved is not 0.
@@ -272,17 +237,19 @@ VGL_GL_API vgl_result vgl_gl_backend_stars_set(vgl_gl_backend* backend,
                                                uint32_t star_count);
 
 /**
- * Sets the clouds the backend draws when vgl_gl_draw_info.clouds asks for them, replacing those
- * set before: their coverage of the whole globe, one byte per pixel from 0 (clear) to 255
- * (overcast), row 0 at 90 N and column 0 at 180 W, each pixel a step of latitude and
- * longitude, as in NASA's cloud composites. The image is copied, with its mip levels, and kept
- * to be drawn again after vgl_gl_backend_reset.
+ * Sets the clouds the backend draws with VGL_DRAW_FEATURE_CLOUDS, replacing those set before: their
+ * coverage of the whole globe, one byte per pixel from 0 (clear) to 255 (overcast), row 0 at 90 N
+ * and column 0 at 180 W, each pixel a step of latitude and longitude, as in NASA's cloud
+ * composites. The image is copied, with its mip levels, and kept to be drawn again after
+ * vgl_gl_backend_device_reset.
  *
  * @param backend   The backend.
  * @param coverage  The image, width x height bytes, rows tightly packed; or null with width and
  *                  height 0 to remove the clouds.
- * @param width     Pixels from west to east, from 2 to 16,384.
- * @param height    Pixels from north to south, from 2 to 8,192.
+ * @param width     Pixels from west to east, from VGL_CLOUD_IMAGE_SIZE_MIN to
+ *                  VGL_CLOUD_IMAGE_WIDTH_MAX.
+ * @param height    Pixels from north to south, from VGL_CLOUD_IMAGE_SIZE_MIN to
+ *                  VGL_CLOUD_IMAGE_HEIGHT_MAX.
  *
  * @retval VGL_RESULT_SUCCESS           The clouds were set.
  * @retval VGL_RESULT_INVALID_ARGUMENT  backend is null, or the image is null or of a size
@@ -316,7 +283,7 @@ VGL_GL_API vgl_result vgl_gl_backend_clouds_set(vgl_gl_backend* backend,
  * @par Thread safety
  * Render thread, with the new OpenGL context current.
  */
-VGL_GL_API vgl_result vgl_gl_backend_reset(vgl_gl_backend* backend);
+VGL_GL_API vgl_result vgl_gl_backend_device_reset(vgl_gl_backend* backend);
 
 #ifdef __cplusplus
 }

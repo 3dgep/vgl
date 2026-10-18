@@ -38,7 +38,7 @@ bool stars_load(const std::string& path, std::string& error);
 
 // The Earth rotation angle in radians for a time of day in hours (UTC) on a day of the year,
 // from 1 on 1 January, in a year (vgl_earth_rotation_angle_get).
-double sidereal_angle(float time_of_day, int day_of_year, int year);
+double earth_rotation_angle(float time_of_day, int day_of_year, int year);
 
 // The system clock's time now, in UTC: the time of day in hours, the day of the year from 1 on
 // 1 January, and the year.

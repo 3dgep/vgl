@@ -107,7 +107,10 @@ struct threaded_host
         auto* self = static_cast<threaded_host*>(user_data);
         self->thread.post(
             [self, request, uri = std::string(r->uri), offset = r->offset, size = r->size] {
-                const vgl_io_read copy{uri.c_str(), offset, size};
+                vgl_io_read copy{};
+                copy.uri = uri.c_str();
+                copy.offset = offset;
+                copy.size = size;
                 self->server.serve(request, copy);
             });
     }
@@ -258,7 +261,7 @@ TEST_CASE(pack_create_needs_an_io_interface)
     double h = 0.0;
     CHECK_EQ(vgl_context_height_query(ctx, 0.0, 0.0, VGL_HEIGHT_REFERENCE_ELLIPSOID, &h),
              VGL_RESULT_NOT_FOUND);
-    CHECK(std::isnan(h));
+    CHECK_EQ(h, 0.0); // An error leaves the output as it was.
     CHECK_EQ(vgl_context_height_query(ctx, 2.0, 0.0, VGL_HEIGHT_REFERENCE_ELLIPSOID, &h),
              VGL_RESULT_INVALID_ARGUMENT);
     CHECK_EQ(vgl_context_height_query(ctx, 0.0, NAN, VGL_HEIGHT_REFERENCE_ELLIPSOID, &h),
@@ -300,7 +303,8 @@ TEST_CASE(libraries_on_a_context_share_its_allocator_log_and_view)
     REQUIRE(log.lines.size() == 1u);
     CHECK(log.lines[0].first == VGL_LOG_LEVEL_INFO && log.lines[0].second == "test: shown");
 
-    // The view comes back as it was set; a newer caller's extra fields are left alone.
+    // The view comes back as it was set; a newer caller's extra fields are left alone, and
+    // struct_size says how much was written.
     struct
     {
         vgl_view view;
@@ -313,12 +317,12 @@ TEST_CASE(libraries_on_a_context_share_its_allocator_log_and_view)
         look_at({2e7, 0, 0}, {0, 0, 0}, {0, 0, 1}), perspective_gl(1.0, 1.5, 1.0, 1e9), 300, 200);
     REQUIRE(vgl_context_view_set(ctx, &view) == VGL_RESULT_SUCCESS);
     CHECK_EQ(vgl_context_view_get(ctx, &got.view), VGL_RESULT_SUCCESS);
-    CHECK(got.view.struct_size == sizeof(got) && got.extra == 7u);
+    CHECK(got.view.struct_size == sizeof(vgl_view) && got.extra == 7u);
     CHECK(got.view.viewport_width == 300u && got.view.viewport_height == 200u);
     CHECK(std::memcmp(&got.view.view_matrix, &view.view_matrix, sizeof(vgl_dmat4)) == 0);
     CHECK(std::memcmp(&got.view.projection_matrix, &view.projection_matrix, sizeof(vgl_dmat4)) ==
           0);
-    got.view.struct_size = 8;
+    got.view.struct_size = 4; // Below the smallest output structure.
     CHECK_EQ(vgl_context_view_get(ctx, &got.view), VGL_RESULT_INVALID_ARGUMENT);
     CHECK_EQ(vgl_context_view_set(ctx, nullptr), VGL_RESULT_SUCCESS);
     got.view.struct_size = sizeof(vgl_view);
@@ -726,7 +730,10 @@ struct relaying_io
     {
         auto* self = static_cast<relaying_io*>(user_data);
         auto* link = new relay{self, outer, r->uri, {}};
-        link->read = {link->uri.c_str(), r->offset, r->size};
+        link->read = {};
+        link->read.uri = link->uri.c_str();
+        link->read.offset = r->offset;
+        link->read.size = r->size;
         vgl_io_request_create_info info{};
         info.struct_size = sizeof(info);
         info.complete = &done;

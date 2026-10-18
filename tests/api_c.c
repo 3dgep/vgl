@@ -54,17 +54,39 @@ static void check_types(void)
     CHECK(sizeof(vgl_draw_item) == 192);
     CHECK(offsetof(vgl_draw_item, geoid_heights) == 168);
     CHECK(offsetof(vgl_draw_item, model_view) == 64);
-    CHECK(sizeof(vgl_frame_begin_info) == 24);
+    CHECK(sizeof(vgl_frame_begin_info) == 40);
+    CHECK(offsetof(vgl_frame_begin_info, upload_budget) == 24);
     CHECK(sizeof(vgl_depth_convention) == 4);
     CHECK(sizeof(vgl_star) == 32 && offsetof(vgl_star, color) == 16);
+    /* Foundation: the I/O and task interfaces and what they pass. */
+    CHECK(sizeof(vgl_io_read) == 24 && offsetof(vgl_io_read, offset) == 8);
+    CHECK(sizeof(vgl_io_interface) == 8 + 4 * sizeof(void*));
+    CHECK(sizeof(vgl_task_interface) == 8 + 3 * sizeof(void*));
+    CHECK(sizeof(vgl_io_request_create_info) == 32);
+    /* Context. */
+    CHECK(sizeof(vgl_context_create_info) == 72);
+    CHECK(offsetof(vgl_context_create_info, gpu_budget) == 64);
+    CHECK(sizeof(vgl_pack_create_info) == 16);
+    CHECK(sizeof(vgl_update_info) == 16);
+    CHECK(sizeof(vgl_context_statistics) == 168);
+    CHECK(offsetof(vgl_context_statistics, textures_waiting) == 72);
+    CHECK(offsetof(vgl_context_statistics, vertices_drawn) == 104);
+    CHECK(offsetof(vgl_context_statistics, frame_time) == 160);
+    /* The defaults module. */
+    CHECK(sizeof(vgl_thread_pool_create_info) == 16);
+    CHECK(sizeof(vgl_file_reader_create_info) == 24);
+    CHECK(sizeof(vgl_http_reader_create_info) == 40);
+    CHECK(sizeof(vgl_disk_cache_create_info) == 48);
+    CHECK(sizeof(vgl_disk_cache_statistics) == 64);
 #ifdef VGL_TEST_GL_HEADER
     /* The OpenGL backend's structures (vgl/gl.h). */
     CHECK(sizeof(vgl_gl_backend_create_info) == 24);
-    CHECK(sizeof(vgl_gl_draw_info) == 128);
-    CHECK(offsetof(vgl_gl_draw_info, cloud_height) == 120);
-    CHECK(offsetof(vgl_gl_draw_info, atmosphere) == 88);
-    CHECK(offsetof(vgl_gl_draw_info, sidereal_angle) == 104);
+    CHECK(sizeof(vgl_gl_draw_info) == 96);
     CHECK(offsetof(vgl_gl_draw_info, sun_direction) == 24);
+    CHECK(offsetof(vgl_gl_draw_info, features) == 64);
+    CHECK(offsetof(vgl_gl_draw_info, debug_views) == 68);
+    CHECK(offsetof(vgl_gl_draw_info, earth_rotation_angle) == 72);
+    CHECK(offsetof(vgl_gl_draw_info, cloud_height) == 88);
 #endif
 }
 
