@@ -385,6 +385,55 @@ TEST_CASE(shard_level_defaults_to_five_levels_above_the_deepest)
     CHECK_EQ(load_bake_config(f.dir / "shallow.json").shard_level, 0u);
 }
 
+TEST_CASE(sea_blends_into_the_next_source_at_the_edge)
+{
+    // Land west of 10.8 E and sea, exactly 0 m, east of it to the edge of the region at 11 E;
+    // under it a seabed 80 m below the geoid, as GEBCO is under GLO-30.
+    const fixture f;
+    write_raster(f.dir / "coast.tif", 10.4, 61.1, 0.001, 700, 700, [](double la, double lo) {
+        return lo < 10.8 ? surface(la, lo) : 0.0;
+    });
+    write_raster(
+        f.dir / "seabed.tif", 10.0, 61.5, 0.01, 200, 150, [](double, double) { return -80.0; });
+    const auto bake_coast = [&](const std::string& output, const std::string& blend) {
+        write_text(f.dir / (output + ".json"),
+                   R"({
+            "output": ")" +
+                       output + R"(", "tile_size": 17, "min_level": 8, "max_level": 13,
+            "shard_level": 10, "region": [10.5, 60.5, 11.0, 61.0], "geoid": "geoid",
+            "sources": [{"files": "coast.tif", "datum": "egm2008")" +
+                       blend + R"(},
+                        {"files": "seabed.tif", "datum": "egm2008", "fill_only": true}]
+        })");
+        bake(load_bake_config(f.dir / (output + ".json")), {});
+        return pack_file(f.dir / output);
+    };
+    const double sea = geoid_height;
+    const double seabed = -80.0 + geoid_height;
+
+    // Without the blend, the sea ends at sea level, 80 m above the seabed beyond it.
+    {
+        const pack_file p = bake_coast("plain", "");
+        height_query q(p);
+        CHECK_NEAR(q.height(60.75, 10.9995).height, sea, 0.1);
+        CHECK_NEAR(q.height(60.75, 10.9).height, sea, 0.1);
+    }
+
+    // With it, the sea meets the seabed at the edge and eases to sea level 5 km in. Land and
+    // the sea further in stay as they are.
+    const pack_file p = bake_coast("blended", R"(, "sea_blend": 5000)");
+    height_query q(p);
+    CHECK_NEAR(q.height(60.75, 10.9995).height, seabed, 0.5);
+    const double near = q.height(60.75, 10.96).height; // About 2.2 km in.
+    CHECK(near > seabed + 10.0 && near < sea - 10.0);
+    const double further = q.height(60.75, 10.93).height; // About 3.8 km in.
+    CHECK(further > near && further < sea);
+    CHECK_NEAR(q.height(60.75, 10.85).height, sea, 0.1); // About 8 km in.
+    CHECK_NEAR(q.height(60.75, 10.6).height, surface(60.75, 10.6) + geoid_height, 0.1);
+    std::ostringstream report;
+    CHECK(validate(f.dir / "blended", report).ok());
+}
+
 TEST_CASE(configuration_errors_name_the_problem)
 {
     const fixture f;
@@ -407,6 +456,8 @@ TEST_CASE(configuration_errors_name_the_problem)
               .find("geoid") != std::string::npos);
     CHECK(error_of(R"({"output": "x", "sources": [{"files": "missing-*.tif"}]})")
               .find("matches no files") != std::string::npos);
+    CHECK(error_of(R"({"output": "x", "sources": [{"files": "terrain.tif", "sea_blend": -1}]})")
+              .find("sea_blend") != std::string::npos);
 }
 
 // ------------------------------------------------------------------------------------------

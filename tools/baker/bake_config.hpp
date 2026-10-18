@@ -49,6 +49,13 @@ struct source_config
     vertical_datum datum = vertical_datum::ellipsoid;
     std::uint32_t max_level = 28;        // Finest level this source contributes to.
     std::string resampling = "bilinear"; // GDAL resampling near the source resolution.
+    // Heights only: within this distance in metres of where the pack's data from this source
+    // ends, its sea, exactly 0 m in its datum, eases into the later sources' heights below sea
+    // level, so that it meets them without a step at the edge. 0 leaves the sea as it is.
+    double sea_blend = 0.0;
+    // Fills only the gaps of tiles that earlier sources have files over, and adds no tiles of
+    // its own, as GEBCO does under a regional GLO-30 pack.
+    bool fill_only = false;
 };
 
 struct bake_config

@@ -12,6 +12,8 @@ Small packs that the samples and their tests use, so that they run offline and w
 
 The Sentinel-2 pack shows a flaw of EOX's 2016 mosaic as it is: over Jostedalsbreen and other glaciers and snowfields, which the mosaic's processing took for cloud, it holds a flat near-black fill (RGB 11, 18, 26) instead of imagery (design document, section 9).
 
+The GLO-30 sample is baked without `sea_blend` (`tools/baker/README.md`): it borders the GEBCO sample, which at about 20 km between samples is far coarser than the full GEBCO grid, so its edges show the change of resolution rather than a step at sea, and blending would only pull its inner fjords down to GEBCO's depth.
+
 Each pack is one base shard. They are far too coarse for anything but samples and tests: the full datasets are described in `tools/baker/README.md` and `docs/test-bake.md`.
 
 ## Attribution

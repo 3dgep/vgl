@@ -68,8 +68,12 @@ Each source has:
 | `datum` | `"ellipsoid"` | Heights only: `"ellipsoid"`, or `"egm2008"` for heights above mean sea level (Copernicus DEM, GEBCO) |
 | `max_level` | the pack's | Deepest level this source contributes to |
 | `resampling` | `"bilinear"` | GDAL resampling near the source's resolution, such as `"cubic"` |
+| `fill_only` | `false` | Fill only the gaps of tiles that earlier sources have files over, adding no tiles of its own, as GEBCO under a regional pack |
+| `sea_blend` | `0` | Heights only: a distance in metres. Within it of where the pack's data from this source ends (the edge of its files, or of the region), the source's sea, exactly 0 m in its datum, eases into the later sources' heights, at most sea level, so that it meets them without a step. See below |
 
 Sources must be in geographic WGS84 coordinates (such as EPSG:4326); reproject others with `gdalwarp` first, and georeference plain images with `gdal_translate -a_srs EPSG:4326 -a_ullr <west> <north> <east> <south>`. Where a source has no data, the next source fills in. Imagery sources have 1 (grey) or 3 (RGB) bands of 8-bit values; a pack is grey only if all its sources are. Pixels without data are those at a band's nodata value.
+
+**Sea at the edge of a regional pack.** Copernicus DEM sets the sea to exactly 0 m, while GEBCO, which fills in around a regional GLO-30 pack, has the seabed there, often hundreds of metres lower. Where the GLO-30 pack ends at sea, the two surfaces would meet with a step, which the runtime's skirts fill as a wall. With `"sea_blend": 10000` on the GLO-30 source and GEBCO as the next source, with `"fill_only": true` so that the pack keeps to GLO-30's tiles, GLO-30's sea within 10 km of the pack's edge takes GEBCO's seabed at the edge, eased to sea level at 10 km, as in `examples/glo30-norway.json`. Only the sea near the edge changes: fjords and lakes inside the coverage keep GLO-30's flat water, which GEBCO, at 450 m, does not resolve.
 
 The default height steps are 0.5 m to level 5, 0.25 m to level 9 and 0.125 m beyond, and 2^-8 m for geoid packs. A tile whose heights do not fit in 65,534 steps fails the bake with a message that names it, rather than being clipped.
 

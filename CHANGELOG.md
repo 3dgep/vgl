@@ -119,6 +119,10 @@ The pack format has its own version number, independent of the library version.
   backend, pixel for pixel but for anti-aliased wireframe lines on Direct3D 11. CI runs it on
   Linux with Mesa on full runs.
 - The samples in a GLFW window share their controls (`samples/common/glfw_controls.hpp`).
+- Baker: `sea_blend` on a source eases its sea, exactly 0 m, into the later sources' heights below
+  sea level within a distance of where the pack's data ends, so that a regional GLO-30 pack
+  meets GEBCO's seabed without a step, which the skirts showed as dark lines across the sea.
+  Fjords and lakes inside the coverage are left alone. The Norway example uses 10 km.
 - `vgl_view_project`: where an ECEF position appears in a view's viewport, in pixels from the
   top left, with its distance along the view axis, for labels and markers; free-threaded, with
   any handedness and depth mapping. `vgl_view_geodetic_project` does the same from a latitude,

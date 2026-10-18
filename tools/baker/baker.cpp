@@ -38,6 +38,8 @@ using vgl::internal::tile_rows;
 using vgl::internal::tile_span;
 
 constexpr double nan = std::numeric_limits<double>::quiet_NaN();
+// Metres per degree along a meridian, near enough for distances of kilometres.
+constexpr double metres_per_degree = 111320.0;
 
 // What a parent needs to know about a child (docs/pack-format.md, section 6.2).
 struct tile_stats
@@ -262,7 +264,8 @@ private:
         std::filesystem::create_directories(config_.output / ".bake");
     }
 
-    // True if a tile may hold data: inside the region and covered by a source for its level.
+    // True if a tile may hold data: inside the region and covered by a source for its level,
+    // other than one that only fills the others' gaps.
     [[nodiscard]] bool relevant(const tile_id& t) const
     {
         const degree_region b = tile_bounds(t);
@@ -271,7 +274,7 @@ private:
             return false;
         }
         return std::any_of(sources_.begin(), sources_.end(), [&](const source& s) {
-            return t.level <= s.config().max_level && s.covers(b);
+            return !s.config().fill_only && t.level <= s.config().max_level && s.covers(b);
         });
     }
 
@@ -349,6 +352,10 @@ private:
 
         std::vector<double> values;
         std::vector<double> column;
+        // Sea samples near the edge of a source with sea_blend, which later sources fill first:
+        // how far into the blend each lies, from 0 at the edge to 1 at its full distance, or
+        // below 0 for the other samples.
+        std::vector<double> blend;
         for (const source& s : sources_)
         {
             if (missing == 0)
@@ -405,6 +412,9 @@ private:
                 }
             }
 
+            const double sea_blend = s.config().sea_blend;
+            const std::vector<degree_region> footprints =
+                sea_blend > 0.0 ? footprints_near(s, b, sea_blend) : std::vector<degree_region>{};
             for (std::uint32_t j = 0; j < n; ++j)
             {
                 for (std::uint32_t i = 0; i < n; ++i)
@@ -413,6 +423,22 @@ private:
                     if (!std::isnan(heights[k]) || std::isnan(values[k]))
                     {
                         continue;
+                    }
+                    if (sea_blend > 0.0 && values[k] == 0.0)
+                    {
+                        const vgl::internal::degree_position p =
+                            vgl::internal::elevation_sample_position(t, n, i, j);
+                        const double d =
+                            edge_distance(footprints, p.latitude, p.longitude, sea_blend);
+                        if (d < sea_blend)
+                        {
+                            if (blend.empty())
+                            {
+                                blend.assign(count, -1.0);
+                            }
+                            blend[k] = d / sea_blend;
+                            continue; // Later sources fill it, then it is eased.
+                        }
                     }
                     double v = values[k];
                     if (s.config().datum == vertical_datum::egm2008)
@@ -426,7 +452,108 @@ private:
                 }
             }
         }
+        // The sea near the edge: from the later sources' heights below sea level at the edge,
+        // eased to sea level at the blend's full distance.
+        for (std::size_t k = 0; k < blend.size(); ++k)
+        {
+            if (blend[k] < 0.0)
+            {
+                continue;
+            }
+            const auto i = static_cast<std::uint32_t>(k % n);
+            const auto j = static_cast<std::uint32_t>(k / n);
+            const vgl::internal::degree_position p =
+                vgl::internal::elevation_sample_position(t, n, i, j);
+            // The blending source's sea level, which is 0 m in its datum.
+            double sea = 0.0;
+            for (const source& s : sources_)
+            {
+                if (s.config().sea_blend > 0.0 && s.config().datum == vertical_datum::egm2008)
+                {
+                    sea = geoid_->height(p.latitude, p.longitude);
+                    break;
+                }
+            }
+            const double below = std::isnan(heights[k]) ? sea : std::min(heights[k], sea);
+            const double x = blend[k];
+            const double w = x * x * (3.0 - 2.0 * x); // Smooth at both ends.
+            if (std::isnan(heights[k]))
+            {
+                --missing;
+            }
+            heights[k] = below + (sea - below) * w;
+        }
         return missing != count;
+    }
+
+    // The footprints of a source's files near a tile, clipped to the bake's region: where the
+    // pack's data from the source can be within a distance in metres of the tile.
+    [[nodiscard]] std::vector<degree_region>
+    footprints_near(const source& s, const degree_region& b, double distance) const
+    {
+        const double margin_lat = distance / metres_per_degree;
+        const double widest = std::max(std::fabs(b.south), std::fabs(b.north)) + margin_lat;
+        const double margin_lon =
+            margin_lat / std::max(std::cos(vgl::internal::radians(std::min(widest, 89.0))), 1e-3);
+        const degree_region near{
+            b.west - margin_lon, b.south - margin_lat, b.east + margin_lon, b.north + margin_lat};
+        std::vector<degree_region> out;
+        for (const source_file& f : s.files())
+        {
+            const degree_region r{std::max(f.bounds.west, region_.west),
+                                  std::max(f.bounds.south, region_.south),
+                                  std::min(f.bounds.east, region_.east),
+                                  std::min(f.bounds.north, region_.north)};
+            if (r.west < r.east && r.south < r.north && intersects(r, near))
+            {
+                out.push_back(r);
+            }
+        }
+        return out;
+    }
+
+    // The distance in metres from a position to the nearest place outside the footprints, at
+    // most limit: for a union of rectangles, the nearest such place lies just beyond one of
+    // their edges, square to it, or just beyond one of their corners.
+    [[nodiscard]] static double edge_distance(const std::vector<degree_region>& footprints,
+                                              double lat,
+                                              double lon,
+                                              double limit)
+    {
+        const auto covered = [&](double la, double lo) {
+            return std::any_of(footprints.begin(), footprints.end(), [&](const degree_region& r) {
+                return la >= r.south && la <= r.north && lo >= r.west && lo <= r.east;
+            });
+        };
+        if (!covered(lat, lon))
+        {
+            return 0.0;
+        }
+        const double ky = metres_per_degree;
+        const double kx = metres_per_degree * std::cos(vgl::internal::radians(lat));
+        constexpr double nudge = 1e-9; // Degrees: just beyond an edge.
+        double best = limit;
+        const auto consider = [&](double la, double lo) {
+            const double d = std::hypot((lo - lon) * kx, (la - lat) * ky);
+            if (d < best && !covered(la, lo))
+            {
+                best = d;
+            }
+        };
+        for (const degree_region& r : footprints)
+        {
+            const double clat = std::clamp(lat, r.south, r.north);
+            const double clon = std::clamp(lon, r.west, r.east);
+            consider(clat, r.west - nudge);
+            consider(clat, r.east + nudge);
+            consider(r.south - nudge, clon);
+            consider(r.north + nudge, clon);
+            consider(r.south - nudge, r.west - nudge);
+            consider(r.south - nudge, r.east + nudge);
+            consider(r.north + nudge, r.west - nudge);
+            consider(r.north + nudge, r.east + nudge);
+        }
+        return best;
     }
 
     // Samples an imagery tile: (P + 2b)^2 pixels (docs/pack-format.md, section 2.4), each from

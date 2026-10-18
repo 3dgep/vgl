@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <stdexcept>
 
@@ -288,6 +289,14 @@ bake_config load_bake_config(const std::filesystem::path& file)
             }
             src.max_level = s.value("max_level", c.max_level);
             src.resampling = s.value("resampling", src.resampling);
+            src.sea_blend = s.value("sea_blend", 0.0);
+            src.fill_only = s.value("fill_only", false);
+            if (!std::isfinite(src.sea_blend) || src.sea_blend < 0.0)
+            {
+                fail(file,
+                     "source \"" + src.name +
+                         R"(": "sea_blend" must be a distance in metres, 0 or more)");
+            }
             c.sources.push_back(std::move(src));
         }
     }
@@ -322,6 +331,12 @@ bake_config load_bake_config(const std::filesystem::path& file)
             }))
         {
             fail(file, "\"datum\" applies only to heights");
+        }
+        if (std::any_of(c.sources.begin(), c.sources.end(), [](const source_config& s) {
+                return s.sea_blend > 0.0;
+            }))
+        {
+            fail(file, "\"sea_blend\" applies only to heights");
         }
     }
     else if (!vgl::internal::elevation_tile_size_is_valid(c.tile_size))

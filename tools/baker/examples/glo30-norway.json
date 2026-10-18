@@ -1,6 +1,7 @@
 {
     // Regional pack from Copernicus DEM GLO-30 over mainland Norway, for the test bake of
-    // milestone M1. Download the tiles from the AWS open data mirror (see README.md).
+    // milestone M1. Download the tiles from the AWS open data mirror (see README.md). GEBCO
+    // below it fills in the seabed at the pack's edges (gebco-global.json).
     "output": "packs/glo30-norway",
     "layer": "elevation",
     "tile_size": 129,
@@ -17,7 +18,16 @@
         {
             "name": "Copernicus GLO-30",
             "files": "sources/glo30/Copernicus_DSM_COG_10_*.tif",
-            "datum": "egm2008"
+            "datum": "egm2008",
+            // GLO-30's sea is exactly 0 m, and GEBCO's seabed lies below it where GLO-30
+            // ends: within 10 km of that edge the sea eases into the seabed, without a step.
+            "sea_blend": 10000
+        },
+        {
+            "name": "GEBCO 2026",
+            "files": "sources/gebco-cog/gebco_2026_*.tif",
+            "datum": "egm2008",
+            "fill_only": true
         }
     ]
 }
