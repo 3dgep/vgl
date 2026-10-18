@@ -154,6 +154,7 @@ cc main.c $(pkg-config --cflags --libs vgl)
 | `tests/` | Tests, and the consumer project that checks an installed vgl (`tests/install`) |
 | `packaging/` | vcpkg port, Conan recipe, and how releases are made |
 | `docs/` | Design document and specifications |
+| `wiki/` | The [GitHub wiki](https://github.com/3dgep/vgl/wiki), as a git submodule |
 
 ## Documentation
 
@@ -164,6 +165,7 @@ cc main.c $(pkg-config --cflags --libs vgl)
 - [Packaging](packaging/README.md): vcpkg, Conan, release archives and the release steps
 - [Contributing](CONTRIBUTING.md): coding style, sign-off and review process
 - [Changelog](CHANGELOG.md)
+- [Wiki](https://github.com/3dgep/vgl/wiki): guides and notes alongside the specifications
 
 ## Data attribution
 

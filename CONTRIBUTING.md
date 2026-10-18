@@ -107,6 +107,15 @@ this.
 - Make sure CI passes: formatting, license headers, sign-off, and the build and tests on Windows
   and Linux.
 
+## The wiki
+
+The [GitHub wiki](https://github.com/3dgep/vgl/wiki) is checked out as the `wiki` submodule, so
+its pages can be edited next to the code. Specifications stay in `docs/`; the wiki holds guides
+and notes. Fetch it with `git submodule update --init wiki` (or clone with
+`--recurse-submodules`). A wiki change is two commits: one in `wiki/`, signed off and pushed
+from there (on its `master` branch), then one in the main repository that records the new
+revision with `git add wiki`. Run `git -C wiki pull` first to bring in pages edited on GitHub.
+
 ## Review process
 
 1. Open the pull request against `main` and fill in the checklist in the template.
