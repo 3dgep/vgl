@@ -211,24 +211,32 @@ VGL_DEFAULTS_API vgl_result vgl_file_reader_io_interface_get(vgl_file_reader* re
  *
  * libcurl's own allocations do not go through the allocator, which serves the reader and the
  * data it delivers.
+ *
+ * On Emscripten, the reader is built on the browser's fetch instead, with VGL_DEFAULTS_HTTP and no
+ * library, and needs no thread: fetches start and finish on the main thread, between the page's
+ * frames, and reads that arrive on other threads are passed to it. Reads that fail without an
+ * answer are tried again, a few times. Without a file reader, URIs that are not HTTP are fetched
+ * too, relative to the page's address. The browser chooses the connections and the User-Agent
+ * header, and allocates the data delivered.
  */
 typedef struct vgl_http_reader vgl_http_reader;
 
 typedef struct vgl_http_reader_create_info
 {
     uint32_t struct_size;
-    /* Connections to each server at most. 0 selects 8. */
+    /* Connections to each server at most. 0 selects 8. Ignored in a browser. */
     uint32_t max_connections;
     /* Optional. Allocator for the reader and its reads; must be thread-safe. */
     const vgl_allocator_interface* allocator;
     VGL_POINTER_PADDING(allocator_padding)
     /* Optional. Reads the URIs that are not HTTP; without it, they complete with
-     * VGL_RESULT_NOT_FOUND. Must outlive the reader. */
+     * VGL_RESULT_NOT_FOUND, or in a browser are fetched. Must outlive the reader. */
     vgl_file_reader* files;
     VGL_POINTER_PADDING(files_padding)
     /* Seconds a read may take before it fails with VGL_RESULT_IO_ERROR. 0 selects 30. */
     double timeout;
-    /* Optional. The User-Agent header, copied; null selects "vgl/<version>". */
+    /* Optional. The User-Agent header, copied; null selects "vgl/<version>". Ignored in a
+     * browser. */
     const char* user_agent;
     VGL_POINTER_PADDING(user_agent_padding)
 } vgl_http_reader_create_info;

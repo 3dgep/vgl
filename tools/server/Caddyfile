@@ -47,6 +47,8 @@
 		X-Content-Type-Options nosniff
 		Referrer-Policy no-referrer
 		Access-Control-Allow-Origin {$VGL_CORS_ORIGIN:*}
+		# Cross-origin isolated pages, as vgl's web build is, load it however they ask.
+		Cross-Origin-Resource-Policy cross-origin
 		Access-Control-Expose-Headers "Accept-Ranges, Content-Length, Content-Range, ETag"
 	}
 

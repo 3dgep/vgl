@@ -23,6 +23,9 @@
 // you fly around it, F6 colours by height instead of imagery, F7 draws contour lines, F8 a sea
 // surface over the ocean floor, and F9 the atmosphere.
 //
+// Built with Emscripten, it runs in a browser on WebGL 2 (samples/gl/web/README.md), with the
+// options in the page's address: vgl-gl.html?pack=<uri>&pack=<uri>&depth=reversed.
+//
 // With --check, the sample runs hidden: it flies to a few views with each depth convention
 // the device supports, and checks what it draws, that the conventions agree, that OpenGL
 // reports no errors and that the backend restores the host's state. It exits with 1 on a
@@ -46,6 +49,12 @@
 #include <vgl/vgl.hpp>
 
 #include <GLFW/glfw3.h>
+
+#if defined(__EMSCRIPTEN__)
+#    include <emscripten/emscripten.h>
+
+#    include <GLFW/emscripten_glfw3.h>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -1484,8 +1493,8 @@ int run_interactive(const options& o,
     target t;
     auto last_title = std::chrono::steady_clock::now();
     int frames = 0;
-    while (glfwWindowShouldClose(window) == 0)
-    {
+    // One frame: the native loop below calls it, and in a browser the page does.
+    auto frame = [&] {
         glfwPollEvents();
         int width = 0;
         int height = 0;
@@ -1493,7 +1502,7 @@ int run_interactive(const options& o,
         if (width == 0 || height == 0)
         {
             glfwWaitEvents(); // Minimized.
-            continue;
+            return;
         }
         if (width != t.width || height != t.height)
         {
@@ -1572,7 +1581,9 @@ int run_interactive(const options& o,
                  sample::frustum_of(s.frozen, field_of_view, aspect, reach),
                  s.debug);
         ui.render();
-        glfwSwapBuffers(window);
+#if !defined(__EMSCRIPTEN__)
+        glfwSwapBuffers(window); // A browser shows the canvas when the frame returns.
+#endif
 
         ++frames;
         const auto now = std::chrono::steady_clock::now();
@@ -1593,7 +1604,19 @@ int run_interactive(const options& o,
             frames = 0;
             last_title = now;
         }
+    };
+#if defined(__EMSCRIPTEN__)
+    // The browser calls the frames, between which the page must return to it. Simulating an
+    // endless loop ends this call without unwinding its stack, so the state above stays where
+    // the frames find it, and nothing after this line runs.
+    emscripten_set_main_loop_arg(
+        [](void* f) { (*static_cast<decltype(frame)*>(f))(); }, &frame, 0, true);
+#else
+    while (glfwWindowShouldClose(window) == 0)
+    {
+        frame();
     }
+#endif
     if (t.framebuffer != 0)
     {
         target_destroy(gl, t);
@@ -1665,6 +1688,12 @@ bool parse(int argc, char** argv, options& o)
             return false;
         }
     }
+#if defined(__EMSCRIPTEN__)
+    if (o.check)
+    {
+        return false; // The check waits in loops, which a page cannot.
+    }
+#endif
     // The check expects the sample set, and --pack replaces it.
     return o.packs.empty() || (o.data.empty() && !o.check);
 }
@@ -1713,6 +1742,10 @@ int main(int argc, char** argv)
     {
         return 1;
     }
+#if defined(__EMSCRIPTEN__)
+    o.es = true;                                       // WebGL 2.
+    glfwWindowHint(GLFW_SCALE_FRAMEBUFFER, GLFW_TRUE); // At the screen's pixel ratio.
+#endif
     if (o.es)
     {
         glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_ES_API);
@@ -1741,6 +1774,9 @@ int main(int argc, char** argv)
         glfwTerminate();
         return 1;
     }
+#if defined(__EMSCRIPTEN__)
+    static_cast<void>(emscripten::glfw3::MakeCanvasResizable(window, "window"));
+#endif
     glfwMakeContextCurrent(window);
     glfwSwapInterval(1);
     const host_gl gl = load_host_gl();

@@ -18,7 +18,7 @@ Any other web server works too, if it:
 
 - answers `Range: bytes=a-b` and `bytes=a-` with `206 Partial Content`, and a range past the end with `416`;
 - does not compress pack files: compression applies to the whole body, so a range of a compressed response is not a range of the file;
-- sends `Access-Control-Allow-Origin`, and answers preflight requests, if browsers read the packs.
+- sends `Access-Control-Allow-Origin`, and answers preflight requests, if browsers read the packs. vgl's web build runs in pages that are cross-origin isolated, which load packs from other servers only through CORS or with `Cross-Origin-Resource-Policy: cross-origin` ([web sample](../samples/gl/web/README.md)).
 
 ## The reference server
 
@@ -91,6 +91,7 @@ The configuration has no admin endpoint, so restart Caddy to change it.
 - Allows `GET` and `HEAD`, and `OPTIONS` for browsers' preflight requests; other methods get `405`.
 - Answers one range per request. A request for several ranges gets `416`: vgl never asks for them, and they let a client make the server do much work for one small request.
 - Never compresses, sends `application/octet-stream` with `X-Content-Type-Options: nosniff`, and does not name itself in a `Server` header.
+- Lets browsers read packs from pages on other sites, cross-origin isolated ones too: CORS for `VGL_CORS_ORIGIN`, and `Cross-Origin-Resource-Policy: cross-origin`.
 - Lets caches keep shards forever (`immutable`), since a shard's name holds a digest of its content, and recheck manifests after a minute, since they change in place when a pack is rebaked. Responses carry an `ETag`, so a recheck costs a `304`.
 - Limits slow clients with timeouts on reading headers and bodies, writing responses and idle connections, and limits headers to 16 KB.
 - Over HTTPS, sends `Strict-Transport-Security`, and redirects HTTP to HTTPS.

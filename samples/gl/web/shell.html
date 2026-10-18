@@ -1,0 +1,75 @@
+<!doctype html>
+<!--
+  SPDX-License-Identifier: MIT
+  Copyright (c) 2026 Jeremiah van Oosten
+
+  The page of the OpenGL sample in a browser (samples/gl/web/README.md). The options are in its
+  address, as the native sample's command line: ?pack=<uri>&pack=<uri>&depth=reversed passes
+  --pack <uri> --pack <uri> --depth reversed.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>vgl</title>
+  <style>
+    :root { color-scheme: dark; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #05070d; }
+    #canvas { display: block; width: 100vw; height: 100vh; outline: none; }
+    #status {
+      position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+      padding: 0 16px; font: 15px/1.5 system-ui, sans-serif; color: #c8d0e0; text-align: center;
+      pointer-events: none;
+    }
+    #status.error { color: #ff9a8a; }
+    #status:empty { display: none; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" tabindex="-1" oncontextmenu="event.preventDefault()"></canvas>
+  <div id="status">Loading vgl</div>
+  <script>
+    'use strict';
+    const status = document.getElementById('status');
+    const fail = (message) => {
+      status.className = 'error';
+      status.textContent = message;
+    };
+
+    // The address's parameters become the sample's options: a key with a value passes
+    // --key value, a key alone --key.
+    const args = [];
+    for (const [key, value] of new URLSearchParams(location.search)) {
+      args.push('--' + key);
+      if (value !== '') {
+        args.push(value);
+      }
+    }
+
+    var Module = {
+      arguments: args,
+      canvas: document.getElementById('canvas'),
+      print: (text) => console.log(text),
+      printErr: (text) => console.warn(text),
+      setStatus: (text) => {
+        status.textContent = text;
+      },
+      onRuntimeInitialized: () => {
+        status.textContent = '';
+        document.getElementById('canvas').focus();
+      },
+      onAbort: (what) => fail('vgl stopped: ' + what + '. The console has the details.'),
+    };
+
+    // Threads need shared memory, which browsers give only to pages served cross-origin
+    // isolated (README.md).
+    if (!window.crossOriginIsolated) {
+      fail('This page needs to be served with the headers Cross-Origin-Opener-Policy: ' +
+           'same-origin and Cross-Origin-Embedder-Policy: require-corp (README.md).');
+    } else if (!document.createElement('canvas').getContext('webgl2')) {
+      fail('This browser has no WebGL 2.');
+    }
+  </script>
+  {{{ SCRIPT }}}
+</body>
+</html>

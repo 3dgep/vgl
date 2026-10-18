@@ -216,6 +216,26 @@
         "BUILD_SHARED_LIBS": "OFF",
         "VGL_ZSTD_PROVIDER": "BUNDLED"
       }
+    },
+    {
+      "name": "emscripten",
+      "displayName": "WebAssembly with Emscripten, static, pthreads (cross-build)",
+      "description": "Needs EMSDK set to an activated emsdk (6.0.11 is tested) and Ninja on the path. Every object is compiled with -pthread, so hosts that link vgl must be too (design document, section 4).",
+      "inherits": "base",
+      "generator": "Ninja Multi-Config",
+      "toolchainFile": "$env{EMSDK}/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "$env{EMSDK}",
+        "rhs": ""
+      },
+      "cacheVariables": {
+        "BUILD_SHARED_LIBS": "OFF",
+        "VGL_ZSTD_PROVIDER": "BUNDLED",
+        "VGL_DEFAULTS_HTTP": "ON",
+        "CMAKE_C_FLAGS": "-pthread",
+        "CMAKE_CXX_FLAGS": "-pthread"
+      }
     }
   ],
   "buildPresets": [
@@ -502,6 +522,17 @@
         "type": "equals",
         "lhs": "${hostSystemName}",
         "rhs": "Darwin"
+      },
+      "configuration": "Release"
+    },
+    {
+      "name": "emscripten-release",
+      "displayName": "WebAssembly with Emscripten, Release",
+      "configurePreset": "emscripten",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "$env{EMSDK}",
+        "rhs": ""
       },
       "configuration": "Release"
     }
@@ -911,6 +942,23 @@
         "type": "equals",
         "lhs": "${hostSystemName}",
         "rhs": "Darwin"
+      },
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "emscripten-release",
+      "displayName": "WebAssembly with Emscripten, Release, on Node.js",
+      "configurePreset": "emscripten",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "$env{EMSDK}",
+        "rhs": ""
       },
       "configuration": "Release",
       "output": {
@@ -1379,6 +1427,24 @@
         {
           "type": "build",
           "name": "ios-arm64-release"
+        }
+      ]
+    },
+    {
+      "name": "emscripten-release",
+      "displayName": "WebAssembly with Emscripten, Release: configure, build, test",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "emscripten"
+        },
+        {
+          "type": "build",
+          "name": "emscripten-release"
+        },
+        {
+          "type": "test",
+          "name": "emscripten-release"
         }
       ]
     }

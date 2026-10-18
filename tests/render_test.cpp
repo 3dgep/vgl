@@ -1241,9 +1241,10 @@ TEST_CASE(imagery_layers_follow_their_priority_and_opacity)
 
     // Each pack is a layer, the higher priority on top, opaque.
     const auto layers_of = [&](const vgl_draw_item& item) {
-        return std::vector<vgl_draw_layer>(gpu.layers.begin() + item.first_layer,
-                                           gpu.layers.begin() + item.first_layer +
-                                               item.layer_count);
+        const auto first = static_cast<std::ptrdiff_t>(item.first_layer);
+        const auto count = static_cast<std::ptrdiff_t>(item.layer_count);
+        return std::vector<vgl_draw_layer>(gpu.layers.begin() + first,
+                                           gpu.layers.begin() + first + count);
     };
     REQUIRE(!gpu.items.empty());
     for (const vgl_draw_item& item : gpu.items)

@@ -81,8 +81,16 @@ if(TARGET vgl_gl AND NOT ANDROID AND NOT IOS)
     set(VGL_GLFW_URL "https://github.com/glfw/glfw/releases/download/${VGL_GLFW_VERSION}/glfw-${VGL_GLFW_VERSION}.zip")
     set(VGL_GLFW_SHA256 b5ec004b2712fd08e8861dc271428f048775200a2df719ccf575143ba749a3e9)
 
-    find_package(glfw3 3.3 CONFIG QUIET)
-    if(glfw3_FOUND)
+    if(NOT EMSCRIPTEN)
+        find_package(glfw3 3.3 CONFIG QUIET)
+    endif()
+    if(EMSCRIPTEN)
+        # In the browser, GLFW is Emscripten's port, on a canvas with WebGL 2.
+        add_library(glfw INTERFACE)
+        target_compile_options(glfw INTERFACE "--use-port=contrib.glfw3")
+        target_link_options(glfw INTERFACE "--use-port=contrib.glfw3")
+        message(STATUS "vgl: using Emscripten's GLFW port for the samples")
+    elseif(glfw3_FOUND)
         message(STATUS "vgl: using installed GLFW ${glfw3_VERSION} for the samples")
     elseif(VGL_FETCH_DEPENDENCIES)
         include(FetchContent)
@@ -110,6 +118,8 @@ if(TARGET vgl_gl AND NOT ANDROID AND NOT IOS)
             "${vgl_imgui_dir}/backends/imgui_impl_glfw.cpp"
             "${vgl_imgui_dir}/backends/imgui_impl_opengl3.cpp")
         target_link_libraries(vgl_imgui_glfw_gl3 PUBLIC vgl_imgui glfw)
+        # Emscripten's GLFW port has a C++17 header.
+        target_compile_features(vgl_imgui_glfw_gl3 PRIVATE cxx_std_17)
         # Its OpenGL backend loads its own functions; without this, GLFW's header would include
         # the system's GL/gl.h, which not every machine has.
         target_compile_definitions(vgl_imgui_glfw_gl3 PRIVATE GLFW_INCLUDE_NONE)
@@ -128,7 +138,10 @@ if(TARGET vgl_gl AND NOT ANDROID AND NOT IOS)
         # has, so it is a test only on request. CI runs it under Xvfb with Mesa.
         option(VGL_TEST_GL "Run the OpenGL samples' checks as tests (needs a display)" OFF)
         add_subdirectory(gl)
-        add_subdirectory(c)
+        # The pure-C sample's loop does not fit a browser, which calls the page's frames.
+        if(NOT EMSCRIPTEN)
+            add_subdirectory(c)
+        endif()
         if(TARGET vgl_ogre)
             add_subdirectory(ogre)
         endif()

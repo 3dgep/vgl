@@ -240,7 +240,8 @@ struct functions
 // What the current OpenGL context is and can do.
 struct device
 {
-    bool es = false; // OpenGL ES rather than OpenGL.
+    bool es = false;    // OpenGL ES rather than OpenGL.
+    bool webgl = false; // WebGL 2, an OpenGL ES 3.0 with fewer capabilities.
     int major = 0;
     int minor = 0;
     bool primitive_restart = false;             // GL_PRIMITIVE_RESTART exists (OpenGL).

@@ -119,6 +119,15 @@ The pack format has its own version number, independent of the library version.
   backend, pixel for pixel but for anti-aliased wireframe lines on Direct3D 11. CI runs it on
   Linux with Mesa on full runs.
 - The samples in a GLFW window share their controls (`samples/common/glfw_controls.hpp`).
+- WebAssembly build with Emscripten (preset `emscripten`, Emscripten 6.0.11), static and with
+  threads: the core, the defaults module, the OpenGL backend on WebGL 2 and the samples. The
+  tests and the headless check run on Node.js. The OpenGL sample becomes a page
+  (`samples/gl/web`) with the same panel, navigation, atmosphere, stars and clouds, its options
+  in the page's address; `samples/gl/web/Caddyfile` serves it cross-origin isolated, with the
+  sample set beside it.
+- On Emscripten, `vgl_http_reader` is built on the browser's fetch, with the same API: reads are
+  passed to the main thread, tried again when they fail without an answer, and relative URIs are
+  fetched from the page's address when there is no file reader.
 - HTTP reader in the defaults module (`vgl_http_reader`, `vgl::http_reader`), built with
   `VGL_DEFAULTS_HTTP` (off by default) on an installed libcurl, or else on curl 8.11.1,
   downloaded and built with HTTP and HTTPS only. It reads `http://` and `https://` packs with

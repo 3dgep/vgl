@@ -11,6 +11,13 @@ target_link_libraries(vgl_headless PRIVATE vgl_sample_common vgl::vgl vgl::defau
 target_compile_definitions(vgl_headless PRIVATE
     VGL_SAMPLE_DATA_DIR="${PROJECT_SOURCE_DIR}/samples/data")
 vgl_target_options(vgl_headless)
+if(EMSCRIPTEN)
+    # A program for Node.js: its main on a worker, so that it may wait for its threads, and the
+    # real filesystem for the sample data.
+    target_link_options(vgl_headless PRIVATE
+        "-sPROXY_TO_PTHREAD" "-sPTHREAD_POOL_SIZE=8" "-sEXIT_RUNTIME" "-sINITIAL_MEMORY=512MB"
+        "-sNODERAWFS")
+endif()
 
 if(VGL_BUILD_TESTS)
     # The check expects the sample set, wherever VGL_SAMPLE_DATA points.

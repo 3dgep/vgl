@@ -116,7 +116,9 @@ vgl_result load(vgl_gl_get_proc_address_fn get_proc_address,
         return VGL_RESULT_NOT_SUPPORTED;
     }
     d.primitive_restart = !d.es;
-    d.primitive_restart_fixed_index = d.es || at_least(d, 4, 3);
+    // WebGL 2 restarts at the fixed index always, and has no capability to switch it.
+    d.webgl = d.es && std::strstr(version, "WebGL") != nullptr;
+    d.primitive_restart_fixed_index = (d.es && !d.webgl) || (!d.es && at_least(d, 4, 3));
     if ((!d.es && at_least(d, 4, 6)) || has_extension(f, "GL_EXT_texture_filter_anisotropic") ||
         has_extension(f, "GL_ARB_texture_filter_anisotropic"))
     {

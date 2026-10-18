@@ -608,10 +608,12 @@ void create_index_list(vgl_gl_backend& b, vgl_frame* frame, const vgl_index_list
     }
     r->kind = resource_kind::index_list;
     gl.GenBuffers(1, &r->buffer);
-    // GL_COPY_WRITE_BUFFER rather than GL_ELEMENT_ARRAY_BUFFER, whose binding belongs to the
-    // vertex array that is bound: the host's.
-    gl.BindBuffer(GL_COPY_WRITE_BUFFER, r->buffer);
-    gl.BufferData(GL_COPY_WRITE_BUFFER,
+    // Uploaded through GL_ELEMENT_ARRAY_BUFFER, since WebGL keeps a buffer to the kind of
+    // target it was first bound to. That binding belongs to the bound vertex array, so the
+    // sky's is bound, which draws without indices; the host's is restored after the frame.
+    gl.BindVertexArray(b.sky_vertex_array);
+    gl.BindBuffer(GL_ELEMENT_ARRAY_BUFFER, r->buffer);
+    gl.BufferData(GL_ELEMENT_ARRAY_BUFFER,
                   static_cast<GLsizeiptr>(std::size_t{d.index_count} * d.index_size),
                   d.indices,
                   GL_STATIC_DRAW);
@@ -1065,7 +1067,9 @@ void draw_items(vgl_gl_backend& b,
     // Counter-clockwise from outside the ellipsoid (docs/render-interface.md, section 6).
     gl.FrontFace(info.mirrored != VGL_FALSE ? GL_CW : GL_CCW);
     gl.Disable(GL_BLEND);
-    // 16-bit index lists may use index 0xFFFF as a vertex.
+    // 16-bit index lists may use index 0xFFFF as a vertex. WebGL always restarts at it, and has
+    // no switch for it, but meshes with 16-bit indices never reach it: no grid size gives
+    // exactly 65536 vertices (docs/render-interface.md, section 6).
     if (b.dev.primitive_restart)
     {
         gl.Disable(GL_PRIMITIVE_RESTART);

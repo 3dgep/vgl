@@ -5,7 +5,7 @@ name: CI
 
 # Pushes to main run a quick check: formatting and sources, Linux GCC with every test including
 # the OpenGL checks on Mesa, and Windows MSVC. Pull requests, manual runs (gh workflow run CI)
-# and a weekly run build everything: every preset, macOS, Android, iOS, the baker and
+# and a weekly run build everything: every preset, macOS, Android, iOS, WebAssembly, the baker and
 # clang-tidy. macOS minutes cost ten times Linux minutes, and Windows twice.
 on:
   push:
@@ -241,6 +241,37 @@ jobs:
       # The tests are built for iOS but not run: that needs a simulator build.
       - name: Configure and build
         run: cmake --workflow --preset ios-arm64-release
+
+  # WebAssembly with Emscripten at a pinned version, with threads: the library, the samples and
+  # the OpenGL sample's page, and the tests and the headless check on Node.js (design document,
+  # section 4).
+  web:
+    name: WebAssembly (Emscripten, Node.js)
+    if: github.event_name != 'push'
+    runs-on: ubuntu-24.04
+    env:
+      EMSDK_VERSION: 6.0.11
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Ninja and Emscripten
+        run: |
+          sudo apt-get update && sudo apt-get install -y ninja-build
+          git clone --depth 1 --branch "$EMSDK_VERSION" https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+          "$RUNNER_TEMP/emsdk/emsdk" install "$EMSDK_VERSION"
+          "$RUNNER_TEMP/emsdk/emsdk" activate "$EMSDK_VERSION"
+          echo "EMSDK=$RUNNER_TEMP/emsdk" >> "$GITHUB_ENV"
+
+      - name: Configure, build and test
+        run: |
+          source "$EMSDK/emsdk_env.sh"
+          cmake --workflow --preset emscripten-release
+
+      - name: Check the page
+        run: |
+          for f in vgl-gl.html vgl-gl.js vgl-gl.wasm vgl-gl.data; do
+            test -s "build/emscripten/bin/Release/$f"
+          done
 
   baker-linux:
     name: Baker (Linux, system GDAL)

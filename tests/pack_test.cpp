@@ -288,13 +288,19 @@ TEST_CASE(pack_round_trip)
             REQUIRE(file.size() == h.file_size);
             const byte_range dr = directory_range(h);
             shard_directory dir;
-            REQUIRE(shard_directory::parse(
-                        std::span(file).subspan(dr.offset, dr.size), h, m, a, z, dir) ==
-                    VGL_RESULT_SUCCESS);
+            REQUIRE(
+                shard_directory::parse(std::span(file).subspan(static_cast<std::size_t>(dr.offset),
+                                                               static_cast<std::size_t>(dr.size)),
+                                       h,
+                                       m,
+                                       a,
+                                       z,
+                                       dir) == VGL_RESULT_SUCCESS);
             directory_entry e;
             REQUIRE(dir.find(t, e));
             const byte_range tr = dir.tile_range(e);
-            const std::span<const std::byte> tile = std::span(file).subspan(tr.offset, tr.size);
+            const std::span<const std::byte> tile = std::span(file).subspan(
+                static_cast<std::size_t>(tr.offset), static_cast<std::size_t>(tr.size));
             REQUIRE(check_tile(tile, e) == VGL_RESULT_SUCCESS);
             tile_header th;
             REQUIRE(parse_tile_header(tile, m, th) == VGL_RESULT_SUCCESS);
@@ -375,8 +381,13 @@ vgl_result read_everything(const std::vector<std::byte>& manifest_bytes,
         }
         shard_directory dir;
         const byte_range dr = directory_range(h);
-        result =
-            shard_directory::parse(std::span(file).subspan(dr.offset, dr.size), h, m, a, z, dir);
+        result = shard_directory::parse(std::span(file).subspan(static_cast<std::size_t>(dr.offset),
+                                                                static_cast<std::size_t>(dr.size)),
+                                        h,
+                                        m,
+                                        a,
+                                        z,
+                                        dir);
         if (result != VGL_RESULT_SUCCESS)
         {
             return result;
@@ -385,7 +396,8 @@ vgl_result read_everything(const std::vector<std::byte>& manifest_bytes,
         {
             const directory_entry e = dir.entry(i);
             const byte_range tr = dir.tile_range(e);
-            const std::span<const std::byte> tile = std::span(file).subspan(tr.offset, tr.size);
+            const std::span<const std::byte> tile = std::span(file).subspan(
+                static_cast<std::size_t>(tr.offset), static_cast<std::size_t>(tr.size));
             result = check_tile(tile, e);
             tile_header th;
             if (result == VGL_RESULT_SUCCESS)

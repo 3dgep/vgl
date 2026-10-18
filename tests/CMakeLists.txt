@@ -1,6 +1,14 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Jeremiah van Oosten
 
+# On Emscripten the tests run on Node.js, the toolchain's emulator. Their main runs on a worker,
+# so that it may block while the threads it starts come up, and they read and write the real
+# filesystem.
+if(EMSCRIPTEN)
+    add_link_options("-sPROXY_TO_PTHREAD" "-sPTHREAD_POOL_SIZE=8" "-sEXIT_RUNTIME"
+        "-sINITIAL_MEMORY=512MB" "-sNODERAWFS")
+endif()
+
 # Test harness: a minimal framework with no dependencies (harness/vgl_test.hpp).
 add_library(vgl_test_main STATIC harness/vgl_test_main.cpp)
 target_include_directories(vgl_test_main PUBLIC harness)
@@ -55,7 +63,7 @@ if(TARGET vgl_defaults)
 endif()
 
 # The HTTP reader, against a small HTTP server in the test on the loopback address.
-if(TARGET vgl_defaults AND VGL_DEFAULTS_HTTP)
+if(TARGET vgl_defaults AND VGL_DEFAULTS_HTTP AND NOT EMSCRIPTEN)
     get_property(vgl_curl_target GLOBAL PROPERTY VGL_CURL_TARGET)
     # An installed libcurl's imported target is visible only where it was found.
     if(vgl_curl_target STREQUAL "CURL::libcurl")

@@ -35,7 +35,13 @@ vgl_disable_exceptions(vgl_defaults)
 # downloaded at a checked hash and built with HTTP and HTTPS only, on the system's TLS
 # (Schannel on Windows, Secure Transport on Apple, OpenSSL elsewhere). Without it, the reader's
 # functions report VGL_RESULT_NOT_SUPPORTED, so hosts can call them in any build.
-if(VGL_DEFAULTS_HTTP)
+if(VGL_DEFAULTS_HTTP AND EMSCRIPTEN)
+    # In the browser, the reader is built on its fetch, which needs no library; hosts link
+    # Emscripten's fetch support, which the interface passes on.
+    target_compile_definitions(vgl_defaults PRIVATE VGL_DEFAULTS_HAS_FETCH=1)
+    target_link_options(vgl_defaults INTERFACE "-sFETCH=1")
+    message(STATUS "vgl: the HTTP reader uses the browser's fetch")
+elseif(VGL_DEFAULTS_HTTP)
     find_package(CURL QUIET)
     if(CURL_FOUND)
         set(vgl_curl_target CURL::libcurl)

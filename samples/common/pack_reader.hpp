@@ -3,6 +3,7 @@
 //
 // How the C++ samples read packs: files on the thread pool and, when vgl is built with
 // VGL_DEFAULTS_HTTP, packs on a web server too, so that --pack takes http:// and https:// URIs.
+// In a page (VGL_SAMPLE_PAGE, an Emscripten build for a browser), every pack is fetched.
 
 #ifndef VGL_SAMPLES_PACK_READER_HPP
 #define VGL_SAMPLES_PACK_READER_HPP
@@ -33,7 +34,13 @@ public:
             return vgl::unexpected(files.error());
         }
         reader.files_ = std::move(*files);
+#if defined(VGL_SAMPLE_PAGE)
+        // In a page every pack is on a web server, and a relative URI is fetched from the page's
+        // own address. Programs for Node.js read files as native ones do.
+        vgl::expected<vgl::http_reader> http = vgl::http_reader::create();
+#else
         vgl::expected<vgl::http_reader> http = vgl::http_reader::create(reader.files_);
+#endif
         if (http)
         {
             reader.http_ = std::move(*http);

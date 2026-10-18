@@ -5,8 +5,9 @@
 
 vgl is a lightweight, open-source C++ library for rendering a virtual globe inside an existing
 application. It streams level-of-detail terrain and imagery on the WGS84 ellipsoid and draws it
-through backends for OpenGL / OpenGL ES, Direct3D 11 and Ogre, on Windows, Linux, macOS, Android and iOS. The public interface is a C
-API, so the library embeds as easily in a C code base as in a C++ one.
+through backends for OpenGL / OpenGL ES, Direct3D 11 and Ogre, on Windows, Linux, macOS, Android
+and iOS, and in web browsers on WebGL 2. The public interface is a C API, so the library embeds as
+easily in a C code base as in a C++ one.
 
 > **Status:** early development, at milestone M2 (MVP runtime). The runtime loads baked packs,
 > selects and meshes tiles, and the OpenGL / OpenGL ES backend draws the terrain with imagery.
@@ -33,6 +34,8 @@ API, so the library embeds as easily in a C code base as in a C++ one.
   GEBCO) and your own imagery into sharded, range-readable tile packs. The runtime reads them
   from local disk or from any web server that supports HTTP range requests, such as an object
   store or the reference server configuration for Caddy ([hosting guide](docs/hosting.md)).
+- **In the browser too.** An Emscripten build runs the OpenGL sample on WebGL 2, with threads,
+  streaming packs from any server that allows it ([web sample](samples/gl/web/README.md)).
 - **Easy to extend.** Backends, data providers, decoders, task scheduling, I/O, allocators and
   logging are all public interfaces. The built-in implementations use the same interfaces.
 
@@ -63,8 +66,9 @@ ctest --test-dir build
 `CMakePresets.json` (CMake 3.25 or later) has presets for the configurations CI builds: MSVC with
 the Visual Studio generator on Windows, GCC and Clang with Ninja Multi-Config on Linux, each as a
 static, shared or no-exceptions build, and Apple Clang on macOS. Cross-build presets cover Android
-(`android-arm64`, with `ANDROID_NDK` pointing at an NDK) and iOS (`ios-arm64`, on a Mac). A workflow preset configures, builds and tests in one
-step:
+(`android-arm64`, with `ANDROID_NDK` pointing at an NDK), iOS (`ios-arm64`, on a Mac) and
+WebAssembly (`emscripten`, with `EMSDK` pointing at an activated emsdk; the tests run on Node.js).
+A workflow preset configures, builds and tests in one step:
 
 ```sh
 cmake --list-presets=all

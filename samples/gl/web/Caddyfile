@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Jeremiah van Oosten
+#
+# Serves the OpenGL sample's page (README.md) for Caddy 2.11, run from the repository root:
+#
+#     caddy run --config samples/gl/web/Caddyfile
+#
+# and open http://localhost:8090/vgl-gl.html. Settings, from the environment:
+#
+#     VGL_SITE   The address to serve: ":8090" by default.
+#     VGL_WEB    The directory of the built page: build/emscripten/bin/Release by default.
+#     VGL_PACKS  The packs served at data/packs next to the page: samples/data/packs by default.
+#
+# The page runs threads, which browsers allow only in a page that is cross-origin isolated:
+# served with Cross-Origin-Opener-Policy: same-origin and Cross-Origin-Embedder-Policy:
+# require-corp. Packs it fetches from other servers must then allow it, with CORS, as the
+# reference server does (tools/server/Caddyfile).
+{
+	admin off
+}
+
+{$VGL_SITE::8090} {
+	header {
+		-Server
+		Cross-Origin-Opener-Policy same-origin
+		Cross-Origin-Embedder-Policy require-corp
+		X-Content-Type-Options nosniff
+		# Pages and their code change from one build to the next.
+		Cache-Control no-cache
+	}
+
+	@not_allowed not method GET HEAD
+	respond @not_allowed 405
+
+	# In the order written: the packs of the sample set, as the reference server serves them,
+	# then the page, its script, its WebAssembly and its package.
+	route {
+		@ranges header_regexp Range ,
+		respond @ranges 416
+
+		handle_path /data/packs/* {
+			root * {$VGL_PACKS:samples/data/packs}
+			route {
+				@pack path */pack.vglm *.vgls
+				header @pack Content-Type application/octet-stream
+				file_server @pack
+				respond 404
+			}
+		}
+
+		redir / /vgl-gl.html
+		root * {$VGL_WEB:build/emscripten/bin/Release}
+		@page path /vgl-gl.html /vgl-gl.js /vgl-gl.wasm /vgl-gl.data
+		file_server @page
+		respond 404
+	}
+}

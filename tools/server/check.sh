@@ -86,6 +86,7 @@ header X-Content-Type-Options nosniff "$url/gebco/$shard"
 header Cache-Control "public, max-age=31536000, immutable" "$url/gebco/$shard"
 header Cache-Control "public, max-age=60" "$url/gebco/pack.vglm"
 header Access-Control-Allow-Origin '\*' "$url/gebco/pack.vglm"
+header Cross-Origin-Resource-Policy cross-origin "$url/gebco/$shard"
 etag=$(curl -s -D - -o /dev/null "$url/gebco/$shard" | tr -d '\r' | grep -i '^etag:' | cut -d' ' -f2-)
 [ -n "$etag" ] || fail "a shard has no ETag"
 expect 304 -H "If-None-Match: $etag" "$url/gebco/$shard"
