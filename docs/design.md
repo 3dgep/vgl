@@ -21,7 +21,7 @@ This document describes the planned design of a lightweight C++ library for rend
 
 The closest existing reference is Cesium Native, a set of C++ libraries for 3D Tiles streaming, glTF, high-precision geospatial math and raster overlays. Cesium Native does not render anything itself. Rendering is done by the integrations built on top of it (Cesium for Unreal, Unity, Omniverse and O3DE). It also consists of roughly two dozen libraries, including networking and cloud service clients, with a substantial dependency tree.
 
-This library takes a different position in two ways. First, it renders: it ships with backends for specific graphics APIs and engines. Second, it is deliberately small. It has a narrow format scope, a minimal set of runtime dependencies, no built-in networking, no threads of its own and bounded memory use.
+This library takes a different position in two ways. First, it renders: it ships with backends for specific graphics APIs and engines. Second, it is deliberately small. It has a narrow format scope, a minimal set of runtime dependencies, no networking in the core, no threads of its own and bounded memory use.
 
 ### 1.3 Summary of key decisions
 
@@ -50,7 +50,7 @@ The library should render a WGS84 globe with streamed, level-of-detail terrain a
 
 ### 2.2 Non-goals
 
-The following are explicitly out of scope for the first releases: 3D Tiles and glTF streaming, text and label rendering, vector tile styling, time-dynamic data, clients for online services (Cesium ion, Google, Bing), general map reprojection at runtime, and a built-in HTTP stack. Several of these may be reconsidered later (see section 14), but the architecture should not be shaped around them.
+The following are explicitly out of scope for the first releases: 3D Tiles and glTF streaming, text and label rendering, vector tile styling, time-dynamic data, clients for online services (Cesium ion, Google, Bing), general map reprojection at runtime, and an HTTP stack in the core (the optional defaults module has an HTTP reader, section 7.5, which hosts may use or replace). Several of these may be reconsidered later (see section 14), but the architecture should not be shaped around them.
 
 ---
 
@@ -73,7 +73,7 @@ The runtime targets Windows, Linux, macOS, Android and iOS, on desktop and mobil
 The rules that keep the runtime portable:
 
 - The core uses only the C and C++ standard libraries. It never calls an operating system API: files, network and threads all go through host callbacks (sections 7.5 and 13.1), which is also how an Android host reads from its APK assets and an iOS host from its app bundle.
-- No `std::filesystem`, `std::thread` or locale-dependent formatting in the core. The optional defaults module (section 6.2) may use threads and files, and is built only where they exist.
+- No `std::filesystem`, `std::thread` or locale-dependent formatting in the core. The optional defaults module (section 6.2) may use threads, files and, for its HTTP reader, libcurl, and is built only where they exist.
 - Data formats are little-endian and read byte by byte (pack format, section 3), so no part of the runtime depends on the host's endianness or alignment.
 - The library builds as a static library, which mobile platforms prefer, as well as a shared one, and CI builds it for every target platform.
 
@@ -189,7 +189,7 @@ flowchart TB
 | Tile mesh builder | Terrain meshes from heightmaps, skirts, normals, imagery texture coordinates |
 | Render interface | The contract between core and backends |
 | Backends | OpenGL / GLES, Direct3D 11, Ogre |
-| Optional defaults | Thread pool and filesystem reader, used by the samples and available to hosts |
+| Optional defaults | Thread pool, filesystem reader and optional HTTP reader, used by the samples and available to hosts |
 
 ### 6.3 Host integration model
 
@@ -292,6 +292,8 @@ The library never spawns threads or opens sockets (NFR-02). The host supplies tw
 GPU uploads happen only on the render thread, in a budgeted step at the start of each frame. The frame functions must not overlap with `vgl_context_update`; a host that updates and renders on different threads serializes the two ([render interface specification](render-interface.md), section 9).
 
 The optional defaults module provides a small thread pool and a filesystem reader, so the common case works without writing callbacks. The samples use these defaults. It is a separate library, `vgl::defaults`, that uses vgl only through the C API.
+
+The defaults module also has an HTTP reader (`vgl_http_reader`), which reads `http://` and `https://` URIs with range requests and hands other URIs to a file reader (section 8.6). It is built on libcurl and only with `VGL_DEFAULTS_HTTP`, off by default, so that a build without it needs no libcurl and the core never has an HTTP stack; without it, `vgl_http_reader_create` reports `VGL_RESULT_NOT_SUPPORTED`. CMake uses an installed libcurl, or else downloads curl and builds it with HTTP and HTTPS only, on the platform's TLS library (Schannel, Secure Transport or OpenSSL). The reader runs one thread of its own on libcurl's multi interface, which overlaps reads over a few connections to each server. Hosts with a network layer of their own implement the I/O interface on it instead.
 
 A context may be destroyed while reads are outstanding or tasks are queued. The state those need is reference counted and outlives the context, so a late completion or task finds the context gone and frees itself; the host never has to drain its queues first (C API conventions, section 12).
 
@@ -469,7 +471,7 @@ The runtime's provider interface is tile-keyed ("return the bytes of tile L/X/Y 
 | Provider | Description | Milestone |
 |---|---|---|
 | Pack on disk | Reads shards from the local filesystem | MVP |
-| Pack over HTTP | Reads the same shards through HTTP range requests, via the host's I/O callback | After MVP |
+| Pack over HTTP | Reads the same shards through HTTP range requests, via the host's I/O callback or the defaults module's HTTP reader (section 7.5) | M3, ahead of M4 |
 | Tile endpoint | Fetches individual tiles from a web API, for example to add access control | Later |
 | Disk cache | Wraps a remote provider and keeps visited tiles available offline | After MVP |
 
@@ -528,6 +530,8 @@ At this size, streaming from a web server becomes the main way most installation
 
 Because shards are plain range-readable files, the first version of the client's web API needs no server code. Any web server, CDN or object store that supports HTTP range requests works. On a small budget, data transfer fees typically matter more than storage costs. The recommended host is therefore an object store without egress fees that serves HTTP range requests, such as Cloudflare R2; at the rates published in 2026 (about $0.015 per GB and month, to be confirmed when the host is set up), a global GLO-30 and GEBCO dataset of about 150 GB costs a few dollars a month to store, and nothing to serve. Since packs are plain files, moving to another host only means copying them. A tile endpoint can be added later if access control or per-tile caching is needed, without changes to the runtime core.
 
+For installations that host packs themselves, vgl provides a reference server: a configuration for Caddy (`tools/server/Caddyfile`), not server code of its own, so that the repository gains no toolchain and the code facing the internet is a widely used web server. It serves only pack files, with `GET` and `HEAD` and one range per request, over HTTPS with certificates Caddy obtains itself, and lets caches keep shards forever because their names hold their digests. Rate limiting is left to a CDN or firewall in front. `tools/server/check.sh` checks it in CI against the HTTP reader, and the [hosting guide](hosting.md) covers deployment and the operator's part of its security.
+
 ---
 
 ## 11. Samples
@@ -549,7 +553,7 @@ All samples use a small dataset baked from freely licensed sources (public domai
 
 ### 12.1 Build
 
-The build uses CMake, with options to enable or disable each backend, decoder and provider. Each dependency is used from an installed package when CMake finds one, and is otherwise downloaded at a pinned version with a checked hash; a downloaded Zstandard is compiled into the library with hidden symbols, and so is stb_image, whose allocations go to the context's allocator. GDAL is only ever found, never downloaded: on Windows it comes from conda-forge. The runtime's third-party dependencies are limited to small, permissively licensed libraries: an image decoder (stb_image) and Zstandard for tile compression. The baker additionally depends on GDAL. The library builds as a static or shared library and installs both a CMake package and a pkg-config file, since C projects often use the latter.
+The build uses CMake, with options to enable or disable each backend, decoder and provider. Each dependency is used from an installed package when CMake finds one, and is otherwise downloaded at a pinned version with a checked hash; a downloaded Zstandard is compiled into the library with hidden symbols, and so is stb_image, whose allocations go to the context's allocator. GDAL is only ever found, never downloaded: on Windows it comes from conda-forge. The runtime's third-party dependencies are limited to small, permissively licensed libraries: an image decoder (stb_image) and Zstandard for tile compression. The defaults module's optional HTTP reader depends on libcurl (section 7.5), and the baker on GDAL. The library builds as a static or shared library and installs both a CMake package and a pkg-config file, since C projects often use the latter.
 
 ### 12.2 Testing
 
@@ -565,7 +569,7 @@ The build uses CMake, with options to enable or disable each backend, decoder an
 
 ### 12.3 Licensing
 
-The library is released under the MIT license. It lets commercial integrators link the library into closed-source products, requires only that the copyright and license notice are kept, and is compatible with both GPLv2 and GPLv3 projects. All runtime, baker and sample dependencies (stb_image, Zstandard, GDAL, Ogre, GLFW, Dear ImGui, ANGLE) use permissive licenses; their notices are included in distributions. Jeremiah van Oosten retains the copyright and publishes the library as open source on GitHub at github.com/3dgep/vgl. The client, like every other user, uses it under the MIT license. External contributors keep the copyright to their own contributions and license them under MIT, confirmed by a Developer Certificate of Origin sign-off on each commit. Baked datasets carry the attribution requirements of their sources (section 9), independently of the code license.
+The library is released under the MIT license. It lets commercial integrators link the library into closed-source products, requires only that the copyright and license notice are kept, and is compatible with both GPLv2 and GPLv3 projects. All runtime, baker and sample dependencies (stb_image, Zstandard, libcurl, GDAL, Ogre, GLFW, Dear ImGui, ANGLE) use permissive licenses; their notices are included in distributions. Jeremiah van Oosten retains the copyright and publishes the library as open source on GitHub at github.com/3dgep/vgl. The client, like every other user, uses it under the MIT license. External contributors keep the copyright to their own contributions and license them under MIT, confirmed by a Developer Certificate of Origin sign-off on each commit. Baked datasets carry the attribution requirements of their sources (section 9), independently of the code license.
 
 ---
 
@@ -609,7 +613,7 @@ The repository is public at github.com/3dgep/vgl, with continuous integration th
 | M1: Data pipeline | Baker with GDAL input, datum conversion, elevation and imagery encoding, sharded packs; regional test bake to settle tile size, deepest level and shard level |
 | M2: MVP runtime | LOD selection and culling, cache and budgets, pack-on-disk provider, mesh builder, OpenGL / GLES and Direct3D 11 backends, a global imagery layer, height queries, attribution; OpenGL, Direct3D 11, pure-C and headless samples; macOS, Android and iOS builds in CI |
 | M3: Integration | Ogre backend and sample on desktop (Windows, Linux, macOS), Android and iOS, GLES sample in CI, multiple imagery layers, picking, atmosphere |
-| M4: Distribution | HTTP pack provider, disk cache, full global bake, hosting setup |
+| M4: Distribution | HTTP pack provider and reference server (delivered during M3: the defaults module's HTTP reader and a Caddy configuration), disk cache, full global bake, hosting setup |
 | Later | Compressed GPU textures, vector overlays rasterized into tiles, Vulkan backend, a limited subset of 3D Tiles |
 
 Within M2, the OpenGL / OpenGL ES backend comes first: it runs on every target platform and the pure-C sample needs it. The Direct3D 11 backend follows. The client integrates vgl themselves, so the order does not wait for their choice of graphics API.

@@ -34,6 +34,7 @@
 #include "glfw_controls.hpp"
 #include "navigation.hpp"
 #include "overlay.hpp"
+#include "pack_reader.hpp"
 #include "sample_camera.hpp"
 #include "sample_check.hpp"
 #include "sample_data.hpp"
@@ -1747,14 +1748,15 @@ int main(int argc, char** argv)
                 reinterpret_cast<const char*>(gl.GetString(GL_VERSION)),
                 reinterpret_cast<const char*>(gl.GetString(GL_RENDERER)));
 
-    // The defaults: a thread pool for decoding and reading, and a file reader on it.
+    // The defaults: a thread pool for decoding and reading, and a file reader on it, with an
+    // HTTP reader in front when vgl has one.
     vgl::expected<vgl::thread_pool> pool = vgl::thread_pool::create();
     if (!pool)
     {
         std::fprintf(stderr, "could not create the thread pool\n");
         return 1;
     }
-    vgl::expected<vgl::file_reader> reader = vgl::file_reader::create(*pool);
+    vgl::expected<sample::pack_reader> reader = sample::pack_reader::create(*pool);
     if (!reader)
     {
         std::fprintf(stderr, "could not create the file reader\n");
@@ -1779,6 +1781,7 @@ int main(int argc, char** argv)
     const std::vector<sample::pack_source> sources =
         o.packs.empty() ? sample::sample_packs(sample::data_directory(o.data, VGL_SAMPLE_DATA_DIR))
                         : sample::named_packs(o.packs);
+    reader->warn_unreadable(sources);
     std::vector<vgl::pack> packs;
     for (const sample::pack_source& s : sources)
     {

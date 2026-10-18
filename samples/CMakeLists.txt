@@ -15,6 +15,7 @@ endif()
 add_library(vgl_sample_common STATIC
     common/navigation.cpp
     common/navigation.hpp
+    common/pack_reader.hpp
     common/sample_camera.hpp
     common/sample_check.cpp
     common/sample_check.hpp

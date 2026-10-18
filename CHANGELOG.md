@@ -119,6 +119,20 @@ The pack format has its own version number, independent of the library version.
   backend, pixel for pixel but for anti-aliased wireframe lines on Direct3D 11. CI runs it on
   Linux with Mesa on full runs.
 - The samples in a GLFW window share their controls (`samples/common/glfw_controls.hpp`).
+- HTTP reader in the defaults module (`vgl_http_reader`, `vgl::http_reader`), built with
+  `VGL_DEFAULTS_HTTP` (off by default) on an installed libcurl, or else on curl 8.11.1,
+  downloaded and built with HTTP and HTTPS only. It reads `http://` and `https://` packs with
+  range requests on one thread of its own, keeps the range of servers that send whole files,
+  and hands other URIs to a file reader. Without libcurl, `vgl_http_reader_create` reports
+  `VGL_RESULT_NOT_SUPPORTED`. Its test serves test packs from a small server on the loopback
+  address. The C++ samples' `--pack` takes HTTP URIs when vgl has the reader.
+- Reference server for packs (`tools/server/Caddyfile`, `docs/hosting.md`): a configuration for
+  Caddy 2.11 that serves only pack files, with GET and HEAD, one range per request, no
+  compression, caching headers by file kind, CORS, timeouts and automatic HTTPS, for public
+  endpoints. `tools/server/check.sh` probes what it serves and refuses and loads the sample
+  packs through it with the headless sample; CI runs it on Linux with Caddy 2.11.7. The hosting
+  guide compares object stores with it, and covers Docker, systemd, the operator's part of
+  security and updating packs.
 - The interactive samples fly to places (1 to 7) and turn (N, U, R) smoothly instead of
   jumping: along the great circle, with the altitude eased on a logarithmic scale and raised in
   an arc over long flights, on an s-curve that starts and ends at rest, from half a second to

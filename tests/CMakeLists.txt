@@ -54,6 +54,26 @@ if(TARGET vgl_defaults)
     target_link_libraries(vgl_test_defaults PRIVATE Threads::Threads)
 endif()
 
+# The HTTP reader, against a small HTTP server in the test on the loopback address.
+if(TARGET vgl_defaults AND VGL_DEFAULTS_HTTP)
+    get_property(vgl_curl_target GLOBAL PROPERTY VGL_CURL_TARGET)
+    # An installed libcurl's imported target is visible only where it was found.
+    if(vgl_curl_target STREQUAL "CURL::libcurl")
+        find_package(CURL REQUIRED)
+    endif()
+    vgl_add_internal_test(http http_test.cpp
+        "${PROJECT_SOURCE_DIR}/src/defaults/file_reader.cpp"
+        "${PROJECT_SOURCE_DIR}/src/defaults/http_reader.cpp"
+        "${PROJECT_SOURCE_DIR}/src/defaults/thread_pool.cpp"
+        WRITER)
+    target_compile_definitions(vgl_test_http PRIVATE VGL_DEFAULTS_BUILDING VGL_DEFAULTS_HAS_CURL=1)
+    target_include_directories(vgl_test_http PRIVATE "${PROJECT_SOURCE_DIR}/src")
+    target_link_libraries(vgl_test_http PRIVATE Threads::Threads ${vgl_curl_target})
+    if(WIN32)
+        target_link_libraries(vgl_test_http PRIVATE ws2_32)
+    endif()
+endif()
+
 # Public API smoke tests: the C API header compiles as C99, the C++ wrapper
 # compiles as C++, and both link against the library itself.
 add_executable(vgl_test_api_c api_c.c)

@@ -78,6 +78,12 @@ if(NOT VGL_ZSTD_BUNDLED)
     endif()
 endif()
 
+# A static defaults module with the HTTP reader passes libcurl on, found as CURL::libcurl.
+if(TARGET vgl_defaults AND VGL_DEFAULTS_HTTP AND NOT BUILD_SHARED_LIBS)
+    string(APPEND VGL_CONFIG_DEPENDENCIES "
+find_dependency(CURL)")
+endif()
+
 configure_package_config_file(
     "${PROJECT_SOURCE_DIR}/cmake/vgl-config.cmake.in"
     "${PROJECT_BINARY_DIR}/vgl-config.cmake"
@@ -130,6 +136,11 @@ if(TARGET vgl_defaults)
         set(VGL_DEFAULTS_PC_LIBS_PRIVATE "-pthread")
     else()
         set(VGL_DEFAULTS_PC_LIBS_PRIVATE "")
+    endif()
+    if(VGL_DEFAULTS_HTTP)
+        set(VGL_DEFAULTS_PC_REQUIRES_PRIVATE "libcurl")
+    else()
+        set(VGL_DEFAULTS_PC_REQUIRES_PRIVATE "")
     endif()
     configure_file(
         "${PROJECT_SOURCE_DIR}/cmake/vgl-defaults.pc.in"

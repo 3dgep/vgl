@@ -22,7 +22,7 @@ while IFS= read -r file; do
 done < <(git ls-files \
     '*.c' '*.h' '*.cpp' '*.hpp' '*.inl' '*.inc' '*.glsl' '*.hlsl' \
     '*.cmake' '*.cmake.in' '*.h.in' '*.pc.in' '*.sh' 'CMakeLists.txt' '*/CMakeLists.txt' \
-    '.clang-format' '.clang-tidy')
+    '*/Caddyfile' '.clang-format' '.clang-tidy')
 
 em_dash=$'\xe2\x80\x94'
 if git grep -n -I -F "$em_dash" -- . ; then

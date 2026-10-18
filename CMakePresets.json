@@ -69,7 +69,8 @@
       "displayName": "Windows MSVC, shared",
       "inherits": "windows-base",
       "cacheVariables": {
-        "BUILD_SHARED_LIBS": "ON"
+        "BUILD_SHARED_LIBS": "ON",
+        "VGL_DEFAULTS_HTTP": "ON"
       }
     },
     {
@@ -93,7 +94,8 @@
       "displayName": "Linux GCC, shared",
       "inherits": "linux-gcc-base",
       "cacheVariables": {
-        "BUILD_SHARED_LIBS": "ON"
+        "BUILD_SHARED_LIBS": "ON",
+        "VGL_DEFAULTS_HTTP": "ON"
       }
     },
     {
@@ -117,7 +119,8 @@
       "displayName": "Linux Clang, shared",
       "inherits": "linux-clang-base",
       "cacheVariables": {
-        "BUILD_SHARED_LIBS": "ON"
+        "BUILD_SHARED_LIBS": "ON",
+        "VGL_DEFAULTS_HTTP": "ON"
       }
     },
     {

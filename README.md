@@ -31,7 +31,8 @@ API, so the library embeds as easily in a C code base as in a C++ one.
   reversed-Z (or logarithmic) depth, so there is no jitter or z-fighting at any distance.
 - **Offline data pipeline.** A bundled baking tool turns free global datasets (Copernicus DEM,
   GEBCO) and your own imagery into sharded, range-readable tile packs. The runtime reads them
-  from local disk or from any web server that supports HTTP range requests.
+  from local disk or from any web server that supports HTTP range requests, such as an object
+  store or the reference server configuration for Caddy ([hosting guide](docs/hosting.md)).
 - **Easy to extend.** Backends, data providers, decoders, task scheduling, I/O, allocators and
   logging are all public interfaces. The built-in implementations use the same interfaces.
 
@@ -45,7 +46,8 @@ These are out of scope for the first releases, and the architecture is not shape
 - Time-dynamic data
 - Clients for online services (Cesium ion, Google, Bing)
 - General map reprojection at runtime
-- A built-in HTTP stack (the host supplies I/O through a callback)
+- An HTTP stack in the core (the host supplies I/O through a callback; the optional defaults
+  module has an HTTP reader on libcurl)
 - Direct3D 12, and OpenGL ES 2.0
 
 ## Building
@@ -76,6 +78,7 @@ cmake --workflow --preset linux-gcc-static-debug
 | `VGL_BUILD_SAMPLES` | `ON` (top level) | Build the samples |
 | `VGL_BUILD_BAKER` | `OFF` | Build the baking tool (requires GDAL) |
 | `VGL_BUILD_DEFAULTS` | `ON` | Build the optional thread pool and filesystem reader |
+| `VGL_DEFAULTS_HTTP` | `OFF` | Give the defaults module an HTTP reader: an installed libcurl, or else curl 8.11.1 downloaded and built with HTTP and HTTPS only |
 | `VGL_BACKEND_GL` | `ON` | Build the OpenGL / OpenGL ES backend |
 | `VGL_BACKEND_D3D11` | `ON` (Windows) | Build the Direct3D 11 backend |
 | `VGL_BACKEND_OGRE` | `OFF` | Build the Ogre backend (classic Ogre 14): an installed Ogre, or else Ogre 14.6.1 downloaded and built statically |
@@ -139,6 +142,7 @@ cc main.c $(pkg-config --cflags --libs vgl)
 | `src/` | Core modules: foundation, geodesy, tiling, cache, providers, decoders, mesh, render, defaults |
 | `backends/` | OpenGL / GLES, Direct3D 11 and Ogre backends, each with its headers in `include/vgl/` |
 | `tools/baker/` | Offline baking tool |
+| `tools/server/` | Reference server for packs: a Caddy configuration and its check |
 | `samples/` | Sample applications |
 | `tests/` | Tests |
 | `docs/` | Design document and specifications |
@@ -148,6 +152,7 @@ cc main.c $(pkg-config --cflags --libs vgl)
 - [Design document](docs/design.md): requirements, architecture, data pipeline and roadmap
 - [C API conventions](docs/c-api.md): naming, types, errors, versioned structures, threading and ABI rules
 - [Pack format](docs/pack-format.md): tiling scheme, manifest, shards and tile encodings
+- [Hosting packs](docs/hosting.md): object stores and the reference server, deployment and security
 - [Contributing](CONTRIBUTING.md): coding style, sign-off and review process
 - [Changelog](CHANGELOG.md)
 

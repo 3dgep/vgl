@@ -2,7 +2,8 @@
 // Copyright (c) 2026 Jeremiah van Oosten
 //
 // Where the C++ samples find their packs. With --pack, the packs named, in the order given, each
-// winning over the ones before it where they overlap. Otherwise the sample set
+// winning over the ones before it where they overlap; http:// and https:// URIs are read from a
+// web server when vgl has the HTTP reader (pack_reader.hpp). Otherwise the sample set
 // (samples/data/README.md) in a directory: the one named with --data, or else the one in the
 // environment variable VGL_SAMPLE_DATA, or else the source tree's samples/data, built in.
 

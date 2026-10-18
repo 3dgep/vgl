@@ -89,7 +89,7 @@ jobs:
       # which needs the X11 and Wayland headers.
       - name: Install Ninja, Zstandard and GLFW's dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ninja-build libzstd-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libwayland-dev libxkbcommon-dev
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libzstd-dev libcurl4-openssl-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libwayland-dev libxkbcommon-dev
 
       - name: Configure, build and test
         run: cmake --workflow --preset ${{ matrix.workflow }}
@@ -127,7 +127,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libzstd-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libwayland-dev libxkbcommon-dev \
+          sudo apt-get install -y ninja-build libzstd-dev libcurl4-openssl-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libwayland-dev libxkbcommon-dev \
             xvfb libgl1-mesa-dri libglx-mesa0 libegl-mesa0
 
       - name: Configure and build
@@ -139,6 +139,21 @@ jobs:
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: xvfb-run -a ctest --test-dir build/linux-gcc-shared -C Release --output-on-failure
+
+      # The reference server (tools/server, docs/hosting.md): Caddy at a pinned version and
+      # checksum, serving the sample packs to the headless sample over HTTP.
+      - name: Check the reference server
+        env:
+          CADDY_VERSION: 2.11.7
+          CADDY_SHA512: a7a433a1b133efc3c8d10eb0b99d52a24b5ef5c322dc77f5282182b1c0402139ab83f3a99f0c52409df77d20123fb0b523edad8a66d8f5e49136197bf61ef0e7
+        run: |
+          mkdir -p "$RUNNER_TEMP/caddy"
+          cd "$RUNNER_TEMP/caddy"
+          curl -fsSLO "https://github.com/caddyserver/caddy/releases/download/v$CADDY_VERSION/caddy_${CADDY_VERSION}_linux_amd64.tar.gz"
+          echo "$CADDY_SHA512  caddy_${CADDY_VERSION}_linux_amd64.tar.gz" | sha512sum -c -
+          tar -xzf "caddy_${CADDY_VERSION}_linux_amd64.tar.gz" caddy
+          cd "$GITHUB_WORKSPACE"
+          bash tools/server/check.sh "$RUNNER_TEMP/caddy/caddy" build/linux-gcc-shared/bin/Release/vgl-headless
 
   # The Ogre backend and its sample's check on Ogre's OpenGL 3+ render system, with Ogre 14
   # downloaded and built statically (design document, section 7.6), under Mesa and Xvfb as the
@@ -153,7 +168,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libzstd-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libwayland-dev libxkbcommon-dev libgl-dev xvfb libgl1-mesa-dri libglx-mesa0 libegl-mesa0
+          sudo apt-get install -y ninja-build libzstd-dev libcurl4-openssl-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libwayland-dev libxkbcommon-dev libgl-dev xvfb libgl1-mesa-dri libglx-mesa0 libegl-mesa0
 
       - name: Configure and build
         run: |
@@ -237,7 +252,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libzstd-dev libgdal-dev nlohmann-json3-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libwayland-dev libxkbcommon-dev
+          sudo apt-get install -y ninja-build libzstd-dev libcurl4-openssl-dev libgdal-dev nlohmann-json3-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libwayland-dev libxkbcommon-dev
 
       - name: Configure, build and test
         run: cmake --workflow --preset linux-gcc-baker-release
@@ -272,13 +287,13 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-18 clang-tidy-18 ninja-build libzstd-dev libgdal-dev \
+          sudo apt-get install -y clang-18 clang-tidy-18 ninja-build libzstd-dev libcurl4-openssl-dev libgdal-dev \
             nlohmann-json3-dev libx11-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libwayland-dev libxkbcommon-dev
 
       - name: Configure and build
         # The preset exports compile_commands.json. Pin the compiler to match clang-tidy-18.
         run: |
-          cmake --preset linux-clang-static -DVGL_BUILD_BAKER=ON \
+          cmake --preset linux-clang-static -DVGL_BUILD_BAKER=ON -DVGL_DEFAULTS_HTTP=ON \
             -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18
           cmake --build --preset linux-clang-static-debug
 

@@ -14,6 +14,7 @@
 // samples/data. Instead, --pack, repeated, loads the packs named, each winning over the ones
 // before it where they overlap (samples/common/sample_data.hpp); the check needs the sample set.
 
+#include "pack_reader.hpp"
 #include "sample_camera.hpp"
 #include "sample_data.hpp"
 
@@ -171,7 +172,8 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    // The defaults: a thread pool for decoding and reading, and a file reader on it.
+    // The defaults: a thread pool for decoding and reading, and a file reader on it, with an
+    // HTTP reader in front when vgl has one.
     vgl::expected<vgl::thread_pool> pool = vgl::thread_pool::create();
     if (!pool)
     {
@@ -179,7 +181,7 @@ int main(int argc, char** argv)
             stderr, "could not create the thread pool: %s\n", vgl::result_name_get(pool.error()));
         return 1;
     }
-    vgl::expected<vgl::file_reader> reader = vgl::file_reader::create(*pool);
+    vgl::expected<sample::pack_reader> reader = sample::pack_reader::create(*pool);
     if (!reader)
     {
         std::fprintf(
@@ -205,6 +207,7 @@ int main(int argc, char** argv)
     const std::vector<sample::pack_source> sources =
         named.empty() ? sample::sample_packs(sample::data_directory(data, VGL_SAMPLE_DATA_DIR))
                       : sample::named_packs(named);
+    reader->warn_unreadable(sources);
     std::vector<vgl::pack> packs;
     for (const sample::pack_source& s : sources)
     {

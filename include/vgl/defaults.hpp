@@ -130,6 +130,68 @@ private:
     vgl_file_reader* handle_ = nullptr;
 };
 
+// Owns a vgl_http_reader.
+class http_reader
+{
+public:
+    http_reader() noexcept = default;
+    explicit http_reader(vgl_http_reader* handle) noexcept : handle_(handle) {}
+    http_reader(const http_reader&) = delete;
+    http_reader& operator=(const http_reader&) = delete;
+    http_reader(http_reader&& other) noexcept : handle_(other.release()) {}
+    http_reader& operator=(http_reader&& other) noexcept
+    {
+        if (this != &other)
+        {
+            reset(other.release());
+        }
+        return *this;
+    }
+    ~http_reader() { reset(); }
+
+    // info may be null for all defaults.
+    [[nodiscard]] static expected<http_reader>
+    create(const vgl_http_reader_create_info* info = nullptr) noexcept
+    {
+        vgl_http_reader* handle = nullptr;
+        const auto r = static_cast<result>(vgl_http_reader_create(info, &handle));
+        if (failed(r))
+        {
+            return unexpected(r);
+        }
+        return http_reader(handle);
+    }
+
+    // Reads the URIs that are not HTTP with a file reader, which must outlive this one.
+    [[nodiscard]] static expected<http_reader> create(file_reader& files) noexcept
+    {
+        auto info = init<vgl_http_reader_create_info>();
+        info.files = files.get();
+        return create(&info);
+    }
+
+    [[nodiscard]] vgl_http_reader* get() const noexcept { return handle_; }
+    [[nodiscard]] explicit operator bool() const noexcept { return handle_ != nullptr; }
+
+    [[nodiscard]] vgl_http_reader* release() noexcept { return std::exchange(handle_, nullptr); }
+
+    void reset(vgl_http_reader* handle = nullptr) noexcept
+    {
+        static_cast<void>(vgl_http_reader_destroy(std::exchange(handle_, handle)));
+    }
+
+    // The reader must be valid.
+    [[nodiscard]] vgl_io_interface io_interface_get() const noexcept
+    {
+        vgl_io_interface table{};
+        static_cast<void>(vgl_http_reader_io_interface_get(handle_, &table));
+        return table;
+    }
+
+private:
+    vgl_http_reader* handle_ = nullptr;
+};
+
 } // namespace vgl
 
 #endif // VGL_DEFAULTS_HPP
