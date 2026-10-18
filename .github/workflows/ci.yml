@@ -97,7 +97,7 @@ jobs:
       - name: Install
         run: cmake --install build/${{ matrix.preset }} --config ${{ matrix.config }} --prefix install
 
-      - name: Build against the installed CMake package
+      - name: Build and run against the installed CMake package
         shell: bash
         run: |
           generator=()
@@ -106,6 +106,7 @@ jobs:
           fi
           cmake -S tests/install -B build-consumer "${generator[@]}"             -DCMAKE_PREFIX_PATH="$PWD/install"
           cmake --build build-consumer --config ${{ matrix.config }}
+          ctest --test-dir build-consumer -C ${{ matrix.config }} --output-on-failure
 
       - name: Check the installed pkg-config file
         if: runner.os == 'Linux'

@@ -50,7 +50,7 @@ endif()
 
 # The Ogre backend, as vgl::ogre, only with an installed Ogre: a downloaded one is built into
 # vgl's build, not installed, so the package could not name it.
-if(TARGET vgl_ogre AND OGRE_FOUND)
+if(TARGET vgl_ogre AND VGL_OGRE_INSTALLED)
     install(TARGETS vgl_ogre
         EXPORT vgl-targets
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
@@ -60,6 +60,26 @@ endif()
 
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/vgl"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
+
+# Licenses (design document, section 12.3): vgl's, and those of the code compiled into it:
+# stb_image always, and Zstandard when it was downloaded. stb_image's license is the comment
+# that ends its header.
+set(VGL_INSTALL_DOCDIR "${CMAKE_INSTALL_DATADIR}/doc/vgl")
+install(FILES "${PROJECT_SOURCE_DIR}/LICENSE" DESTINATION "${VGL_INSTALL_DOCDIR}")
+if(VGL_ZSTD_BUNDLED)
+    install(FILES "${vgl_zstd_source_SOURCE_DIR}/LICENSE"
+        DESTINATION "${VGL_INSTALL_DOCDIR}" RENAME LICENSE.zstd)
+endif()
+file(READ "${VGL_STB_INCLUDE_DIR}/stb_image.h" vgl_stb_header)
+string(FIND "${vgl_stb_header}" "This software is available under 2 licenses" vgl_stb_license_start)
+if(vgl_stb_license_start GREATER -1)
+    string(FIND "${vgl_stb_header}" "*/" vgl_stb_license_end REVERSE)
+    math(EXPR vgl_stb_license_length "${vgl_stb_license_end} - ${vgl_stb_license_start}")
+    string(SUBSTRING "${vgl_stb_header}" ${vgl_stb_license_start} ${vgl_stb_license_length}
+        vgl_stb_license)
+    file(WRITE "${PROJECT_BINARY_DIR}/LICENSE.stb" "${vgl_stb_license}")
+    install(FILES "${PROJECT_BINARY_DIR}/LICENSE.stb" DESTINATION "${VGL_INSTALL_DOCDIR}")
+endif()
 install(DIRECTORY "${PROJECT_BINARY_DIR}/include/vgl"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
 
@@ -78,10 +98,22 @@ if(NOT VGL_ZSTD_BUNDLED)
     endif()
 endif()
 
+# A static defaults module passes its threads on, as Threads::Threads.
+if(TARGET vgl_defaults AND NOT BUILD_SHARED_LIBS)
+    string(APPEND VGL_CONFIG_DEPENDENCIES "
+find_dependency(Threads)")
+endif()
+
 # A static defaults module with the HTTP reader passes libcurl on, found as CURL::libcurl.
 if(TARGET vgl_defaults AND VGL_DEFAULTS_HTTP AND NOT BUILD_SHARED_LIBS)
     string(APPEND VGL_CONFIG_DEPENDENCIES "
 find_dependency(CURL)")
+endif()
+
+# vgl::ogre links Ogre's OgreMain, which its consumers find as vgl's build did.
+if(TARGET vgl_ogre AND VGL_OGRE_INSTALLED)
+    string(APPEND VGL_CONFIG_DEPENDENCIES "
+find_dependency(OGRE 14 CONFIG)")
 endif()
 
 configure_package_config_file(

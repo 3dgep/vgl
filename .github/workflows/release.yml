@@ -1,0 +1,150 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Jeremiah van Oosten
+
+name: Release
+
+# A tag v<version> builds the release archives (packaging/README.md): vgl's install tree for
+# each platform, shared and static, built, tested and then checked by building the consumer
+# project (tests/install) against it. The archives and their checksums go to a draft release
+# for the maintainer to review and publish. A manual run (gh workflow run Release) builds the
+# archives as workflow artifacts, without a release.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  archive:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: windows-x64-shared, os: windows-2025, preset: windows-msvc-shared }
+          - { name: windows-x64-static, os: windows-2025, preset: windows-msvc-static }
+          - { name: linux-x64-shared,   os: ubuntu-24.04, preset: linux-gcc-shared }
+          - { name: linux-x64-static,   os: ubuntu-24.04, preset: linux-gcc-static }
+          - { name: macos-shared,       os: macos-15,     preset: macos-clang-shared }
+          - { name: macos-static,       os: macos-15,     preset: macos-clang-static }
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Version
+        id: version
+        shell: bash
+        run: |
+          version=$(sed -nE 's/^ *VERSION ([0-9]+\.[0-9]+\.[0-9]+)$/\1/p' CMakeLists.txt | head -1)
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::The tag ${GITHUB_REF_NAME} does not match the version ${version} in CMakeLists.txt"
+            exit 1
+          fi
+          port=$(sed -nE 's/^ *"version": "([^"]+)",$/\1/p' packaging/vcpkg/ports/vgl/vcpkg.json)
+          if [ "${port}" != "${version}" ]; then
+            echo "::error::The vcpkg port's version ${port} is not the version ${version} in CMakeLists.txt"
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "stem=vgl-${version}-${{ matrix.name }}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Ninja (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Install Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
+      # Zstandard is compiled in, so the archives depend on nothing but the system. The HTTP
+      # reader needs libcurl, so it is left out: hosts that want it use vcpkg, Conan or a
+      # source build. macOS gets universal binaries (design document, section 4).
+      - name: Configure
+        shell: bash
+        run: |
+          extra=()
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            extra=(-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0)
+          fi
+          cmake --preset ${{ matrix.preset }} -DVGL_BUILD_SAMPLES=OFF \
+            -DVGL_ZSTD_PROVIDER=BUNDLED -DVGL_DEFAULTS_HTTP=OFF "${extra[@]}"
+
+      - name: Build
+        run: cmake --build build/${{ matrix.preset }} --config Release
+
+      - name: Test
+        run: ctest --test-dir build/${{ matrix.preset }} -C Release --output-on-failure
+
+      - name: Install
+        run: cmake --install build/${{ matrix.preset }} --config Release --prefix stage/${{ steps.version.outputs.stem }}
+
+      - name: Check the archive with the consumer project
+        shell: bash
+        run: |
+          generator=()
+          if [ "$RUNNER_OS" != "Windows" ]; then
+            generator=(-G Ninja -DCMAKE_BUILD_TYPE=Release)
+          fi
+          expected="vgl::defaults;vgl::gl"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            expected="${expected};vgl::d3d11"
+          fi
+          cmake -S tests/install -B build-consumer "${generator[@]}" \
+            -DCMAKE_PREFIX_PATH="$PWD/stage/${{ steps.version.outputs.stem }}" \
+            "-DVGL_EXPECTED_TARGETS=${expected}"
+          cmake --build build-consumer --config Release
+          ctest --test-dir build-consumer -C Release --output-on-failure
+
+      - name: Archive
+        shell: bash
+        working-directory: stage
+        run: |
+          stem=${{ steps.version.outputs.stem }}
+          cp ../README.md ../CHANGELOG.md "$stem/"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a -tzip "$stem.zip" "$stem" > /dev/null
+            sha256sum "$stem.zip" > "$stem.zip.sha256"
+          else
+            tar -czf "$stem.tar.gz" "$stem"
+            shasum -a 256 "$stem.tar.gz" > "$stem.tar.gz.sha256"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.version.outputs.stem }}
+          path: |
+            stage/*.zip
+            stage/*.tar.gz
+            stage/*.sha256
+          if-no-files-found: error
+
+  release:
+    name: Draft release
+    needs: archive
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # The notes are the version's section of the changelog.
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }' CHANGELOG.md > notes.md
+          cat dist/*.sha256 > dist/SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+            --title "vgl $version" --notes-file notes.md dist/*.zip dist/*.tar.gz dist/SHA256SUMS

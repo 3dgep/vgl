@@ -10,6 +10,11 @@ The pack format has its own version number, independent of the library version.
 
 ### Added
 
+- Packaging (`packaging/README.md`): a vcpkg port with the features `defaults`, `gl`, `d3d11`,
+  `http` and `ogre`, a Conan recipe, and a release workflow that builds archives for Windows,
+  Linux and macOS into a draft release on a tag. The consumer project in `tests/install`
+  checks each against the C API and C++ wrapper tests, and CI now runs it too. The install
+  includes the licenses of vgl, stb_image and a downloaded Zstandard in `share/doc/vgl`.
 - `vgl_degrees_to_radians` and `vgl_radians_to_degrees`, for bindings that cannot use the
   conversion macros.
 - The thread-safety category Externally synchronized (C API conventions, section 11), and the
@@ -458,6 +463,9 @@ The pack format has its own version number, independent of the library version.
 
 ### Fixed
 
+- The installed CMake package now finds Threads for a static defaults module, and Ogre for
+  `vgl::ogre`, whose consumers failed to configure or link without them. `vgl::ogre` was never
+  installed, even with an installed Ogre.
 - The OpenGL and Direct3D 11 samples' executables were not relinked when their backend's library
   changed, with Visual Studio: an executable's import library took the same name as the
   backend's (`vgl-gl.lib`, `vgl-d3d11.lib`), which MSBuild then took for the executable's own

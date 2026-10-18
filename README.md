@@ -127,7 +127,8 @@ vgl-gl --pack samples/data/packs/gebco --pack /data/packs/glo30-norway \
 
 ### Using vgl
 
-After `cmake --install build`, consume vgl through its CMake package:
+vgl is packaged for vcpkg and Conan, and released as archives (`packaging/README.md`). After
+`cmake --install build`, or with a package, consume vgl through its CMake package:
 
 ```cmake
 find_package(vgl REQUIRED)
@@ -150,7 +151,8 @@ cc main.c $(pkg-config --cflags --libs vgl)
 | `tools/baker/` | Offline baking tool |
 | `tools/server/` | Reference server for packs: a Caddy configuration and its check |
 | `samples/` | Sample applications |
-| `tests/` | Tests |
+| `tests/` | Tests, and the consumer project that checks an installed vgl (`tests/install`) |
+| `packaging/` | vcpkg port, Conan recipe, and how releases are made |
 | `docs/` | Design document and specifications |
 
 ## Documentation
@@ -159,6 +161,7 @@ cc main.c $(pkg-config --cflags --libs vgl)
 - [C API conventions](docs/c-api.md): naming, types, errors, versioned structures, threading and ABI rules
 - [Pack format](docs/pack-format.md): tiling scheme, manifest, shards and tile encodings
 - [Hosting packs](docs/hosting.md): object stores and the reference server, deployment and security
+- [Packaging](packaging/README.md): vcpkg, Conan, release archives and the release steps
 - [Contributing](CONTRIBUTING.md): coding style, sign-off and review process
 - [Changelog](CHANGELOG.md)
 

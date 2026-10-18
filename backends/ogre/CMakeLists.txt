@@ -12,6 +12,9 @@ set(VGL_OGRE_URL "https://github.com/OGRECave/ogre/archive/refs/tags/v${VGL_OGRE
 set(VGL_OGRE_SHA256 ec95dfd25c01904baa254316d9416c5acc348f58fde7e16570f698b0fdb1c87e)
 
 find_package(OGRE 14 CONFIG QUIET)
+# Whether the backend links an installed Ogre, which the install rules need: only then is
+# vgl::ogre installed (cmake/vgl_install.cmake), since a downloaded Ogre is not.
+set(VGL_OGRE_INSTALLED ${OGRE_FOUND} CACHE INTERNAL "vgl::ogre links an installed Ogre")
 if(OGRE_FOUND)
     set(VGL_OGRE_MEDIA_DIR "${OGRE_MEDIA_DIR}" CACHE INTERNAL "Ogre's media")
     message(STATUS "vgl: using installed Ogre ${OGRE_VERSION}")
