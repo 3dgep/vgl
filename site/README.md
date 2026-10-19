@@ -34,9 +34,16 @@ The demo runs threads, which browsers allow only in a cross-origin isolated page
 (`samples/gl/web/README.md`), and GitHub Pages cannot send the headers for it. So the site's
 copy of the page loads `demo/coi.js` first: when the page is not isolated, it registers the
 service worker `demo/coi-sw.js` and reloads, and the worker then adds
-`Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` to the demo's responses. The
-workflow checks the result with `tests/browser/page_check.mjs --url`, from a server that sends
-no headers, as visitors get it.
+`Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` to the demo's responses.
+
+GitHub Pages also compresses every file type it does not know as already compressed, pack files
+included, and answers range requests with ranges of the compressed stream, which no reader can
+decode (`vgl-bake check` reports it). So `site/build.sh` gives the site's copies of the packs'
+files a `.zip` suffix, a type Pages serves as it is, and the worker sends the demo's reads of
+`data/packs/...` to those names, with their `Range` header. The packs are unchanged.
+
+The workflow checks the result with `tests/browser/page_check.mjs --url`, from a server that
+sends no headers.
 
 The sample packs are the one set of data the project serves: small, coarse and already in the
 repository, for the demo only (design document, section 10.2). Integrators bake and host their

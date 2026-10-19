@@ -39,6 +39,10 @@ if ! grep -q 'src=coi.js' "$out/demo/vgl-gl.html"; then
 fi
 mkdir -p "$out/demo/data"
 cp -r samples/data/packs "$out/demo/data/"
+# GitHub Pages compresses unknown file types and then serves ranges of the compressed stream,
+# so the packs' files get a .zip suffix, a type it serves as it is; coi-sw.js maps the demo's
+# reads to them.
+find "$out/demo/data/packs" -type f -exec mv {} {}.zip \;
 
 # The API reference, at api/. Any warning fails the build, so that the reference stays whole.
 version=$(sed -nE 's/^ *VERSION ([0-9]+\.[0-9]+\.[0-9]+)$/\1/p' CMakeLists.txt | head -1)

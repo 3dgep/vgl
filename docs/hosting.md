@@ -11,12 +11,12 @@ vgl hosts no data: an application that uses it bakes the elevation and imagery i
 | Maintenance | None | Updates to Caddy and the operating system |
 | Suits | Public datasets, most installations | Local networks, private or offline sites, development, full control |
 
-For public data read by many users, downloads usually outweigh storage, so an object store that does not charge for them is a good fit. The reference server suits everything else, and is also how to try a pack over HTTP locally.
+For public data read by many users, an object store is a good fit. The reference server suits everything else, and is also how to try a pack over HTTP locally.
 
 Any other web server works too, if it:
 
 - answers `Range: bytes=a-b` and `bytes=a-` with `206 Partial Content`, and a range past the end with `416`;
-- does not compress pack files: compression applies to the whole body, so a range of a compressed response is not a range of the file;
+- does not compress pack files: compression applies to the whole body, so a range of a compressed response is not a range of the file. GitHub Pages, for example, compresses every type it does not know as compressed and has no setting to stop it, so it does not serve packs as they are (`vgl-bake check` reports it); the project site's demo works around it by renaming its copies of the sample packs (`site/README.md`);
 - sends `Access-Control-Allow-Origin`, and answers preflight requests, if browsers read the packs. vgl's web build runs in pages that are cross-origin isolated, which load packs from other servers only through CORS or with `Cross-Origin-Resource-Policy: cross-origin` ([web sample](../samples/gl/web/README.md)).
 
 ## The reference server
