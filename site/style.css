@@ -2,37 +2,56 @@
  * SPDX-License-Identifier: MIT
  * Copyright (c) 2026 Jeremiah van Oosten
  *
- * The project site's styles (site/README.md): dark by default, light on request.
+ * The project site's styles (site/README.md), on the brand's tokens (brand/css/vgl-tokens.css,
+ * from docs/assets/brand). They follow the system's light or dark scheme, unless theme.js has
+ * set data-theme on the root.
  */
 
 :root {
-  color-scheme: dark;
-  --bg: #070a12;
-  --bg-raised: #0e1320;
-  --bg-code: #0b1019;
-  --border: #1f2838;
-  --text: #dbe2ef;
-  --text-muted: #96a1b5;
-  --accent: #5fb4ff;
-  --accent-strong: #2d8ff0;
-  --on-accent: #04101e;
+  --bg: var(--vgl-surface);
+  --bg-raised: var(--vgl-surface-raised);
+  --bg-code: var(--vgl-surface-raised);
+  --border: var(--vgl-border);
+  --text: var(--vgl-text);
+  --text-muted: var(--vgl-text-muted);
+  --accent: var(--vgl-link);
+  --accent-strong: var(--vgl-accent);
+  --on-accent: #ffffff;
   --radius: 10px;
   --wrap: 1120px;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color-scheme: light;
-    --bg: #f7f9fc;
-    --bg-raised: #ffffff;
-    --bg-code: #eef2f8;
-    --border: #d7deea;
-    --text: #172033;
-    --text-muted: #556178;
-    --accent: #0b6fd6;
-    --accent-strong: #0b6fd6;
-    --on-accent: #ffffff;
+/* What the dark theme changes, by the system's scheme or by choice. The .for-light and .for-dark
+   elements are the logo and the switch's icon for each theme. */
+
+.for-dark {
+  display: none;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --on-accent: var(--vgl-orbital);
   }
+
+  :root:not([data-theme="light"]) .for-light {
+    display: none;
+  }
+
+  :root:not([data-theme="light"]) .for-dark {
+    display: block;
+  }
+}
+
+:root[data-theme="dark"] {
+  --on-accent: var(--vgl-orbital);
+}
+
+:root[data-theme="dark"] .for-light {
+  display: none;
+}
+
+:root[data-theme="dark"] .for-dark {
+  display: block;
 }
 
 * {
@@ -47,7 +66,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font: 16px/1.6 var(--vgl-font-body);
 }
 
 a {
@@ -67,7 +86,7 @@ img {
 
 code,
 pre {
-  font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font: 14px/1.5 var(--vgl-font-mono);
 }
 
 pre {
@@ -112,10 +131,25 @@ pre {
 }
 
 .brand {
-  color: var(--text);
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
+  display: flex;
+  align-items: center;
+}
+
+.brand img {
+  height: 34px;
+  width: auto;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--vgl-font-display);
+}
+
+.hero-logo img {
+  width: min(100%, 320px);
+  height: auto;
+  margin-bottom: 24px;
 }
 
 nav {
@@ -131,6 +165,42 @@ nav a {
 nav a:hover {
   color: var(--text);
   text-decoration: none;
+}
+
+nav {
+  align-items: center;
+}
+
+.theme-switch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  color: var(--text-muted);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.theme-switch:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.theme-switch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.theme-switch svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 /* Hero. */

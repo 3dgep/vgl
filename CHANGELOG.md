@@ -10,6 +10,10 @@ The pack format has its own version number, independent of the library version.
 
 ### Added
 
+- The brand assets (`docs/assets/brand`): the logo, wordmark, icon, favicons, share images and
+  design tokens, with compact horizontal and stacked logos without the subtitle for small
+  sizes, SVG and PNG (`tools/make_compact_logo.py`), in the README's header and on the project site, which takes the brand's colours
+  and type, with a switch between its light and dark themes.
 - The project site on GitHub Pages (`site/`, <https://3dgep.github.io/vgl/>): a landing page,
   the OpenGL sample as a live WebGL demo on the sample packs, and the API reference generated
   with Doxygen, deployed by `.github/workflows/pages.yml`. A service worker makes the demo

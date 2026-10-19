@@ -8,6 +8,7 @@
 PROJECT_NAME           = vgl
 PROJECT_NUMBER         = $(VGL_VERSION)
 PROJECT_BRIEF          = "Virtual Globe Library: API reference"
+PROJECT_LOGO           = docs/assets/brand/svg/vgl-icon.svg
 OUTPUT_DIRECTORY       = $(VGL_DOXYGEN_OUTPUT)
 HTML_OUTPUT            = api
 GENERATE_LATEX         = NO

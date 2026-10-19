@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64.00 64.00" width="64.00" height="64.00" role="img" aria-label="vgl"><title>vgl</title><defs><clipPath id="mk"><path clip-rule="evenodd" d="M-1000-1000H2000V2000H-1000ZM36.71 4H55.29A4.71 4.71 0 0 1 60 8.71V27.29A4.71 4.71 0 0 1 55.29 32H36.71A4.71 4.71 0 0 1 32 27.29V8.71A4.71 4.71 0 0 1 36.71 4Z"/></clipPath></defs><g clip-path="url(#mk)"><g>
+    <circle cx="31.91" cy="32.09" r="24.11" fill="#0f1d40" />
+    <g>
+      <ellipse cx="31.91" cy="32.09" rx="11.35" ry="23.77" fill="none" stroke-width="4" stroke="#0284c7" />
+      <path d="M31.91,8.31v47.54M8.14,32.09h47.54M11.38,20.2h41.06M11.38,43.97h41.06" fill="none" stroke-width="4" stroke="#0284c7" />
+    </g>
+    <circle cx="31.81" cy="31.99" r="24.21" stroke="#38bdf8" fill="none" stroke-width="4" />
+  </g>
+  </g><g>
+    <rect x="34.91" y="7" width="10" height="10" rx="2.5" ry="2.5" fill="#38bdf8" />
+    <rect x="46.91" y="7" width="10" height="10" rx="2.5" ry="2.5" fill="#f59e0b" />
+    <rect x="34.91" y="19" width="10" height="10" rx="2.49" ry="2.49" fill="#10b981" />
+    <rect x="46.91" y="19" width="10" height="10" rx="2.5" ry="2.5" fill="#38bdf8" />
+  </g>
+</svg>

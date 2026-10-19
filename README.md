@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/svg/vgl-logo-dark.svg">
+    <img src="docs/assets/brand/svg/vgl-logo-light.svg" alt="vgl: Virtual Globe Library" width="360">
+  </picture>
+</p>
+
 # vgl (Virtual Globe Library)
 
 [![CI](https://github.com/3dgep/vgl/actions/workflows/ci.yml/badge.svg)](https://github.com/3dgep/vgl/actions/workflows/ci.yml)
@@ -194,7 +201,7 @@ cc main.c $(pkg-config --cflags --libs vgl)
 | `samples/` | Sample applications |
 | `tests/` | Tests, and the consumer project that checks an installed vgl (`tests/install`) |
 | `packaging/` | vcpkg port, Conan recipe, and how releases are made |
-| `docs/` | Design document and specifications |
+| `docs/` | Design document and specifications, and the brand assets (`docs/assets/brand`) |
 | `site/` | The project site on GitHub Pages: landing page, live demo and API reference |
 | `wiki/` | The [GitHub wiki](https://github.com/3dgep/vgl/wiki), as a git submodule |
 

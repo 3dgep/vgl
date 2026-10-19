@@ -26,13 +26,20 @@ mkdir -p "$out"
 cp -r site/. "$out/"
 rm -f "$out/README.md" "$out/build.sh" "$out/Doxyfile" "$out/api-main.md"
 
+# The brand's logos, icons and tokens (docs/assets/brand), at brand/.
+mkdir -p "$out/brand"
+for part in svg png favicon css; do
+    cp -r "docs/assets/brand/$part" "$out/brand/"
+done
+
 # The demo: the OpenGL sample's page, loading coi.js first so that it is cross-origin isolated
 # on a host without the headers, and the sample packs at data/packs beside it, where the page
 # looks without a pack in its address.
 for file in vgl-gl.html vgl-gl.js vgl-gl.wasm vgl-gl.data; do
     cp "$web/$file" "$out/demo/"
 done
-sed -i 's#<head>#<head><script src=coi.js></script>#' "$out/demo/vgl-gl.html"
+sed -i -e 's#<head>#<head><script src=coi.js></script>#' \
+    -e 's#href=data:, rel=icon#href=../brand/favicon/favicon.svg rel=icon#' "$out/demo/vgl-gl.html"
 if ! grep -q 'src=coi.js' "$out/demo/vgl-gl.html"; then
     echo "error: could not add coi.js to the demo's page" >&2
     exit 1

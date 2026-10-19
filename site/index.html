@@ -13,20 +13,41 @@
   <meta name="description" content="vgl is a lightweight, open-source C++ library for rendering a virtual globe inside your application, with a C API and OpenGL, OpenGL ES, WebGL 2, Direct3D 11 and Ogre backends.">
   <meta property="og:title" content="vgl: Virtual Globe Library">
   <meta property="og:description" content="A lightweight, open-source library for rendering a virtual globe inside your application.">
-  <meta property="og:image" content="images/europe.png">
-  <link rel="icon" href="data:,">
+  <meta property="og:image" content="https://3dgep.github.io/vgl/brand/png/vgl-og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="theme-color" content="#0B132B">
+  <link rel="icon" href="brand/favicon/favicon.ico" sizes="32x32">
+  <link rel="icon" href="brand/favicon/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="brand/favicon/apple-touch-icon.png">
+  <link rel="manifest" href="brand/favicon/site.webmanifest">
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="brand/css/vgl-tokens.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header class="bar">
     <div class="wrap bar-inner">
-      <a class="brand" href="./">vgl</a>
+      <a class="brand" href="./">
+        <img class="for-light" src="brand/svg/vgl-logo-compact-light.svg" alt="vgl" height="34">
+        <img class="for-dark" src="brand/svg/vgl-logo-compact-dark.svg" alt="vgl" height="34">
+      </a>
       <nav aria-label="Site">
         <a href="demo/vgl-gl.html">Demo</a>
         <a href="https://github.com/3dgep/vgl/wiki">Guide</a>
         <a href="api/">API</a>
         <a href="https://github.com/3dgep/vgl/releases/latest">Download</a>
         <a href="https://github.com/3dgep/vgl">GitHub</a>
+        <button id="theme-switch" class="theme-switch" type="button" aria-label="Switch the theme">
+          <svg class="for-light" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/>
+          </svg>
+          <svg class="for-dark" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <circle cx="12" cy="12" r="4.5"/>
+            <path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/>
+          </svg>
+        </button>
       </nav>
     </div>
   </header>
@@ -35,6 +56,10 @@
     <section class="hero">
       <div class="wrap hero-inner">
         <div class="hero-text">
+          <div class="hero-logo">
+            <img class="for-light" src="brand/svg/vgl-logo-light.svg" alt="vgl: Virtual Globe Library" width="320">
+            <img class="for-dark" src="brand/svg/vgl-logo-dark.svg" alt="vgl: Virtual Globe Library" width="320">
+          </div>
           <h1>A virtual globe, inside your application</h1>
           <p class="lead">vgl is a lightweight, open-source C++ library that streams
             level-of-detail terrain and imagery on the WGS84 ellipsoid and draws it with

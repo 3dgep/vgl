@@ -1,0 +1,58 @@
+/* vgl design tokens. Primitive palette from the brand manual v1.0,
+   plus semantic aliases that switch between dark and light mode. */
+:root {
+  /* palette */
+  --vgl-orbital: #0B132B;   /* Orbital Slate   */
+  --vgl-ocean:   #0F1D40;   /* Deep Ocean      */
+  --vgl-blue:    #0284C7;   /* Bathymetry Blue */
+  --vgl-cyan:    #38BDF8;   /* Atmosphere Cyan */
+  --vgl-emerald: #10B981;   /* DEM Emerald     */
+  --vgl-amber:   #F59E0B;   /* Telemetry Amber */
+  --vgl-starlight: #F8FAFC; /* Starlight       */
+  --vgl-geoid:   #94A3B8;   /* Geoid Slate     */
+  --vgl-slate-600: #475569; /* light-mode muted text, 7.6:1 on white */
+
+  /* type */
+  --vgl-font-display: "Space Grotesk", "Inter", system-ui, sans-serif;
+  --vgl-font-body: "Inter", "IBM Plex Sans", system-ui, sans-serif;
+  --vgl-font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, monospace;
+
+  /* semantic: light (default) */
+  color-scheme: light;
+  --vgl-surface: #FFFFFF;
+  --vgl-surface-raised: #F1F5F9;
+  --vgl-text: var(--vgl-orbital);
+  --vgl-text-muted: var(--vgl-slate-600);
+  --vgl-link: var(--vgl-blue);        /* 4.1:1 on white: use at 18px+ or bold, else darken */
+  --vgl-accent: var(--vgl-blue);
+  --vgl-success: #047857;             /* emerald too light for text on white */
+  --vgl-warning: #B45309;
+  --vgl-border: #E2E8F0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --vgl-surface: var(--vgl-orbital);
+    --vgl-surface-raised: var(--vgl-ocean);
+    --vgl-text: var(--vgl-starlight);
+    --vgl-text-muted: var(--vgl-geoid);
+    --vgl-link: var(--vgl-cyan);
+    --vgl-accent: var(--vgl-cyan);
+    --vgl-success: var(--vgl-emerald);
+    --vgl-warning: var(--vgl-amber);
+    --vgl-border: #1E2A4A;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --vgl-surface: var(--vgl-orbital);
+  --vgl-surface-raised: var(--vgl-ocean);
+  --vgl-text: var(--vgl-starlight);
+  --vgl-text-muted: var(--vgl-geoid);
+  --vgl-link: var(--vgl-cyan);
+  --vgl-accent: var(--vgl-cyan);
+  --vgl-success: var(--vgl-emerald);
+  --vgl-warning: var(--vgl-amber);
+  --vgl-border: #1E2A4A;
+}
