@@ -8,6 +8,16 @@ The pack format has its own version number, independent of the library version.
 
 ## [Unreleased]
 
+### Added
+
+- The vcpkg registry port and the ConanCenter recipe, ready to submit
+  (`packaging/vcpkg-registry`, `packaging/conan-center`; `packaging/README.md`).
+
+### Fixed
+
+- The `vgl-defaults` pkg-config module's description names the disk cache, and the HTTP
+  reader as optional.
+
 ## [1.0.0] - 2026-10-19
 
 The first release. vgl is a lightweight library for rendering a virtual globe inside an

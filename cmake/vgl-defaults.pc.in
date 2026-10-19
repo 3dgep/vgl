@@ -7,7 +7,7 @@ libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
 includedir=${prefix}/@CMAKE_INSTALL_INCLUDEDIR@
 
 Name: vgl-defaults
-Description: Default thread pool, filesystem reader and HTTP reader for vgl
+Description: Default thread pool, file reader, disk cache and optional HTTP reader for vgl
 URL: @PROJECT_HOMEPAGE_URL@
 Version: @PROJECT_VERSION@
 Requires: vgl = @PROJECT_VERSION@

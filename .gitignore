@@ -5,6 +5,7 @@
 /install/
 # The Conan test package's build (packaging/conan)
 /packaging/conan/test_package/build/
+/packaging/conan-center/recipes/vgl/all/test_package/build/
 
 # CMake user files
 CMakeUserPresets.json

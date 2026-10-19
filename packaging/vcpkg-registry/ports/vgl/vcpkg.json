@@ -1,0 +1,58 @@
+{
+  "name": "vgl",
+  "version": "1.0.0",
+  "description": "Lightweight virtual globe library: streams baked elevation and imagery packs and draws the globe through OpenGL / OpenGL ES, Direct3D 11 or Ogre, behind a C API.",
+  "homepage": "https://github.com/3dgep/vgl",
+  "license": "MIT",
+  "dependencies": [
+    "stb",
+    {
+      "name": "vcpkg-cmake",
+      "host": true
+    },
+    {
+      "name": "vcpkg-cmake-config",
+      "host": true
+    },
+    "zstd"
+  ],
+  "default-features": [
+    {
+      "name": "d3d11",
+      "platform": "windows & !uwp"
+    },
+    "defaults",
+    "gl"
+  ],
+  "features": {
+    "d3d11": {
+      "description": "The Direct3D 11 backend (vgl::d3d11)",
+      "supports": "windows & !uwp"
+    },
+    "defaults": {
+      "description": "The defaults module (vgl::defaults): a thread pool, a file reader and a disk cache"
+    },
+    "gl": {
+      "description": "The OpenGL 3.3 / OpenGL ES 3.0 backend (vgl::gl)"
+    },
+    "http": {
+      "description": "An HTTP reader in the defaults module, on libcurl",
+      "dependencies": [
+        "curl",
+        {
+          "name": "vgl",
+          "default-features": false,
+          "features": [
+            "defaults"
+          ]
+        }
+      ]
+    },
+    "ogre": {
+      "description": "The Ogre 14 backend (vgl::ogre), a static library",
+      "dependencies": [
+        "ogre"
+      ]
+    }
+  }
+}

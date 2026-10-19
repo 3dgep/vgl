@@ -1,0 +1,11 @@
+vgl provides CMake targets:
+
+  find_package(vgl CONFIG REQUIRED)
+  target_link_libraries(main PRIVATE vgl::vgl)
+
+Each feature adds a target: vgl::defaults, vgl::gl, vgl::d3d11 and vgl::ogre.
+
+vgl provides pkg-config modules:
+
+  # Lightweight library for rendering a virtual globe
+  vgl

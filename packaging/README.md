@@ -62,9 +62,26 @@ as its test package.
    versions, builds and tests each archive, checks it with the consumer project, and creates
    a draft release with the archives and `SHA256SUMS`.
 3. Review the draft and publish it.
-4. vcpkg: in a fork of microsoft/vcpkg, copy the port without its `VGL_PORT_SOURCE_DIR`
-   branch, set `SHA512` to the hash of the tag's source archive (vcpkg prints it on the first
-   install with `SHA512 0`), run `vcpkg x-add-version vgl`, and open a pull request.
-5. Conan: in a fork of conan-io/conan-center-index, add a recipe whose `source()` downloads
-   the tag's source archive (listed in `conandata.yml` with its hash) instead of exporting the
-   working tree, with the test package made self-contained, and open a pull request.
+4. vcpkg: update the registry port in `vcpkg-registry/ports/vgl` (below) to the version and
+   the SHA512 of the tag's source archive
+   (`https://github.com/3dgep/vgl/archive/v<version>.tar.gz`), copy it into a fork of microsoft/vcpkg without its license header, run
+   `vcpkg format-manifest` and `vcpkg x-add-version`, and open a pull request.
+5. Conan: update the recipe in `conan-center/recipes/vgl` (below) to the version and the
+   SHA-256 of the same archive, copy it into a fork of conan-io/conan-center-index without the
+   license headers, check it with `conan create all --version <version>`, and open a pull
+   request.
+
+## Registry submissions
+
+`vcpkg-registry` and `conan-center` hold the port and the recipe in the forms the vcpkg
+registry and ConanCenter take: they download the tag's source archive instead of building the
+working tree, and the recipe's test package is self-contained. Both were tested on 1.0.0:
+the port on x64-windows, x64-windows-static and x64-linux, with its `ogre` feature on
+x64-windows; the recipe with GCC on Linux and MSVC on Windows, static and shared.
+
+- **vcpkg:** not submitted yet. The registry takes new ports of projects with a release at
+  least six months old or six months of public development, so vgl waits until about
+  April 2027. Its port name is also still to settle: other projects are known as vgl
+  (VirtualGL, VXL's geometry library), and the registry always accepts the `Owner-Project`
+  form, `3dgep-vgl`. The port name does not change `find_package(vgl)` or the `vgl::` targets.
+- **ConanCenter:** not submitted yet. First-time contributors sign its CLA.
