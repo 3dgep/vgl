@@ -5,7 +5,7 @@
 
 #include <vgl/vgl.h>
 #ifdef VGL_TEST_DEFAULTS
-#include <vgl/defaults.h>
+#    include <vgl/defaults.h>
 #endif
 
 #include <stdio.h>
