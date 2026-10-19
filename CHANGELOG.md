@@ -8,7 +8,7 @@ The pack format has its own version number, independent of the library version.
 
 ## [Unreleased]
 
-## [1.0.0]
+## [1.0.0] - 2026-10-19
 
 The first release. vgl is a lightweight library for rendering a virtual globe inside an
 existing application, behind a C API with a header-only C++ wrapper. The development history
