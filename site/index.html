@@ -1,0 +1,226 @@
+<!doctype html>
+<!--
+  SPDX-License-Identifier: MIT
+  Copyright (c) 2026 Jeremiah van Oosten
+
+  The project site's landing page (site/README.md).
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>vgl: Virtual Globe Library</title>
+  <meta name="description" content="vgl is a lightweight, open-source C++ library for rendering a virtual globe inside your application, with a C API and OpenGL, OpenGL ES, WebGL 2, Direct3D 11 and Ogre backends.">
+  <meta property="og:title" content="vgl: Virtual Globe Library">
+  <meta property="og:description" content="A lightweight, open-source library for rendering a virtual globe inside your application.">
+  <meta property="og:image" content="images/europe.png">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="bar">
+    <div class="wrap bar-inner">
+      <a class="brand" href="./">vgl</a>
+      <nav aria-label="Site">
+        <a href="demo/vgl-gl.html">Demo</a>
+        <a href="https://github.com/3dgep/vgl/wiki">Guide</a>
+        <a href="api/">API</a>
+        <a href="https://github.com/3dgep/vgl/releases/latest">Download</a>
+        <a href="https://github.com/3dgep/vgl">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="wrap hero-inner">
+        <div class="hero-text">
+          <h1>A virtual globe, inside your application</h1>
+          <p class="lead">vgl is a lightweight, open-source C++ library that streams
+            level-of-detail terrain and imagery on the WGS84 ellipsoid and draws it with
+            OpenGL, OpenGL ES, WebGL 2, Direct3D 11 or Ogre, behind a stable C API.</p>
+          <div class="actions">
+            <a class="button primary" href="demo/vgl-gl.html">Try the live demo</a>
+            <a class="button" href="https://github.com/3dgep/vgl/wiki/Getting-Started">Get started</a>
+            <a class="button" href="https://github.com/3dgep/vgl/releases/latest">Download 1.0</a>
+          </div>
+          <p class="meta">MIT licensed. Windows, Linux, macOS, Android, iOS and the web.</p>
+        </div>
+        <figure class="hero-image">
+          <img src="images/europe.png" width="640" height="360"
+               alt="The globe from orbit over Europe, with clouds and the atmosphere's glow along the limb">
+        </figure>
+      </div>
+    </section>
+
+    <section class="wrap" aria-labelledby="why">
+      <h2 id="why">Why vgl</h2>
+      <div class="grid features">
+        <article>
+          <h3>Your window, your loop</h3>
+          <p>Your application keeps its window, main loop, camera and render target. vgl draws
+            into the render pass you are in, and never presents, swaps or clears.</p>
+        </article>
+        <article>
+          <h3>C first</h3>
+          <p>The stable ABI is a C API of opaque handles and result codes, compatible within
+            each major version. A header-only C++ wrapper adds RAII, spans and enum classes.</p>
+        </article>
+        <article>
+          <h3>Precise at every scale</h3>
+          <p>Double-precision geometry on the CPU, tile-relative vertices and logarithmic or
+            reversed-Z depth: no jitter and no z-fighting, from orbit down to the ground.</p>
+        </article>
+        <article>
+          <h3>Small and predictable</h3>
+          <p>Two runtime dependencies, stb_image and Zstandard. No global state, no threads or
+            connections of its own, every allocation through your allocator, and memory
+            within the budgets you set.</p>
+        </article>
+        <article>
+          <h3>Your data, your server</h3>
+          <p>The bundled baker turns Copernicus DEM, GEBCO and your own imagery into sharded
+            packs that load from disk or from any web server with HTTP range requests, with a
+            disk cache for offline use.</p>
+        </article>
+        <article>
+          <h3>Built to extend</h3>
+          <p>Draw with your own renderer through the render interface, and bring your own I/O,
+            task scheduling, allocators and logging: the built-in parts use the same public
+            interfaces.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="wrap" aria-labelledby="gallery">
+      <h2 id="gallery">What it draws</h2>
+      <div class="grid gallery">
+        <figure>
+          <img src="images/sognefjord.png" width="640" height="360" loading="lazy"
+               alt="The Sognefjord in Norway from a few kilometres up, with haze over the mountains">
+          <figcaption>The Sognefjord, on Copernicus GLO-30 terrain and Sentinel-2 cloudless
+            imagery, with the atmosphere's haze.</figcaption>
+        </figure>
+        <figure>
+          <img src="images/alps-limb.png" width="640" height="360" loading="lazy"
+               alt="Looking across the Alps to the curved horizon, with clouds and the blue limb glow">
+          <figcaption>The Alps toward the horizon: clouds, the limb's glow and the stars, drawn
+            by every backend.</figcaption>
+        </figure>
+        <figure>
+          <img src="images/contours.png" width="640" height="360" loading="lazy"
+               alt="Terrain coloured by height with contour lines, and the sea surface">
+          <figcaption>Colours by height, contour lines above mean sea level, and the optional
+            sea surface at the geoid.</figcaption>
+        </figure>
+        <figure>
+          <img src="images/wireframe.png" width="640" height="360" loading="lazy"
+               alt="The terrain mesh as a wireframe, with tile boundaries in yellow">
+          <figcaption>The wireframe debug view: each tile's grid, and the tiles' boundaries in
+            yellow.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="wrap" aria-labelledby="backends">
+      <h2 id="backends">Backends and platforms</h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr><th>Backend</th><th>Graphics API</th><th>Platforms</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><a href="https://github.com/3dgep/vgl/wiki/OpenGL-Backend">OpenGL / OpenGL ES</a></td>
+                <td>OpenGL 3.3, OpenGL ES 3.0, WebGL 2</td>
+                <td>Windows, Linux, macOS, Android, iOS, browsers</td></tr>
+            <tr><td><a href="https://github.com/3dgep/vgl/wiki/Direct3D-11-Backend">Direct3D 11</a></td>
+                <td>Direct3D 11 (feature level 11_0)</td>
+                <td>Windows</td></tr>
+            <tr><td><a href="https://github.com/3dgep/vgl/wiki/Ogre-Backend">Ogre</a></td>
+                <td>Ogre 14 on OpenGL 3+ and Direct3D 11</td>
+                <td>Windows, Linux</td></tr>
+            <tr><td><a href="https://github.com/3dgep/vgl/wiki/Render-Interface">Your own</a></td>
+                <td>Anything, through the render interface</td>
+                <td>Anywhere the core builds</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="wrap" aria-labelledby="start">
+      <h2 id="start">Get started</h2>
+      <div class="grid two">
+        <div>
+          <h3>Install</h3>
+          <p>Download a <a href="https://github.com/3dgep/vgl/releases/latest">release
+            archive</a> for Windows, Linux or macOS, use the vcpkg port or the Conan recipe,
+            or build from source with CMake. Then link it:</p>
+<pre><code>find_package(vgl 1 REQUIRED)
+target_link_libraries(my_app PRIVATE
+    vgl::vgl vgl::defaults vgl::gl)</code></pre>
+        </div>
+        <div>
+          <h3>Draw</h3>
+          <ol>
+            <li>Create a thread pool and a file reader, and a context with them.</li>
+            <li>Add packs: elevation, the geoid and imagery.</li>
+            <li>Create a backend on your device.</li>
+            <li>Every frame: set the view, update, and draw inside your render pass.</li>
+            <li>Show the credits of the data in view.</li>
+          </ol>
+          <p><a href="https://github.com/3dgep/vgl/wiki/Getting-Started">Getting started</a>
+            walks through a complete program.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="wrap" aria-labelledby="data">
+      <h2 id="data">Bake and host your own data</h2>
+      <p>vgl hosts no datasets: you bake packs from the sources you choose and serve them
+        yourself. The baker reads any raster GDAL reads, converts vertical datums, and writes
+        deterministic packs; <code>vgl-bake check</code> tests a web server the way vgl and
+        browsers read it, and a reference server configuration for Caddy is included.</p>
+<pre><code>vgl-bake bake glo30-norway.json --jobs 16
+vgl-bake check https://packs.example.org/glo30-norway</code></pre>
+      <p><a href="https://github.com/3dgep/vgl/wiki/Baker">The baker</a> ·
+        <a href="https://github.com/3dgep/vgl/wiki/Hosting-Packs">Hosting packs</a> ·
+        <a href="https://github.com/3dgep/vgl/wiki/Reference-Server">Reference server</a></p>
+    </section>
+
+    <section class="wrap" aria-labelledby="docs">
+      <h2 id="docs">Documentation</h2>
+      <div class="grid links">
+        <a class="card" href="https://github.com/3dgep/vgl/wiki">
+          <strong>Integrator's guide</strong>
+          <span>Building, embedding, backends, baking and hosting, in the wiki.</span></a>
+        <a class="card" href="api/">
+          <strong>API reference</strong>
+          <span>Every function and structure, generated from the headers.</span></a>
+        <a class="card" href="https://github.com/3dgep/vgl/blob/main/docs/design.md">
+          <strong>Design and specifications</strong>
+          <span>The design document, the C API conventions, the render interface and the pack
+            format.</span></a>
+        <a class="card" href="https://github.com/3dgep/vgl/blob/main/CHANGELOG.md">
+          <strong>Changelog</strong>
+          <span>What each release changed, and the known limitations.</span></a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <p>vgl is released under the <a href="https://github.com/3dgep/vgl/blob/main/LICENSE">MIT
+        license</a>. Copyright © 2026 Jeremiah van Oosten.
+        <a href="https://github.com/3dgep/vgl/blob/main/CONTRIBUTING.md">Contributing</a> ·
+        <a href="https://github.com/3dgep/vgl/blob/main/SECURITY.md">Security</a></p>
+      <p class="credits">Images and demo data: NASA Earth Observatory, Blue Marble: Next
+        Generation and Blue Marble: Clouds (Reto Stöckli). Sentinel-2 cloudless by EOX IT
+        Services GmbH (Contains modified Copernicus Sentinel data 2016). Produced using
+        Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH
+        2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved.
+        GEBCO Compilation Group (2026) GEBCO 2026 Grid. EGM2008 geoid model, National
+        Geospatial-Intelligence Agency (NGA).</p>
+    </div>
+  </footer>
+</body>
+</html>

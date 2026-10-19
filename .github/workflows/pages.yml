@@ -1,0 +1,82 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Jeremiah van Oosten
+
+name: Pages
+
+# The project site on GitHub Pages (site/README.md): the landing page, the WebGL demo with the
+# sample packs, and the API reference. It is built from main when the site changes, when a
+# release is published, and on a manual run (gh workflow run Pages).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "tests/browser/page_check.mjs"
+      - ".github/workflows/pages.yml"
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build the site
+    runs-on: ubuntu-24.04
+    env:
+      EMSDK_VERSION: 6.0.11
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+
+      - name: Install Ninja, Doxygen and Emscripten
+        run: |
+          sudo apt-get update && sudo apt-get install -y ninja-build doxygen
+          git clone --depth 1 --branch "$EMSDK_VERSION" https://github.com/emscripten-core/emsdk.git "$RUNNER_TEMP/emsdk"
+          "$RUNNER_TEMP/emsdk/emsdk" install "$EMSDK_VERSION"
+          "$RUNNER_TEMP/emsdk/emsdk" activate "$EMSDK_VERSION"
+          echo "EMSDK=$RUNNER_TEMP/emsdk" >> "$GITHUB_ENV"
+
+      - name: Build the demo
+        run: |
+          source "$EMSDK/emsdk_env.sh"
+          cmake --preset emscripten
+          cmake --build --preset emscripten-release --target vgl_gl_sample
+
+      - name: Assemble the site
+        run: site/build.sh build/emscripten/bin/Release _site
+
+      # The demo as visitors get it: from a server that sends no headers, cross-origin isolated
+      # by its service worker, drawing tiles and flying to the Sognefjord.
+      - name: Check the demo
+        run: |
+          source "$EMSDK/emsdk_env.sh"
+          python3 -m http.server 18095 --bind 127.0.0.1 --directory _site > /dev/null 2>&1 &
+          server=$!
+          node tests/browser/page_check.mjs --chrome "$(command -v google-chrome)" \
+            --url http://localhost:18095/demo/vgl-gl.html --port 18096
+          kill "$server"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -9,8 +9,12 @@
 //
 //     node tests/browser/page_check.mjs --chrome <chrome> --caddy <caddy> --web <directory>
 //          [--packs <directory>] [--port <port>] [--screenshot <png>]
+//     node tests/browser/page_check.mjs --chrome <chrome> --url <page> [--port <port>]
+//          [--screenshot <png>]
 //
 // --web is the directory of the built page; --packs, the sample set's packs (samples/data/packs).
+// --url checks a page that another server serves instead, such as the project site's demo
+// (site/README.md), which is cross-origin isolated by its service worker rather than headers.
 // Exits with 1 on a failure, after a screenshot of the page.
 
 import { spawn } from 'node:child_process';
@@ -30,9 +34,12 @@ const web = option('--web');
 const packs = option('--packs', join(repo, 'samples', 'data', 'packs'));
 const port = Number(option('--port', '18091'));
 const screenshot = option('--screenshot', '');
-if (!chromePath || !caddyPath || !web) {
+const url = option('--url', '');
+if (!chromePath || (!url && (!caddyPath || !web))) {
   console.error('usage: page_check.mjs --chrome <chrome> --caddy <caddy> --web <directory> ' +
-                '[--packs <directory>] [--port <port>] [--screenshot <png>]');
+                '[--packs <directory>] [--port <port>] [--screenshot <png>]\n' +
+                '       page_check.mjs --chrome <chrome> --url <page> [--port <port>] ' +
+                '[--screenshot <png>]');
   process.exit(2);
 }
 
@@ -63,14 +70,16 @@ const cleanup = () => {
 };
 
 try {
-  // The page's server.
-  const caddy = spawn(caddyPath, ['run', '--config', join(repo, 'samples', 'gl', 'web', 'Caddyfile')], {
-    cwd: repo,
-    env: { ...process.env, VGL_SITE: `:${port}`, VGL_WEB: web, VGL_PACKS: packs },
-    stdio: 'ignore',
-  });
-  children.push(caddy);
-  const page = `http://localhost:${port}/vgl-gl.html`;
+  // The page's server, unless another one serves it.
+  if (!url) {
+    const caddy = spawn(caddyPath, ['run', '--config', join(repo, 'samples', 'gl', 'web', 'Caddyfile')], {
+      cwd: repo,
+      env: { ...process.env, VGL_SITE: `:${port}`, VGL_WEB: web, VGL_PACKS: packs },
+      stdio: 'ignore',
+    });
+    children.push(caddy);
+  }
+  const page = url || `http://localhost:${port}/vgl-gl.html`;
   let served = false;
   for (let i = 0; i < 50 && !served; ++i) {
     await sleep(200);

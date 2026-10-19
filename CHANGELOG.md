@@ -10,6 +10,11 @@ The pack format has its own version number, independent of the library version.
 
 ### Added
 
+- The project site on GitHub Pages (`site/`, <https://3dgep.github.io/vgl/>): a landing page,
+  the OpenGL sample as a live WebGL demo on the sample packs, and the API reference generated
+  with Doxygen, deployed by `.github/workflows/pages.yml`. A service worker makes the demo
+  cross-origin isolated, since Pages cannot send headers, and `tests/browser/page_check.mjs`
+  takes `--url` to check a page another server serves.
 - The vcpkg registry port and the ConanCenter recipe, ready to submit
   (`packaging/vcpkg-registry`, `packaging/conan-center`; `packaging/README.md`).
 

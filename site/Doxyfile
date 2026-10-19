@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Jeremiah van Oosten
+#
+# The API reference on the project site (site/README.md), from the public headers'
+# documentation comments. Run from the repository root:
+#     VGL_VERSION=1.0.0 VGL_DOXYGEN_OUTPUT=build/site doxygen site/Doxyfile
+
+PROJECT_NAME           = vgl
+PROJECT_NUMBER         = $(VGL_VERSION)
+PROJECT_BRIEF          = "Virtual Globe Library: API reference"
+OUTPUT_DIRECTORY       = $(VGL_DOXYGEN_OUTPUT)
+HTML_OUTPUT            = api
+GENERATE_LATEX         = NO
+
+INPUT                  = site/api-main.md \
+                         include/vgl \
+                         backends/gl/include/vgl \
+                         backends/d3d11/include/vgl \
+                         backends/ogre/include/vgl
+FILE_PATTERNS          = *.h *.hpp
+USE_MDFILE_AS_MAINPAGE = site/api-main.md
+FULL_PATH_NAMES        = YES
+STRIP_FROM_PATH        = include backends/gl/include backends/d3d11/include backends/ogre/include
+STRIP_FROM_INC_PATH    = include backends/gl/include backends/d3d11/include backends/ogre/include
+
+EXTRACT_ALL            = YES
+EXTRACT_STATIC         = YES
+HIDE_UNDOC_RELATIONS   = YES
+SHOW_INCLUDE_FILES     = YES
+SORT_MEMBER_DOCS       = NO
+TYPEDEF_HIDES_STRUCT   = YES
+
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+PREDEFINED             = VGL_API= \
+                         VGL_DEFAULTS_API= \
+                         VGL_GL_API= \
+                         VGL_D3D11_API= \
+                         "VGL_DEPRECATED(message)=" \
+                         "VGL_POINTER_PADDING(name)="
+
+HAVE_DOT               = NO
+CLASS_GRAPH            = NO
+INCLUDE_GRAPH          = NO
+INCLUDED_BY_GRAPH      = NO
+DIRECTORY_GRAPH        = NO
+
+HTML_COLORSTYLE        = TOGGLE
+GENERATE_TREEVIEW      = YES
+SEARCHENGINE           = YES
+
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = NO
+WARN_LOGFILE           = $(VGL_DOXYGEN_OUTPUT)/doxygen-warnings.txt
