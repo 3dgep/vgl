@@ -88,6 +88,8 @@ Graphics APIs by platform:
 | iOS | OpenGL ES 3.0 (deprecated by Apple since iOS 12, but available) | Metal |
 | Web (WebAssembly) | WebGL 2, the browser's OpenGL ES 3.0 | None |
 
+The Ogre column is the backend's goal. Version 1 covers its OpenGL 3+ and Direct3D 11 render systems on Windows and Linux; the rest follow after it (M3b, section 14).
+
 OpenGL ES 3.0 is therefore a target from the first releases, not just a possibility: the OpenGL backend targets the common subset of OpenGL 3.3 and OpenGL ES 3.0 (section 7.6). OpenGL ES 2.0 is out of scope. A raw Metal backend is not planned; on macOS and iOS, rendering goes through OpenGL, OpenGL ES or Ogre's Metal render system. On macOS the OpenGL backend needs no extensions beyond OpenGL 4.1, the last version Apple ships, so clip control is unavailable there too and the logarithmic depth path applies.
 
 Minimum versions and architectures, chosen as recommended defaults (section 16):
@@ -623,14 +625,14 @@ The repository is public at github.com/3dgep/vgl, with continuous integration th
 | M0: Foundations | Public GitHub repository with CI and contribution guidelines, build system, foundation and geodesy modules, tiling scheme, pack format specification, C API conventions |
 | M1: Data pipeline | Baker with GDAL input, datum conversion, elevation and imagery encoding, sharded packs; regional test bake to settle tile size, deepest level and shard level |
 | M2: MVP runtime | LOD selection and culling, cache and budgets, pack-on-disk provider, mesh builder, OpenGL / GLES and Direct3D 11 backends, a global imagery layer, height queries, attribution; OpenGL, Direct3D 11, pure-C and headless samples; macOS, Android and iOS builds in CI |
-| M3: Integration | Ogre backend and sample on the desktop render systems (OpenGL 3+, Direct3D 11 and Vulkan; Windows, Linux, macOS), GLES sample in CI, multiple imagery layers, picking, atmosphere, a WebAssembly build with the OpenGL sample in a browser |
-| M3b: Mobile Ogre | The Ogre backend on OpenGL ES 3 and Metal, on Android and iOS; after version 1 |
+| M3: Integration | Ogre backend and sample on the desktop render systems (OpenGL 3+ and Direct3D 11, on Windows and Linux), GLES sample in CI, multiple imagery layers, picking, atmosphere, a WebAssembly build with the OpenGL sample in a browser |
+| M3b: More Ogre render systems | The Ogre backend on Vulkan (Windows and Linux), on Metal (macOS), and on OpenGL ES 3 and Metal (Android and iOS); after version 1 |
 | M4: Distribution | HTTP pack provider, reference server and disk cache (delivered during M3: the defaults module's HTTP reader and disk cache, and a Caddy configuration); a checker of hosted packs (`vgl-bake check`) and the hosting guide's publishing steps. Global bakes and their hosting are the consumers' (section 10.2) |
 | Later | Compressed GPU textures, vector overlays rasterized into tiles, Vulkan backend, a limited subset of 3D Tiles |
 
 Within M2, the OpenGL / OpenGL ES backend comes first: it runs on every target platform and the pure-C sample needs it. The Direct3D 11 backend follows. The order does not wait for any one integrator's choice of graphics API.
 
-Version 1 follows M3 and M4, after an API review that settles the C ABI (binary layout, shared draw flags, output structures, the C++ wrappers). It covers the Ogre backend on the desktop render systems only, so Ogre's Vulkan render system is verified before it; the mobile Ogre render systems (M3b) come after it. Version 1 is released as archives on GitHub releases, a vcpkg port and a Conan recipe; the release waits until the Vulkan render system is verified.
+Version 1 follows M3 and M4, after an API review that settles the C ABI (binary layout, shared draw flags, output structures, the C++ wrappers). Its Ogre backend covers OpenGL 3+ and Direct3D 11 on Windows and Linux only; Ogre's Vulkan render system, macOS and the mobile platforms (M3b) come after it. Version 1 is released as archives on GitHub releases, a vcpkg port and a Conan recipe.
 
 ---
 
@@ -656,7 +658,7 @@ These questions were left open during planning. On 16 October 2026 each was sett
 
 | # | Question | Decision |
 |---|---|---|
-| 1 | Which Ogre release and render systems? | Ogre 14, the classic line, 14.6.0 when decided; Direct3D 11, OpenGL 3+, OpenGL ES 3, Vulkan and Metal (sections 4 and 7.6) |
+| 1 | Which Ogre release and render systems? | Ogre 14, the classic line, 14.6.0 when decided; Direct3D 11, OpenGL 3+, OpenGL ES 3, Vulkan and Metal (sections 4 and 7.6). On 19 October 2026 version 1 was limited to OpenGL 3+ and Direct3D 11 on Windows and Linux, with Vulkan, macOS and mobile after it (M3b, section 14) |
 | 2 | Which backend comes first? | The OpenGL / OpenGL ES backend, then Direct3D 11 (section 14) |
 | 3 | Minimum OS versions, Intel Macs, 32-bit ARM? | Windows 10, macOS 11 with universal binaries, Android 7.0 (API 24), iOS 15; no 32-bit ARM (section 4) |
 | 4 | Which imagery? | Blue Marble Next Generation as the global base, Sentinel-2 cloudless 2016 for detail (section 9) |

@@ -12,8 +12,7 @@ easily in a C code base as in a C++ one.
 > **Status:** early development, at milestone M3 (integration). The runtime streams baked packs
 > from disk or a web server, and the OpenGL / OpenGL ES, Direct3D 11 and Ogre backends draw the
 > terrain with layered imagery, an atmosphere, stars and clouds, with picking and a WebAssembly
-> build. Version 1 follows once Ogre's Vulkan render system is verified; until then the API may
-> still change.
+> build. Version 1 is being prepared; until then the API may still change.
 
 ## Goals
 

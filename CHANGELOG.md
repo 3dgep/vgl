@@ -375,6 +375,9 @@ The pack format has its own version number, independent of the library version.
 
 ### Changed
 
+- Version 1's Ogre backend covers OpenGL 3+ and Direct3D 11 on Windows and Linux only, and the
+  release no longer waits for Ogre's Vulkan render system: Vulkan, macOS and the mobile
+  platforms follow after version 1 (design document, milestone M3b).
 - The backend headers (`vgl/gl.h`, `vgl/gl.hpp`, `vgl/d3d11.h`, `vgl/d3d11.hpp` and
   `vgl/ogre.hpp`) moved from `include/vgl` to `backends/<backend>/include/vgl`. Their include
   paths are unchanged, but they are found only by code that links their backend's target, and
