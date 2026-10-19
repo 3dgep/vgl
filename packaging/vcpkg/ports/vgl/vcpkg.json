@@ -1,6 +1,6 @@
 {
   "name": "vgl",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Lightweight virtual globe library: streams baked elevation and imagery packs and draws the globe through OpenGL / OpenGL ES, Direct3D 11 or Ogre, behind a C API.",
   "homepage": "https://github.com/3dgep/vgl",
   "license": "MIT",

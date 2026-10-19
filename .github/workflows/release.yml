@@ -136,10 +136,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version=${GITHUB_REF_NAME#v}
-          awk -v v="$version" '
-            $0 ~ "^## \\[" v "\\]" { on = 1; next }
-            on && /^## \[/ { exit }
+          # Plain string matches: awks differ in how they read escapes in a dynamic regex.
+          awk -v heading="## [$version]" '
+            index($0, heading) == 1 { on = 1; next }
+            on && index($0, "## [") == 1 { exit }
             on { print }' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "::error::CHANGELOG.md has no section ## [$version]"
+            exit 1
+          fi
           cat dist/*.sha256 > dist/SHA256SUMS
           gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
             --title "vgl $version" --notes-file notes.md dist/*.zip dist/*.tar.gz dist/SHA256SUMS

@@ -4,13 +4,21 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(vgl
-    VERSION 0.1.0
+    VERSION 1.0.0
     DESCRIPTION "Lightweight library for rendering a virtual globe"
     HOMEPAGE_URL "https://github.com/3dgep/vgl"
     LANGUAGES C CXX)
 
 include(CMakeDependentOption)
 include(GNUInstallDirs)
+
+# The shared libraries' ABI version: the major version, which keeps the C ABI compatible
+# (docs/c-api.md, section 14); before 1.0, the minor version too.
+if(PROJECT_VERSION_MAJOR EQUAL 0)
+    set(VGL_SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR})
+else()
+    set(VGL_SOVERSION ${PROJECT_VERSION_MAJOR})
+endif()
 
 # Build options. Tests, samples and installation default to on only when vgl is
 # the top-level project, so that embedding it with add_subdirectory stays cheap.

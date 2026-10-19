@@ -83,7 +83,7 @@ endif()
 set_target_properties(vgl PROPERTIES
     LINKER_LANGUAGE CXX
     VERSION ${PROJECT_VERSION}
-    SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR})
+    SOVERSION ${VGL_SOVERSION})
 
 if(VGL_BUILD_DEFAULTS)
     add_subdirectory(defaults)

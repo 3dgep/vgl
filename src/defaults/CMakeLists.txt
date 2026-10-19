@@ -31,7 +31,7 @@ set_target_properties(vgl_defaults PROPERTIES
     OUTPUT_NAME vgl-defaults
     EXPORT_NAME defaults
     VERSION ${PROJECT_VERSION}
-    SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR})
+    SOVERSION ${VGL_SOVERSION})
 
 vgl_target_options(vgl_defaults)
 vgl_disable_exceptions(vgl_defaults)

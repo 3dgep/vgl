@@ -9,10 +9,10 @@ through backends for OpenGL / OpenGL ES, Direct3D 11 and Ogre, on Windows, Linux
 and iOS, and in web browsers on WebGL 2. The public interface is a C API, so the library embeds as
 easily in a C code base as in a C++ one.
 
-> **Status:** early development, at milestone M3 (integration). The runtime streams baked packs
-> from disk or a web server, and the OpenGL / OpenGL ES, Direct3D 11 and Ogre backends draw the
-> terrain with layered imagery, an atmosphere, stars and clouds, with picking and a WebAssembly
-> build. Version 1 is being prepared; until then the API may still change.
+> **Status:** version 1.0. The C ABI stays compatible within major version 1
+> ([C API conventions](docs/c-api.md), section 14). The Ogre backend covers OpenGL 3+ and
+> Direct3D 11 on Windows and Linux; Ogre on Vulkan, macOS and mobile follows
+> ([changelog](CHANGELOG.md), Known limitations).
 
 ## Goals
 
@@ -54,6 +54,44 @@ These are out of scope for the first releases, and the architecture is not shape
 - An HTTP stack in the core (the host supplies I/O through a callback; the optional defaults
   module has an HTTP reader on libcurl)
 - Direct3D 12, and OpenGL ES 2.0
+
+## Quickstart
+
+The [integrator's guide](https://github.com/3dgep/vgl/wiki) covers each step in detail, starting
+with [Getting started](https://github.com/3dgep/vgl/wiki/Getting-Started).
+
+**1. Get vgl.** Download a release archive from
+[GitHub releases](https://github.com/3dgep/vgl/releases) and point `CMAKE_PREFIX_PATH` at it,
+use the vcpkg port or the Conan recipe ([packaging](packaging/README.md)), or build from source
+(below).
+
+**2. See it run.** Build with a workflow preset and start the OpenGL sample on the sample data:
+
+```sh
+cmake --workflow --preset linux-gcc-static-release   # or windows-msvc-static-release, macos-clang-static-release
+build/linux-gcc-static/bin/Release/vgl-gl
+```
+
+**3. Link it.**
+
+```cmake
+find_package(vgl 1 REQUIRED)
+target_link_libraries(my_app PRIVATE vgl::vgl vgl::defaults vgl::gl)
+```
+
+**4. Draw a globe.** Your application keeps its window, loop and camera:
+
+1. Create a thread pool and a file reader (`vgl_thread_pool_create`, `vgl_file_reader_create`)
+   and pass their task and I/O interfaces to `vgl_context_create`.
+2. Add packs with `vgl_pack_create`: elevation, the geoid and imagery, such as those in
+   `samples/data/packs`. Bake your own with `vgl-bake` ([baker](tools/baker/README.md)) and
+   serve them from disk or any web server ([hosting](docs/hosting.md)).
+3. Create a backend on your device, for example `vgl_gl_backend_create` with your OpenGL
+   function loader.
+4. Every frame: `vgl_context_view_set` with your camera, `vgl_context_update`, then the
+   backend's draw (`vgl_gl_backend_draw`) inside your render pass. Show the lines of
+   `vgl_context_attribution_get` while their data is in view.
+5. Destroy the backend, packs and context, then the reader and the pool.
 
 ## Building
 
@@ -165,6 +203,7 @@ cc main.c $(pkg-config --cflags --libs vgl)
 - [Hosting packs](docs/hosting.md): object stores and the reference server, deployment and security
 - [Packaging](packaging/README.md): vcpkg, Conan, release archives and the release steps
 - [Contributing](CONTRIBUTING.md): coding style, sign-off and review process
+- [Security policy](SECURITY.md): reporting vulnerabilities privately
 - [Changelog](CHANGELOG.md)
 - [Wiki](https://github.com/3dgep/vgl/wiki): guides and notes alongside the specifications
 

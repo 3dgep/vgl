@@ -10,7 +10,8 @@ is updated in the same pull request.
 
 ## Ways to contribute
 
-- **Report a bug** with the bug report issue template.
+- **Report a bug** with the bug report issue template. Report security problems privately
+  instead, as [SECURITY.md](SECURITY.md) describes.
 - **Propose a feature** with the feature request template. vgl is deliberately small, so check
   the goals and non-goals in the [README](README.md) first. Many features fit better as an
   extension built on the public interfaces (design document, section 13.1) than in the library.
