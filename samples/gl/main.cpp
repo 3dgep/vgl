@@ -25,7 +25,9 @@
 // surface over the ocean floor, and F9 the atmosphere.
 //
 // Built with Emscripten, it runs in a browser on WebGL 2 (samples/gl/web/README.md), with the
-// options in the page's address: vgl-gl.html?pack=<uri>&pack=<uri>&depth=reversed.
+// options in the page's address: vgl-gl.html?pack=<uri>&pack=<uri>&depth=reversed. On a touch
+// screen, one finger drags and double-taps as the mouse does; two pinch to zoom and twist to
+// turn around the point between them, or tilt when both move up or down together.
 //
 // With --check, the sample runs hidden: it flies to a few views with each depth convention
 // the device supports, and checks what it draws, that the conventions agree, that OpenGL
@@ -867,6 +869,100 @@ void navigation_check()
                 expect(held, "orbiting keeps the clicked point under the cursor" + where);
                 expect(upright,
                        "orbiting around the clicked point never turns the view over" + where);
+            }
+        }
+
+        // Two fingers around a point off the centre, moved in steps: spreading zooms in, pinching
+        // in zooms out, twisting clockwise turns the ground clockwise with them, and all keep the
+        // point under their midpoint, also while it moves; both moving up together tilt towards
+        // the horizon, keeping the point in place. Nothing moves until the fingers have moved a
+        // little, which decides the gesture.
+        {
+            const double px = w / 2.0 + 90.0;
+            const double py = h / 2.0 + 60.0;
+            // Fingers at a distance and angle from the midpoint, which moves by (mx, my).
+            const auto fingers = [&](double spread,
+                                     double angle,
+                                     double mx,
+                                     double my,
+                                     sample::camera& f,
+                                     bool first) {
+                const double dx = spread * std::cos(angle);
+                const double dy = spread * std::sin(angle);
+                if (first)
+                {
+                    nav.touch_press(px + mx - dx, py + my - dy, px + mx + dx, py + my + dy, f);
+                }
+                else
+                {
+                    nav.touch_move(px + mx - dx, py + my - dy, px + mx + dx, py + my + dy, f);
+                }
+            };
+            struct gesture_case
+            {
+                double spread; // From 60 pixels to this.
+                double turn;   // Radians, clockwise on the screen.
+                double mx;     // How far the midpoint moves.
+                double my;
+                double lift; // How far both fingers move up, alone.
+            };
+            for (const gesture_case& g : {gesture_case{120.0, 0.0, 0.0, 0.0, 0.0},
+                                          gesture_case{40.0, 0.0, 0.0, 0.0, 0.0},
+                                          gesture_case{100.0, 0.0, -40.0, 30.0, 0.0},
+                                          gesture_case{60.0, 0.5, 0.0, 0.0, 0.0},
+                                          gesture_case{60.0, 0.0, 0.0, 0.0, 60.0}})
+            {
+                nav.stop();
+                c = start;
+                vgl_dvec3 pivot{};
+                expect(nav.pick(c, px, py, pivot), "the midpoint is over the globe" + where);
+                // Tilting lifts the fingers apart, side by side; otherwise they lie diagonally.
+                const double angle = g.lift != 0.0 ? 0.0 : 0.6;
+                fingers(60.0, angle, 0.0, 0.0, c, true);
+                bool held = true;
+                for (int k = 1; k <= 20; ++k)
+                {
+                    const double s = k / 20.0;
+                    const double lift = g.lift * s;
+                    fingers(60.0 + (g.spread - 60.0) * s,
+                            angle + g.turn * s,
+                            g.mx * s,
+                            g.my * s - lift,
+                            c,
+                            false);
+                    const double ex = g.lift != 0.0 ? px : px + g.mx * s;
+                    const double ey = g.lift != 0.0 ? py : py + g.my * s;
+                    // Once the fingers have moved far enough to start the gesture.
+                    held =
+                        held && (k < 10 || (project(c, pivot, w, h, x, y) && near(x, y, ex, ey)));
+                }
+                nav.release();
+                nav.update(0.1, {}, c); // No throw.
+                const double ex = g.lift != 0.0 ? px : px + g.mx;
+                const double ey = g.lift != 0.0 ? py : py + g.my;
+                held = held && project(c, pivot, w, h, x, y) && near(x, y, ex, ey);
+                expect(held, "two fingers keep the point between them" + where);
+                const double turned = std::remainder(c.heading - start.heading, 360.0);
+                if (g.lift != 0.0)
+                {
+                    // From far away, tilting about a point turns the camera's own pitch only a
+                    // little.
+                    expect(c.pitch < start.pitch - 2.0 &&
+                               std::abs(c.altitude - start.altitude) < 0.5 * start.altitude,
+                           "two fingers moving up tilt towards the horizon" + where);
+                }
+                else if (g.turn != 0.0)
+                {
+                    expect(turned < -10.0 &&
+                               std::abs(c.altitude - start.altitude) < 1e-3 * start.altitude,
+                           "twisting two fingers clockwise turns the ground with them" + where);
+                }
+                else
+                {
+                    expect(g.spread > 60.0 ? c.altitude < 0.8 * start.altitude
+                                           : c.altitude > 1.2 * start.altitude,
+                           "spreading two fingers zooms in, pinching zooms out" + where);
+                }
             }
         }
 

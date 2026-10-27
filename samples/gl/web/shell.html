@@ -16,7 +16,10 @@
   <style>
     :root { color-scheme: dark; }
     html, body { margin: 0; height: 100%; overflow: hidden; background: #05070d; }
-    #canvas { display: block; width: 100vw; height: 100vh; outline: none; }
+    #canvas {
+      display: block; width: 100vw; height: 100vh; outline: none;
+      touch-action: none; /* The sample's fingers, not the browser's scrolling and zooming. */
+    }
     #status {
       position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
       padding: 0 16px; font: 15px/1.5 system-ui, sans-serif; color: #c8d0e0; text-align: center;

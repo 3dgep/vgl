@@ -4,8 +4,9 @@
 // Checks the OpenGL sample's page in a browser (samples/gl/web/README.md): serves it with Caddy
 // and samples/gl/web/Caddyfile, opens it in headless Chrome on its software renderer, and drives
 // it over the DevTools protocol in real time, as a user would. The page must come up cross-origin
-// isolated on WebGL 2, draw tiles from orbit, and fly to the Sognefjord on a key press, loading the
-// tiles there; nothing may throw, no WebGL call may fail and no read may fail on the way.
+// isolated on WebGL 2, draw tiles from orbit, zoom in when two fingers spread apart on a touch
+// screen, and fly to the Sognefjord on a key press, loading the tiles there; nothing may throw,
+// no WebGL call may fail and no read may fail on the way.
 //
 //     node tests/browser/page_check.mjs --chrome <chrome> --caddy <caddy> --web <directory>
 //          [--packs <directory>] [--port <port>] [--screenshot <png>]
@@ -174,6 +175,23 @@ try {
   await until('the backend draws with OpenGL ES 3.0 (WebGL 2)', 60,
               async () => log.some((l) => /vgl_gl_backend_create: drawing with OpenGL ES 3\.0/.test(l)));
   await until('tiles are drawn from orbit', 60, async () => (await title()).tiles >= 10);
+
+  // Two fingers spreading apart on a touch screen zoom in: to a third of the height, for fingers
+  // three times as far apart.
+  await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+  const orbit = (await title()).km;
+  const touch = async (type, spread) => send('Input.dispatchTouchEvent', {
+    type,
+    touchPoints: type === 'touchEnd' ? [] : [{ x: 640 - spread, y: 360, id: 1 }, { x: 640 + spread, y: 360, id: 2 }],
+  });
+  await touch('touchStart', 50);
+  for (let spread = 60; spread <= 150; spread += 10) {
+    await sleep(30);
+    await touch('touchMove', spread);
+  }
+  await touch('touchEnd', 0);
+  await until('spreading two fingers zooms in', 10, async () => (await title()).km < orbit * 0.6);
+  await send('Emulation.setTouchEmulationEnabled', { enabled: false });
 
   // A real key press: 7 flies to the Sognefjord, 4 km up.
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: 900, y: 400, button: 'left', clickCount: 1 });

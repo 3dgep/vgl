@@ -8,7 +8,12 @@
 
 #include <GLFW/glfw3.h>
 
+#if defined(__EMSCRIPTEN__)
+#    include <emscripten/html5.h>
+#endif
+
 #include <cmath>
+#include <cstddef>
 
 namespace sample
 {
@@ -161,6 +166,80 @@ void on_key(GLFWwindow* window, int key, int /*scancode*/, int action, int /*mod
     }
 }
 
+#if defined(__EMSCRIPTEN__)
+// Fingers on a touch screen. The GLFW port turns the first finger into the mouse, which pans,
+// double-taps and works the panel, and ignores the others; the controls follow every finger,
+// and a second one turns the gesture into the navigation's two-finger one, which the mouse
+// cannot disturb (move ignores it, and a release ends it as lifting a finger does). The page
+// stops the browser's own gestures on the canvas (touch-action: none).
+bool on_touch(int type, const EmscriptenTouchEvent* event, void* user)
+{
+    auto* window = static_cast<GLFWwindow*>(user);
+    glfw_controls& in = controls_of(window);
+    // Where a finger still on the screen is, in cursor coordinates, as the port puts the mouse.
+    int wx = 0;
+    int wy = 0;
+    glfwGetWindowPos(window, &wx, &wy);
+    const bool lifting = type == EMSCRIPTEN_EVENT_TOUCHEND || type == EMSCRIPTEN_EVENT_TOUCHCANCEL;
+    const auto down = [&](const EmscriptenTouchPoint& t) { return !(lifting && t.isChanged); };
+    const auto find = [&](long id, double& x, double& y) {
+        for (int i = 0; i < event->numTouches; ++i)
+        {
+            const EmscriptenTouchPoint& t = event->touches[i];
+            if (t.identifier == id && down(t))
+            {
+                x = static_cast<double>(t.clientX - wx);
+                y = static_cast<double>(t.clientY - wy);
+                return true;
+            }
+        }
+        return false;
+    };
+    const camera& c = *in.camera;
+    if (in.two_fingers)
+    {
+        double x0 = 0.0;
+        double y0 = 0.0;
+        double x1 = 0.0;
+        double y1 = 0.0;
+        if (!find(in.finger_ids[0], x0, y0) || !find(in.finger_ids[1], x1, y1))
+        {
+            in.two_fingers = false; // A finger lifted: the one left does nothing until it does.
+            in.nav->release();
+        }
+        else if (type == EMSCRIPTEN_EVENT_TOUCHMOVE)
+        {
+            in.nav->touch_move(x0, y0, x1, y1, *in.camera);
+        }
+        return false;
+    }
+    // A second finger down, unless the first is working the panel, starts the gesture.
+    if (type != EMSCRIPTEN_EVENT_TOUCHSTART || in.ui->wants_mouse())
+    {
+        return false;
+    }
+    std::size_t count = 0;
+    for (int i = 0; i < event->numTouches && count < in.finger_ids.size(); ++i)
+    {
+        if (down(event->touches[i]))
+        {
+            in.finger_ids[count++] = event->touches[i].identifier;
+        }
+    }
+    double x0 = 0.0;
+    double y0 = 0.0;
+    double x1 = 0.0;
+    double y1 = 0.0;
+    if (count == 2 && find(in.finger_ids[0], x0, y0) && find(in.finger_ids[1], x1, y1))
+    {
+        in.two_fingers = true;
+        in.last_click = -1.0; // Lifting the fingers is no click.
+        in.nav->touch_press(x0, y0, x1, y1, c);
+    }
+    return false;
+}
+#endif
+
 } // namespace
 
 void controls_install(GLFWwindow* window, glfw_controls* controls)
@@ -170,6 +249,14 @@ void controls_install(GLFWwindow* window, glfw_controls* controls)
     glfwSetCursorPosCallback(window, on_cursor);
     glfwSetScrollCallback(window, on_scroll);
     glfwSetKeyCallback(window, on_key);
+#if defined(__EMSCRIPTEN__)
+    // On the document, as the port follows fingers, so that they are followed off the canvas.
+    const char* document = EMSCRIPTEN_EVENT_TARGET_DOCUMENT;
+    emscripten_set_touchstart_callback(document, window, false, on_touch);
+    emscripten_set_touchmove_callback(document, window, false, on_touch);
+    emscripten_set_touchend_callback(document, window, false, on_touch);
+    emscripten_set_touchcancel_callback(document, window, false, on_touch);
+#endif
 }
 
 navigation_keys controls_keys(GLFWwindow* window, const glfw_controls& controls)

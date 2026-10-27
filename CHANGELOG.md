@@ -19,6 +19,11 @@ The pack format has its own version number, independent of the library version.
   with Doxygen, deployed by `.github/workflows/pages.yml`. A service worker makes the demo
   cross-origin isolated, since Pages cannot send headers, and `tests/browser/page_check.mjs`
   takes `--url` to check a page another server serves.
+- Touch controls in the OpenGL sample's web page, such as on a phone: two fingers pinch to zoom
+  and twist to turn around the point between them, or tilt the view when both move up or down
+  together, and the page turns off the browser's own gestures on the canvas. The shared
+  navigation has the two-finger gesture (`touch_press`, `touch_move`), and the sample's check
+  and the browser page check cover it.
 - The vcpkg registry port and the ConanCenter recipe, ready to submit
   (`packaging/vcpkg-registry`, `packaging/conan-center`; `packaging/README.md`).
 

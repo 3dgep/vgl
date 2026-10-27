@@ -18,6 +18,9 @@
 //   right drag           zoom
 //   arrows, WASD         move; with shift, turn and tilt around the point at the centre
 //   page up, page down   zoom
+//   two fingers          on a touch screen: the point under their midpoint stays under it,
+//                        pinching zooms and twisting turns the view about it; moving both up
+//                        or down together tilts around it instead
 //
 // A movement that starts at the cursor, a drag, scroll or double-click, picks the terrain under
 // it (vgl_context_ray_query), and holds that point's height until the movement ends: the drag
@@ -61,6 +64,7 @@ public:
         look,  // Turn the camera in place.
         spin,  // Turn the globe like a disk; pressing to pan over space starts it.
         zoom,  // Zoom by dragging up and down.
+        touch, // Two fingers; touch_press starts it.
     };
 
     // The window in cursor coordinates, and the vertical field of view in degrees.
@@ -78,6 +82,15 @@ public:
     void release();
     void scroll(double steps, double x, double y, const camera& c);
     void double_click(double x, double y, const camera& c);
+
+    // Two fingers on a touch screen, at (x0, y0) and (x1, y1) in cursor coordinates. Their first
+    // movement decides what the gesture does until release, which ends it without a throw:
+    // both moving up or down together, by about as much, tilt around the point under their
+    // midpoint, as an orbit does; anything else grabs that point, which then stays under the
+    // midpoint while pinching zooms towards it and twisting turns the view about it. Over
+    // space, the fingers zoom towards the point at the centre and do nothing else.
+    void touch_press(double x0, double y0, double x1, double y1, const camera& c);
+    void touch_move(double x0, double y0, double x1, double y1, camera& c);
 
     // Advances throws, smooth zooms and keys by dt seconds.
     void update(double dt, const navigation_keys& keys, camera& c);
@@ -136,6 +149,8 @@ private:
     // Turns the globe about its centre until the point p appears at (x, y).
     void bring(camera& c, const vgl_dvec3& p, double x, double y) const;
     void orbit_by(camera& c, const vgl_dvec3& pivot, double yaw, double tilt) const;
+    // After turning about a pivot p, keeps it at (x, y) on the screen.
+    void keep_at(camera& c, const vgl_dvec3& p, double x, double y) const;
     void zoom_by(camera& c, const vgl_dvec3& towards, double factor) const;
     // Where a point appears in the window; false behind the camera.
     [[nodiscard]] bool project(const camera& c, const vgl_dvec3& p, double& x, double& y) const;
@@ -160,6 +175,18 @@ private:
     vgl_dvec3 pivot_{};
     double pivot_x_ = 0.0; // Where an orbit's pivot stays on the screen.
     double pivot_y_ = 0.0;
+
+    // Two fingers (touch_press): where they were when they went down and at the last move, as
+    // x0, y0, x1, y1, and what the gesture does, once their first movement has decided.
+    enum class gesture
+    {
+        undecided,
+        pinch,
+        tilt,
+    };
+    gesture gesture_ = gesture::undecided;
+    std::array<double, 4> fingers_start_{};
+    std::array<double, 4> fingers_{};
 
     // Where the camera was during a pan, or how far a spin had turned, at each update, to
     // measure how fast the globe turned when it was released: a ring of the latest positions, on

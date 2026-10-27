@@ -20,6 +20,7 @@ constexpr double max_tilt = 85.0;      // Degrees from looking straight down at 
 constexpr double throw_window = 0.1;   // Seconds of a pan that set the speed of its throw.
 constexpr double throw_decay = 3.0;    // How fast a throw slows down, per second.
 constexpr double focus_fade = 0.5;     // Seconds over which the focus fades after a movement.
+constexpr double touch_slop = 0.02;    // How far fingers move to start a gesture, in view sizes.
 // Keys move the camera over the ground at up to four view heights per second. The speed eases in
 // and out, as a critically damped spring: starting, it reaches 83% in a second and 99% in two;
 // stopping or reversing, it falls below 5% in 0.15 seconds.
@@ -384,6 +385,24 @@ void globe_navigation::orbit_by(camera& c, const vgl_dvec3& pivot, double yaw, d
     }
 }
 
+void globe_navigation::keep_at(camera& c, const vgl_dvec3& p, double x, double y) const
+{
+    // Turning about a point off the centre would roll the camera, which has no roll: aim it to
+    // keep the point at (x, y). Looking straight down, the heading and pitch cannot both move
+    // the point (aiming would tilt the camera anywhere): turn the globe to bring it back
+    // instead, at the same height, as zooming does.
+    if (c.pitch >= 89.999)
+    {
+        const double altitude = c.altitude;
+        bring(c, p, x, y);
+        c.altitude = altitude;
+    }
+    else
+    {
+        aim(c, p, x, y);
+    }
+}
+
 void globe_navigation::zoom_by(camera& c, const vgl_dvec3& towards, double factor) const
 {
     double x = 0.0;
@@ -710,20 +729,7 @@ void globe_navigation::move(double x, double y, camera& c)
     case drag::orbit:
         orbit_by(
             c, pivot_, vgl::degrees_to_radians(-dx * 0.25), vgl::degrees_to_radians(-dy * 0.25));
-        // Turning about a point off the centre would roll the camera, which has no roll: aim it
-        // to keep the point under the cursor. Looking straight down, the heading and pitch
-        // cannot both move the point (aiming would tilt the camera anywhere): turn the globe to
-        // bring it back instead, at the same height, as zooming does.
-        if (c.pitch >= 89.999)
-        {
-            const double altitude = c.altitude;
-            bring(c, pivot_, pivot_x_, pivot_y_);
-            c.altitude = altitude;
-        }
-        else
-        {
-            aim(c, pivot_, pivot_x_, pivot_y_);
-        }
+        keep_at(c, pivot_, pivot_x_, pivot_y_);
         return;
     case drag::look:
         c.heading = std::remainder(c.heading + dx * 0.15, 360.0);
@@ -732,7 +738,92 @@ void globe_navigation::move(double x, double y, camera& c)
     case drag::zoom:
         zoom_by(c, pivot_, std::exp(dy * 0.01));
         return;
+    case drag::touch:
+        return; // The fingers move with touch_move.
     }
+}
+
+void globe_navigation::touch_press(double x0, double y0, double x1, double y1, const camera& c)
+{
+    stop();
+    ground_ = latest_ground_;
+    mode_ = drag::touch;
+    gesture_ = gesture::undecided;
+    fingers_start_ = {x0, y0, x1, y1};
+    fingers_ = fingers_start_;
+    // The point under the midpoint, held there; over space, the one at the centre.
+    pivot_x_ = (x0 + x1) / 2.0;
+    pivot_y_ = (y0 + y1) / 2.0;
+    holding_ = grab(c, pivot_x_, pivot_y_, pivot_);
+    if (!holding_)
+    {
+        pivot_x_ = width_ / 2.0;
+        pivot_y_ = height_ / 2.0;
+        pivot_ = anchor(c, pivot_x_, pivot_y_);
+    }
+    focus_ = pivot_;
+    has_focus_ = true;
+    focus_since_ = 0.0;
+}
+
+void globe_navigation::touch_move(double x0, double y0, double x1, double y1, camera& c)
+{
+    if (mode_ != drag::touch)
+    {
+        return;
+    }
+    if (gesture_ == gesture::undecided)
+    {
+        // Nothing until a finger has moved a little; then both moving up or down together, by
+        // about as much, tilt, and anything else pinches, from where the fingers went down.
+        const double ax = x0 - fingers_start_[0];
+        const double ay = y0 - fingers_start_[1];
+        const double bx = x1 - fingers_start_[2];
+        const double by = y1 - fingers_start_[3];
+        if (std::max(std::hypot(ax, ay), std::hypot(bx, by)) <
+            touch_slop * std::min(width_, height_))
+        {
+            return;
+        }
+        const bool vertical =
+            std::abs(ay) > 2.0 * std::abs(ax) && std::abs(by) > 2.0 * std::abs(bx);
+        const bool together = ay * by > 0.0 && std::min(std::abs(ay), std::abs(by)) >
+                                                   0.5 * std::max(std::abs(ay), std::abs(by));
+        gesture_ = vertical && together ? gesture::tilt : gesture::pinch;
+    }
+    const std::array<double, 4> was = fingers_;
+    fingers_ = {x0, y0, x1, y1};
+    if (gesture_ == gesture::tilt)
+    {
+        // Up tilts towards the horizon, half a turn over the view's height, as an orbit does.
+        const double dy = (y0 + y1 - was[1] - was[3]) / 2.0;
+        orbit_by(c, pivot_, 0.0, vgl::degrees_to_radians(-dy * 180.0 / height_));
+        keep_at(c, pivot_, pivot_x_, pivot_y_);
+        return;
+    }
+    // Zoom by how much the fingers spread, so that the ground under them follows them.
+    const double before = std::hypot(was[2] - was[0], was[3] - was[1]);
+    const double after = std::hypot(x1 - x0, y1 - y0);
+    if (before < 1.0 || after < 1.0)
+    {
+        return;
+    }
+    zoom_by(c, pivot_, before / after);
+    if (!holding_)
+    {
+        return;
+    }
+    // Turn about the held point by how far the fingers twisted: clockwise on the screen, where
+    // y points down, turns the ground clockwise with them. Then bring the point under the
+    // midpoint, at the same height, which also pans.
+    const double twist = std::remainder(
+        std::atan2(y1 - y0, x1 - x0) - std::atan2(was[3] - was[1], was[2] - was[0]), 2.0 * vgl::pi);
+    orbit_by(c, pivot_, twist, 0.0);
+    pivot_x_ = (x0 + x1) / 2.0;
+    pivot_y_ = (y0 + y1) / 2.0;
+    const double altitude = c.altitude;
+    bring(c, pivot_, pivot_x_, pivot_y_);
+    c.altitude = altitude;
 }
 
 void globe_navigation::release()
@@ -1008,8 +1099,9 @@ void globe_navigation::update(double dt, const navigation_keys& keys, camera& c)
     }
     settle();
 
-    // The focus shows while the mouse orbits or zooms around it, then fades.
-    const bool focused = mode_ == drag::orbit || mode_ == drag::zoom || zoom_left_ != 0.0;
+    // The focus shows while the mouse or fingers orbit or zoom around it, then fades.
+    const bool focused =
+        mode_ == drag::orbit || mode_ == drag::zoom || mode_ == drag::touch || zoom_left_ != 0.0;
     focus_since_ = focused ? 0.0 : focus_since_ + dt;
 }
 

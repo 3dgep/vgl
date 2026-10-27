@@ -1,6 +1,6 @@
 # The OpenGL sample in a browser
 
-The OpenGL sample (`samples/gl`) builds with [Emscripten](https://emscripten.org) into a page that draws the globe with WebGL 2, the browser's OpenGL ES 3.0. It is the same program as the native sample, with the same panel, navigation, atmosphere, stars and clouds. Its thread pool runs on Web Workers, and the HTTP reader fetches packs with the browser's own fetch.
+The OpenGL sample (`samples/gl`) builds with [Emscripten](https://emscripten.org) into a page that draws the globe with WebGL 2, the browser's OpenGL ES 3.0. It is the same program as the native sample, with the same panel, navigation, atmosphere, stars and clouds. On a touch screen, such as a phone's, one finger drags the globe and a double tap zooms in, as the mouse does; two fingers pinch to zoom and twist to turn around the point between them, or tilt the view when both move up or down together. The page turns off the browser's own scrolling and zooming on the canvas (`touch-action: none`). Its thread pool runs on Web Workers, and the HTTP reader fetches packs with the browser's own fetch.
 
 ## Building
 
@@ -44,7 +44,7 @@ Relative pack URIs are fetched from the page's own address. Packs on another ser
 
 ## Checking
 
-`tests/browser/page_check.mjs` checks the page in headless Chrome, on its software renderer, so that it needs no GPU. It serves the page with Caddy and the Caddyfile above, drives it over the DevTools protocol as a user would, and fails if the page is not cross-origin isolated, does not draw tiles from orbit, or does not fly to the Sognefjord on the key 7 and load the tiles there, or if anything throws, a WebGL call fails or a read fails. With `VGL_TEST_BROWSER` on, it is the `browser` test of the `emscripten` build, finding Chrome and Caddy on the path or as `VGL_CHROME` and `VGL_CADDY`, and it leaves a screenshot in the build directory. CI runs it on Linux.
+`tests/browser/page_check.mjs` checks the page in headless Chrome, on its software renderer, so that it needs no GPU. It serves the page with Caddy and the Caddyfile above, drives it over the DevTools protocol as a user would, and fails if the page is not cross-origin isolated, does not draw tiles from orbit, does not zoom in when two fingers spread apart on the touch screen it emulates, or does not fly to the Sognefjord on the key 7 and load the tiles there, or if anything throws, a WebGL call fails or a read fails. With `VGL_TEST_BROWSER` on, it is the `browser` test of the `emscripten` build, finding Chrome and Caddy on the path or as `VGL_CHROME` and `VGL_CADDY`, and it leaves a screenshot in the build directory. CI runs it on Linux.
 
 ```sh
 cmake --preset emscripten -DVGL_TEST_BROWSER=ON
