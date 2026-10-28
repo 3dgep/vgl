@@ -964,6 +964,21 @@ void navigation_check()
                            "spreading two fingers zooms in, pinching zooms out" + where);
                 }
             }
+
+            // Fingers seldom move in step: the right one starts up first, and the left follows
+            // a few moves later, which still tilts.
+            nav.stop();
+            c = start;
+            nav.touch_press(px - 60.0, py, px + 60.0, py, c);
+            for (int k = 1; k <= 20; ++k)
+            {
+                nav.touch_move(
+                    px - 60.0, py - 3.0 * std::max(k - 4, 0), px + 60.0, py - 3.0 * k, c);
+            }
+            nav.release();
+            nav.update(0.1, {}, c);
+            expect(c.pitch < start.pitch - 2.0,
+                   "two fingers moving up one after the other tilt" + where);
         }
 
         // The reticle: at the clicked point while the mouse orbits around it, then fading over

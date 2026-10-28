@@ -499,7 +499,8 @@ typedef enum vgl_draw_feature
     VGL_DRAW_FEATURE_STARS = 0x4,
     /** With the atmosphere, the clouds set with the backend's clouds_set: a shell at the draw's
      * cloud height above the ellipsoid, over the terrain and in the sky, lit by the sun, which
-     * they shade the terrain from. */
+     * they shade the terrain from. They fade out as the camera comes down to the shell from
+     * above, where it would fill the view. */
     VGL_DRAW_FEATURE_CLOUDS = 0x8,
     /** Contour lines every contour interval metres above mean sea level, every fifth one
      * heavier. Without a geoid pack, heights are above the ellipsoid, which differs from mean

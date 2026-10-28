@@ -300,7 +300,8 @@ MAIN_DECLARATION
             float ts = vgl_cloud_shadow_distance(p, u_sun_planet.xyz, u_cloud.y);
             vec3 crossing = p + u_sun_planet.xyz * max(ts, 0.0);
             float lod = vgl_cloud_lod(length(fwidth(crossing)), u_cloud.z);
-            float cover = vgl_cloud_alpha(texture2DLod(u_clouds, vgl_cloud_uv(crossing), lod).r);
+            float cover = vgl_cloud_alpha(texture2DLod(u_clouds, vgl_cloud_uv(crossing), lod).r)
+                * vgl_cloud_fade(u_camera.w, u_cloud.y, u_cloud.z);
             sunlight *= ts > 0.0 ? 1.0 - 0.75 * cover : 1.0;
         }
     }
@@ -328,7 +329,8 @@ MAIN_DECLARATION
             float tc = vgl_cloud_distance(u_camera.xyz, u_camera.w, direction, u_cloud.y, distance);
             vec3 hit = u_camera.xyz + direction * max(tc, 0.0);
             float lod = vgl_cloud_lod(length(fwidth(hit)), u_cloud.z);
-            float cover = vgl_cloud_alpha(texture2DLod(u_clouds, vgl_cloud_uv(hit), lod).r);
+            float cover = vgl_cloud_alpha(texture2DLod(u_clouds, vgl_cloud_uv(hit), lod).r)
+                * vgl_cloud_fade(u_camera.w, u_cloud.y, u_cloud.z);
             if (tc > 0.0 && cover > 0.0)
             {
                 vec3 near_inscatter;
@@ -424,7 +426,8 @@ MAIN_DECLARATION
         float tc = vgl_cloud_distance(u_camera.xyz, u_camera.w, direction, u_cloud.y, 1.0e9);
         vec3 hit = u_camera.xyz + direction * max(tc, 0.0);
         float lod = vgl_cloud_lod(length(fwidth(hit)), u_cloud.z);
-        float cover = vgl_cloud_alpha(texture2DLod(u_clouds, vgl_cloud_uv(hit), lod).r);
+        float cover = vgl_cloud_alpha(texture2DLod(u_clouds, vgl_cloud_uv(hit), lod).r)
+            * vgl_cloud_fade(u_camera.w, u_cloud.y, u_cloud.z);
         if (tc > 0.0 && cover > 0.0)
         {
             vec3 near_inscatter;

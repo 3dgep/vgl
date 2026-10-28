@@ -774,22 +774,36 @@ void globe_navigation::touch_move(double x0, double y0, double x1, double y1, ca
     }
     if (gesture_ == gesture::undecided)
     {
-        // Nothing until a finger has moved a little; then both moving up or down together, by
-        // about as much, tilt, and anything else pinches, from where the fingers went down.
+        // Nothing until a finger has moved a little, and the other has followed it, unless the
+        // one has gone well past it alone: fingers seldom move in step, and the first to move
+        // would otherwise decide alone. Then the midpoint moving up or down, more than the
+        // fingers spread or twist, tilts, and anything else pinches, from where they went down.
         const double ax = x0 - fingers_start_[0];
         const double ay = y0 - fingers_start_[1];
         const double bx = x1 - fingers_start_[2];
         const double by = y1 - fingers_start_[3];
-        if (std::max(std::hypot(ax, ay), std::hypot(bx, by)) <
-            touch_slop * std::min(width_, height_))
+        const double slop = touch_slop * std::min(width_, height_);
+        const double a = std::hypot(ax, ay);
+        const double b = std::hypot(bx, by);
+        if (std::max(a, b) < slop || (std::min(a, b) < 0.5 * slop && std::max(a, b) < 3.0 * slop))
         {
             return;
         }
-        const bool vertical =
-            std::abs(ay) > 2.0 * std::abs(ax) && std::abs(by) > 2.0 * std::abs(bx);
-        const bool together = ay * by > 0.0 && std::min(std::abs(ay), std::abs(by)) >
-                                                   0.5 * std::max(std::abs(ay), std::abs(by));
-        gesture_ = vertical && together ? gesture::tilt : gesture::pinch;
+        const double mx = (ax + bx) / 2.0;
+        const double my = (ay + by) / 2.0;
+        const double start_x = fingers_start_[2] - fingers_start_[0];
+        const double start_y = fingers_start_[3] - fingers_start_[1];
+        const double start = std::hypot(start_x, start_y);
+        const double spread = std::hypot(x1 - x0, y1 - y0) - start;
+        // How far the fingers moved round their midpoint.
+        const double twist =
+            std::remainder(std::atan2(y1 - y0, x1 - x0) - std::atan2(start_y, start_x),
+                           2.0 * vgl::pi) *
+            start / 2.0;
+        const bool tilt = std::abs(my) > 2.0 * std::abs(mx) &&
+                          std::abs(spread) < 0.5 * std::abs(my) &&
+                          std::abs(twist) < 0.5 * std::abs(my);
+        gesture_ = tilt ? gesture::tilt : gesture::pinch;
     }
     const std::array<double, 4> was = fingers_;
     fingers_ = {x0, y0, x1, y1};

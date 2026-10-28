@@ -84,11 +84,12 @@ public:
     void double_click(double x, double y, const camera& c);
 
     // Two fingers on a touch screen, at (x0, y0) and (x1, y1) in cursor coordinates. Their first
-    // movement decides what the gesture does until release, which ends it without a throw:
-    // both moving up or down together, by about as much, tilt around the point under their
-    // midpoint, as an orbit does; anything else grabs that point, which then stays under the
-    // midpoint while pinching zooms towards it and twisting turns the view about it. Over
-    // space, the fingers zoom towards the point at the centre and do nothing else.
+    // movement, once both have moved, decides what the gesture does until release, which ends
+    // it without a throw: their midpoint moving up or down, more than they spread or twist,
+    // tilts around the point under it, as an orbit does; anything else grabs that point, which
+    // then stays under the midpoint while pinching zooms towards it and twisting turns the view
+    // about it. Over space, the fingers zoom towards the point at the centre and do nothing
+    // else.
     void touch_press(double x0, double y0, double x1, double y1, const camera& c);
     void touch_move(double x0, double y0, double x1, double y1, camera& c);
 

@@ -149,6 +149,7 @@ public:
 
 private:
     void panel(const vgl_context_statistics& s, const panel_info& info, debug_settings& d);
+    static void panel_button(debug_settings& d);
     static void layers(const std::vector<layer_control>& layers);
     void frustum_lines(const vgl_dmat4& view,
                        const vgl_dmat4& projection,

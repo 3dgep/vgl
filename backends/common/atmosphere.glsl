@@ -252,6 +252,18 @@ float vgl_cloud_alpha(float coverage)
     return smoothstep(0.12, 0.8, coverage);
 }
 
+// How much of the clouds shows from a camera at height, for the shell at cloud_height and the
+// image's texels texel_km wide: all of them from afar, fading out as the camera comes down to
+// the shell, from twenty texels above it to one, before the thin shell fills the view with its
+// blurred texels, and back within a kilometre below it, so that they do not pop in when the
+// camera goes through.
+float vgl_cloud_fade(float height, float cloud_height, float texel_km)
+{
+    float above = height - cloud_height;
+    float texel = max(texel_km, 1.0);
+    return above >= 0.0 ? smoothstep(texel, 20.0 * texel, above) : smoothstep(0.0, 1.0, -above);
+}
+
 // The clouds' colour at a point of the shell, lit by the sunlight that reaches it and the
 // daylight around, and darker seen from below, the thicker they are.
 vec3 vgl_cloud_light(vec3 p, vec3 sun, float alpha, bool from_below)

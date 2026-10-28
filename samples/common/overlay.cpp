@@ -197,6 +197,10 @@ void overlay::frame(const vgl_context_statistics& s,
     {
         panel(s, info, settings);
     }
+    else
+    {
+        panel_button(settings);
+    }
     if (settings.freeze)
     {
         frustum_lines(view, projection, frustum);
@@ -305,6 +309,22 @@ void overlay::layers(const std::vector<layer_control>& layers)
 void overlay::render()
 {
     backend_.render(backend_.user_data);
+}
+
+void overlay::panel_button(debug_settings& d)
+{
+    // Where the panel was, a button that brings it back, for a touch screen without F1.
+    constexpr ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration |
+                                       ImGuiWindowFlags_AlwaysAutoResize |
+                                       ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove |
+                                       ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
+    ImGui::SetNextWindowPos(ImVec2(10.0f, 10.0f));
+    ImGui::SetNextWindowBgAlpha(0.6f);
+    if (ImGui::Begin("##panel button", nullptr, flags) && ImGui::Button("vgl (F1)"))
+    {
+        d.panel = true;
+    }
+    ImGui::End();
 }
 
 void overlay::panel(const vgl_context_statistics& s, const panel_info& info, debug_settings& d)

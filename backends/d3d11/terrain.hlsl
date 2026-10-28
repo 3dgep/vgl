@@ -322,7 +322,8 @@ pixel_output ps_main(varyings i)
             float t = vgl_cloud_shadow_distance(p, u_sun_planet, u_cloud.y);
             float3 crossing = p + u_sun_planet * max(t, 0.0);
             float lod = vgl_cloud_lod(length(fwidth(crossing)), u_cloud.z);
-            float cover = vgl_cloud_alpha(u_clouds.SampleLevel(u_cloud_sampler, vgl_cloud_uv(crossing), lod));
+            float cover = vgl_cloud_alpha(u_clouds.SampleLevel(u_cloud_sampler, vgl_cloud_uv(crossing), lod))
+                * vgl_cloud_fade(u_camera_height, u_cloud.y, u_cloud.z);
             sunlight *= t > 0.0 ? 1.0 - 0.75 * cover : 1.0;
         }
     }
@@ -353,7 +354,8 @@ pixel_output ps_main(varyings i)
             float t = vgl_cloud_distance(u_camera_km, u_camera_height, direction, u_cloud.y, distance);
             float3 hit = u_camera_km + direction * max(t, 0.0);
             float lod = vgl_cloud_lod(length(fwidth(hit)), u_cloud.z);
-            float cover = vgl_cloud_alpha(u_clouds.SampleLevel(u_cloud_sampler, vgl_cloud_uv(hit), lod));
+            float cover = vgl_cloud_alpha(u_clouds.SampleLevel(u_cloud_sampler, vgl_cloud_uv(hit), lod))
+                * vgl_cloud_fade(u_camera_height, u_cloud.y, u_cloud.z);
             if (t > 0.0 && cover > 0.0)
             {
                 float3 near_inscatter;
@@ -420,7 +422,8 @@ float4 sky_ps_main(sky_varyings i) : SV_Target
         float t = vgl_cloud_distance(u_camera_km, u_camera_height, direction, u_cloud.y, 1.0e9);
         float3 hit = u_camera_km + direction * max(t, 0.0);
         float lod = vgl_cloud_lod(length(fwidth(hit)), u_cloud.z);
-        float cover = vgl_cloud_alpha(u_clouds.SampleLevel(u_cloud_sampler, vgl_cloud_uv(hit), lod));
+        float cover = vgl_cloud_alpha(u_clouds.SampleLevel(u_cloud_sampler, vgl_cloud_uv(hit), lod))
+            * vgl_cloud_fade(u_camera_height, u_cloud.y, u_cloud.z);
         if (t > 0.0 && cover > 0.0)
         {
             float3 near_inscatter;

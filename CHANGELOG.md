@@ -31,6 +31,15 @@ The pack format has its own version number, independent of the library version.
 
 - The `vgl-defaults` pkg-config module's description names the disk cache, and the HTTP
   reader as optional.
+- The clouds fade out as the camera comes down to their shell from above, from twenty texels
+  of the coverage image above it to one (200 km to 10 km for the samples' image), and back in
+  just below it, where every backend filled the view with white before, the shell's blurred
+  texels seen up close.
+- The interactive samples' panel, once closed, can be brought back without F1, as on a phone:
+  a button "vgl (F1)" takes its place in the corner.
+- Two fingers moving up or down tilt the view also when one starts before the other, as
+  fingers usually do: the gesture waits for both, where the first to move decided alone and
+  nearly always made it a pinch.
 
 ## [1.0.0] - 2026-10-19
 
